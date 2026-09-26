@@ -1,0 +1,33 @@
+# Python and test artifacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments and local configuration
+.venv/
+venv/
+.env
+.env.*
+
+# Editors and operating systems
+.DS_Store
+.idea/
+.vscode/
+
+# Generated experiments and large local data
+runs/
+checkpoints/
+data/raw/
+data/processed/
+logs/
+*.tmp
+
+# Local working instructions and tool configuration
+/AGENTS.md
+/.codex/
+/.claude/
