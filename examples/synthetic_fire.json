@@ -1,0 +1,29 @@
+{
+  "schema_version": "fire-synthetic-0.1",
+  "scenario_id": "synthetic-fire-001",
+  "provenance": "synthetic",
+  "seed": 42,
+  "crs": "LOCAL_METERS",
+  "rows": 5,
+  "cols": 5,
+  "cell_size_m": 100,
+  "horizon_s": 600,
+  "base_ros_m_s": [
+    [0.5, 0.5, 0.5, 0.5, 0.5],
+    [0.5, 0.5, 0.5, 0.5, 0.5],
+    [0.5, 0.5, 0.5, 0.5, 0.5],
+    [0.5, 0.5, 0.5, 0.5, 0.5],
+    [0.5, 0.5, 0.5, 0.5, 0.5]
+  ],
+  "elevation_m": [
+    [0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0]
+  ],
+  "wind_to_m_s": [5, 0],
+  "wind_coefficient_s_m": 0.03,
+  "slope_coefficient": 1.0,
+  "ignitions": [[2, 2]]
+}

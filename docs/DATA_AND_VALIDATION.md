@@ -23,6 +23,20 @@ Protected assets, roads, water access, airspace, aircraft performance and operat
 
 ## 3. Physical model validation
 
+The sourced Rothermel equation and CL-415 reference figures selected for initial study are recorded in [PHYSICAL_MODEL_V0.md](PHYSICAL_MODEL_V0.md). Published component values do not validate the assembled simulator.
+
+The executable `examples/synthetic_aircraft.json` has `provenance: "synthetic"` and local metre coordinates. Its ground speeds and refill duration are test inputs without empirical provenance. The v0.1 replay records a seed but uses no randomness. Passing its deterministic checks establishes accounting and time behavior only, not aircraft or fire realism.
+
+`examples/synthetic_fire.json` likewise declares synthetic provenance and local coordinates. Its per-cell base spread rates and wind/slope coefficients are unsourced test values; no fuel model, moisture measurement, or observational fire perimeter is present. The replay stores a SHA-256 of the input scenario JSON for traceability. Directional-response tests are structural checks, not physical calibration. Actual spread-model validation, sensitivity to grid resolution, and held-out incident comparison remain open.
+
+The FM1 example uses a **published stylized fuel model**, but its assignment to every cell, constant 6% dead moisture, flat terrain, 2 m/s midflame wind, ignition, and horizon are synthetic. FM1 load, depth, SAV, extinction moisture, and heat content come from Anderson (1982) and Andrews (2018), as recorded in [PHYSICAL_MODEL_V0.md](PHYSICAL_MODEL_V0.md). The implementation reproduces the approximate 4 mi/h reference in Andrews figure 16. A fixed-domain 100–5 m grid comparison is recorded there; it is a numerical sensitivity check, not calibration to an observed incident. Geographic fuel mapping, observed-weather conversion to midflame wind, independent perimeter validation, and convergence under heterogeneous conditions remain open.
+
+An audited candidate observed series is documented in [VALIDATION_EMSR578.md](VALIDATION_EMSR578.md): three Copernicus EMSR578 AOI01 cumulative burned-area polygons with source ZIP checksums and image acquisition times. They are kept in ignored `data/raw/` and are not a physical-validation result. A seven-case synthetic grid sensitivity report now covers wind direction, moisture, and slope but not heterogeneous fuel or changing weather. The 25 m versus 5 m affected-area differences ranged from −3.94% to +19.05% of the 5 m area on 2026-09-27.
+
+The [Annaburroo diagnostic](VALIDATION_ANNABURROO.md) compares the unchanged FM1 head-rate equation with 120 measured grass-plot averages after one declared missing-data exclusion. Its 0.5264 m/s mean absolute error is a transfer diagnostic, not independent incident validation. The source version, license, table hashes, selection, command, and per-plot output are recorded there.
+
+`examples/synthetic_observation_schedule.json` tests information timing and coverage on a synthetic arrival map. Its capture and delivery times are illustrative, not measurements of a real sensor. Tests confirm no change to the controller view from unobserved cells or undelivered reports. Real acquisition cadence, missed detections, and uncertainty distributions still need sourced definitions before training.
+
 Before policy training, test and document:
 
 - Spread direction and rate response to wind, slope, fuel, and moisture, with units and plausible parameter ranges from identified fire-behavior literature or data.

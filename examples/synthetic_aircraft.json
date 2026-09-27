@@ -1,0 +1,17 @@
+{
+  "schema_version": "0.1",
+  "scenario_id": "synthetic-aircraft-001",
+  "provenance": "synthetic",
+  "seed": 42,
+  "crs": "LOCAL_METERS",
+  "horizon_s": 600,
+  "decision_interval_s": 60,
+  "water_source_m": [0, 0],
+  "aircraft": {
+    "initial_position_m": [0, 0],
+    "initial_water_l": 6137,
+    "loaded_ground_speed_m_s": 50,
+    "empty_ground_speed_m_s": 55,
+    "refill_time_s": 180
+  }
+}

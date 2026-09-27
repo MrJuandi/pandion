@@ -1,0 +1,4 @@
+[
+  {"type": "DROP", "target_m": [3000, 0]},
+  {"type": "RETURN_TO_REFILL"}
+]
