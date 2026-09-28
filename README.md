@@ -2,7 +2,7 @@
 
 Research project for learning and evaluating decisions in wildfire response. The long-term goal is a decision-making system that assigns missions to heterogeneous resources using the information available at the time of each decision. Development begins with one water-dropping aircraft, then two aircraft, before introducing other resource types.
 
-**Status:** early Stage 0. The repository contains deterministic aircraft and fire components plus a small synthetic integrated episode. Its full-load drop blocks not-yet-burning grid cells under a provisional, unsourced water rule. Synthetic scenario families and a headless decision interface are available for evaluation design; no trained controller is part of the current code. This is not a physically validated or operational decision tool.
+**Status:** early Stage 0. The repository contains deterministic aircraft and fire components plus a small synthetic integrated episode. Its full-load drop blocks not-yet-burning grid cells under a provisional, unsourced water rule. A three-policy comparison exercises information flow and accounting; it is not a physical validation, training result, or operational decision tool.
 
 ## Research question
 
@@ -55,7 +55,7 @@ These are research gates, not claims that any stage is complete. The detailed pl
 - [DATA_AND_VALIDATION.md](docs/DATA_AND_VALIDATION.md) — candidate data, provenance, calibration, and validation requirements.
 - [VALIDATION_EMSR578.md](docs/VALIDATION_EMSR578.md) — audited independent burned-area snapshots and the reasons they cannot yet validate FM1 spread.
 - [VALIDATION_ANNABURROO.md](docs/VALIDATION_ANNABURROO.md) — no-fit comparison of FM1 head rate with experimental grass fires.
-- [TRAINING_READINESS.md](docs/TRAINING_READINESS.md) — evidence gate for physical claims and the separate scope of exploratory synthetic training.
+- [TRAINING_READINESS.md](docs/TRAINING_READINESS.md) — evidence gate and current blockers before the first result-bearing training run.
 - [EVALUATION.md](docs/EVALUATION.md) — baselines, splits, metrics, statistics, and failure analysis.
 - [ROADMAP.md](docs/ROADMAP.md) — milestones and acceptance criteria.
 - [DECISIONS.md](docs/DECISIONS.md) — settled choices and open decisions.
@@ -77,9 +77,6 @@ python3 -m nightjar.sensitivity --output runs/fm1-resolution.json
 python3 -m nightjar.sensitivity --varied --output runs/fm1-varied-resolution.json
 python3 -m nightjar.integrated examples/synthetic_integrated.json --policy heuristic --output runs/integrated-heuristic.json
 python3 -m nightjar.integrated_benchmark examples/synthetic_integrated.json --output runs/integrated-comparison.json
-python3 -m nightjar.scenario_family --output-dir runs/scenario-family
-python3 -m nightjar.challenge_family --output-dir runs/challenge-family
-python3 -m nightjar.discrimination_family --output-dir runs/discrimination-family
 python3 -m unittest discover -s tests -v
 ```
 
@@ -95,34 +92,9 @@ The example mixes GR1 (101), SH1 (141), and nonburnable (0) cells. It is a synth
 
 The same unit suite runs in GitHub Actions for pushes and pull requests. Tests that need a downloaded external source skip when the audited file is absent.
 
-`runs/` is ignored by Git. Omit `--output` to print a result to standard output for commands that accept it. The aircraft example exercises movement, a full-water drop, return, and refill. The fire examples produce first-arrival times and grid-cell affected area without intervention. The resolution command compares the FM1 assumptions on one physical domain at several cell sizes. Scenario contracts and limitations are in [ARCHITECTURE.md](docs/ARCHITECTURE.md) and [PHYSICAL_MODEL_V0.md](docs/PHYSICAL_MODEL_V0.md). A local browser replay and analysis view remains optional; scientific artifacts are usable without it.
+`runs/` is ignored by Git. Omit `--output` to print a result to standard output. The aircraft example exercises movement, a full-water drop, return, and refill. The fire examples produce first-arrival times and grid-cell affected area without intervention. The resolution command compares the FM1 assumptions on one physical domain at several cell sizes. Scenario contracts and limitations are in [ARCHITECTURE.md](docs/ARCHITECTURE.md) and [PHYSICAL_MODEL_V0.md](docs/PHYSICAL_MODEL_V0.md). There is no training command yet. The first interface will be a local browser replay and analysis view if experiments show it is useful; scientific artifacts must remain usable without the interface.
 
 The integrated example compares no intervention, a seeded valid random choice, and a deterministic downwind heuristic over the same synthetic scenario. At its 600 s horizon, the example gives 2.00 ha without intervention, 0.75 ha with the heuristic, and 1.30 ha mean over ten random-policy seeds. These figures depend on the assumed permanent one-cell water barrier and do not estimate real suppression effectiveness; see [EVALUATION.md](docs/EVALUATION.md).
-
-The scenario-family command writes eight fixed synthetic variants, a manifest, 96 full replays, and a per-run comparison report under ignored `runs/scenario-family/`. Four variants are marked development and four reserved. Four base configurations vary ignition, wind, and starting position; each is paired at 35 and 55 m provisional water radii. The reserved results are included in this diagnostic, so they are **not an untouched test** for a future controller selected after reading them. The heuristic returns the same affected area across all four base configurations at a given radius, suggesting these cases are too simple for a meaningful training comparison; see [EVALUATION.md](docs/EVALUATION.md) for the numbers and limits.
-
-The challenge-family command keeps the FM1 fire and 35 m water rule but extends each episode to 20 minutes and adds synthetic nonburnable cells and longer observation delays. It writes eight versioned scenarios and evaluates only the four development cases: 48 full replays and a report. Four separately generated scenarios were opened during a prior exploratory controller test and cannot be treated as untouched test cases. In development, the downwind heuristic beats the random-policy mean in two cases and loses in two. This tests whether action choices matter without implying that the simulator matches a real fire.
-
-A prior exploratory linear-controller trial did not show a convincing gain over the heuristic or seeded random baseline. Its implementation has been removed; the four challenge outcomes it opened remain documented in [EVALUATION.md](docs/EVALUATION.md).
-
-The discrimination-family command generates 24 synthetic scenarios under `nightjar-discrimination-family-0.1` partitioned into disjoint development, validation, and unopened reserved splits (eight scenarios each). It features multi-foci ignitions in separate quadrants, edge water refill locations, dynamic observation delays (60–120 s), and guaranteed non-trivial fire spread (>= 4.0 ha unmitigated). The command evaluates only the development split (104 full replays) across four policies: `no_intervention` (10.44 ha mean), greedy `heuristic` (8.94 ha mean), `containment_heuristic` (9.34 ha mean), and `random_valid` (9.23 ha mean). Validation and reserved splits remain strictly unopened for future model selection and testing; see [EVALUATION.md](docs/EVALUATION.md).
-
-
-The same fixed scenario now has a small headless interface for exploratory controller code:
-
-```python
-import json
-from nightjar.training_env import IntegratedTrainingEnv
-
-with open("examples/synthetic_integrated.json") as source:
-    env = IntegratedTrainingEnv(json.load(source))
-observation = env.reset(seed=42)
-done = False
-while not done:
-    observation, reward, done, info = env.step({"type": "HOLD"})
-```
-
-`env.action_mask` lists valid orders for the current delivered observation; `step` rejects others. The reward is negative newly affected area in hectares. This interface remains an exploratory synthetic contract.
 
 The observation example reads the FM1 replay and a synthetic schedule of capture and delivery times. It exposes only delivered, covered cells. It is an information-flow test, not a real satellite sensor model.
 

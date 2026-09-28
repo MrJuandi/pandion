@@ -19,14 +19,7 @@ from .policies import candidate_cells, choose_order
 from .rothermel import FM1_MOISTURE_EXTINCTION, fm1_directional_rate
 
 
-def run_integrated(
-    scenario: dict,
-    policy: str,
-    *,
-    policy_seed: int | None = None,
-    _actions: list[dict] | None = None,
-    _stop_after_steps: int | None = None,
-) -> dict:
+def run_integrated(scenario: dict, policy: str, *, policy_seed: int | None = None) -> dict:
     if scenario.get("schema_version") != "integrated-synthetic-0.1":
         raise ValueError("schema_version must be integrated-synthetic-0.1")
     fire_input, aircraft_input = scenario["fire"], scenario["aircraft"]
@@ -92,7 +85,6 @@ def run_integrated(
     latest_aircraft = None
     processed_drops = 0
     schedule_index = 0
-    pending_observation = None
 
     def advance_fire(until_s: float) -> None:
         while queue and queue[0][0] <= until_s + 1e-9:
@@ -156,13 +148,7 @@ def run_integrated(
             "cell_size_m": cell, "known_treated_cells": known_treated,
         }
         candidates = candidate_cells(observation)
-        if _stop_after_steps is not None and len(decisions) >= _stop_after_steps:
-            pending_observation = observation
-            break
-        if _actions is not None and len(decisions) < len(_actions):
-            order = deepcopy(_actions[len(decisions)])
-        else:
-            order = choose_order(policy, observation, candidates, rng)
+        order = choose_order(policy, observation, candidates, rng)
         orders.append(order)
         next_time = min(time_s + interval, horizon)
         stepped_aircraft = dict(aircraft_input)
@@ -178,11 +164,10 @@ def run_integrated(
         time_s = next_time
 
     affected = sum(value is not None for line in arrival for value in line) * cell * cell / 10_000
-    result = {
+    return {
         "replay_schema_version": "integrated-synthetic-0.1",
         "scenario_id": scenario["scenario_id"], "seed": scenario["seed"],
-        "policy": "external_actions" if _actions is not None else policy,
-        "policy_seed": scenario["seed"] if policy_seed is None else policy_seed,
+        "policy": policy, "policy_seed": scenario["seed"] if policy_seed is None else policy_seed,
         "scenario_sha256": sha256(json.dumps(scenario, sort_keys=True, separators=(",", ":")).encode()).hexdigest(),
         "provenance": "synthetic", "crs": "LOCAL_METERS",
         "units": {"time": "s", "distance": "m", "water": "L", "area": "ha"},
@@ -190,14 +175,9 @@ def run_integrated(
         "arrival_time_s": [[round(value, 6) if value is not None else None for value in line] for line in arrival],
         "water_barrier_cells": [[r, c] for r in range(rows) for c in range(cols) if barrier[r][c]],
         "decisions": decisions, "drops": drops,
-        "aircraft_metrics": latest_aircraft["metrics"] if latest_aircraft else {"flight_s": 0.0, "water_dropped_l": 0.0, "rejected_orders": 0},
+        "aircraft_metrics": latest_aircraft["metrics"],
         "aircraft_final_state": aircraft_state,
     }
-    if _stop_after_steps is not None:
-        result["pending_observation"] = pending_observation
-    if "time_origin_utc" in scenario:
-        result["time_origin_utc"] = scenario["time_origin_utc"]
-    return result
 
 
 def main() -> None:

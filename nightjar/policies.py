@@ -48,12 +48,11 @@ def choose_order(
 ) -> dict:
     """Choose HOLD, RETURN_TO_REFILL, or a DROP order from current observation.
 
-    ``policy`` is one of ``no_intervention``, ``random_valid``,
-    ``heuristic``, or ``containment_heuristic``. The latter three use only
-    observed cells and static fuel/aircraft data.
+    ``policy`` is one of ``no_intervention``, ``random_valid``, or
+    ``heuristic``. The latter two use only observed cells and static fuel data.
     """
-    if policy not in {"no_intervention", "random_valid", "heuristic", "containment_heuristic"}:
-        raise ValueError("policy must be no_intervention, random_valid, heuristic, or containment_heuristic")
+    if policy not in {"no_intervention", "random_valid", "heuristic"}:
+        raise ValueError("policy must be no_intervention, random_valid, or heuristic")
     if policy == "no_intervention":
         return {"type": "HOLD"}
     aircraft = observation["aircraft"]
@@ -68,8 +67,6 @@ def choose_order(
         if rng is None:
             raise ValueError("random_valid requires a random.Random instance")
         target = rng.choice(candidates)
-    elif policy == "containment_heuristic":
-        target = _containment_target(observation, candidates)
     else:
         target = _heuristic_target(observation, candidates)
     cell_size = float(observation["cell_size_m"])
@@ -101,62 +98,3 @@ def _heuristic_target(observation: dict, candidates: list[list[int]]) -> list[in
         return (-downwind, distance, r, c)
 
     return min(candidates, key=rank)
-
-
-def _containment_target(observation: dict, candidates: list[list[int]]) -> list[int]:
-    """Prioritize downwind head-attack, downstream fuel protection, bottleneck containment, and cycle efficiency."""
-    cells = observation["fire"]["cells"]
-    rows = len(cells)
-    cols = len(cells[0]) if rows else 0
-    fuel = observation["fuel_model"]
-    treated = {tuple(c) for c in observation.get("known_treated_cells", [])}
-    east, north = observation.get("midflame_wind_to_m_s", [0.0, 0.0])
-    position_x, position_y = observation["aircraft"]["position_m"]
-    water_pos = observation.get("water_source_m", [position_x, position_y])
-    cell_size = float(observation["cell_size_m"])
-
-    burning = {
-        (r, c)
-        for r in range(rows)
-        for c in range(cols)
-        if isinstance(cells[r][c], dict) and cells[r][c].get("fire_detected") is True
-    }
-
-    step_r = 1 if north > 0.5 else (-1 if north < -0.5 else 0)
-    step_c = 1 if east > 0.5 else (-1 if east < -0.5 else 0)
-
-    def rank(candidate: list[int]) -> tuple[float, float, int, int]:
-        r, c = candidate
-        sources = []
-        burning_neighbors = 0
-        for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1)):
-            nr, nc = r + dr, c + dc
-            if 0 <= nr < rows and 0 <= nc < cols:
-                record = cells[nr][nc]
-                if isinstance(record, dict) and record.get("fire_detected") is True:
-                    burning_neighbors += 1
-                    sources.append((-dc * cell_size * east - dr * cell_size * north) / cell_size)
-        downwind = max(sources) if sources else float("-inf")
-
-        downstream_fuel = 0
-        if step_r != 0 or step_c != 0:
-            for step in range(1, 5):
-                nr, nc = r + step * step_r, c + step * step_c
-                if 0 <= nr < rows and 0 <= nc < cols:
-                    if fuel[nr][nc] == "FM1" and (nr, nc) not in burning and (nr, nc) not in treated:
-                        downstream_fuel += 1
-                    elif fuel[nr][nc] == "NONE":
-                        break
-
-        x, y = c * cell_size, r * cell_size
-        d_ac = hypot(x - position_x, y - position_y)
-        d_water = hypot(x - water_pos[0], y - water_pos[1])
-        cycle_dist = d_ac + 0.4 * d_water
-
-        score = -downwind - 0.20 * downstream_fuel - 0.20 * (burning_neighbors - 1)
-        return (score, cycle_dist, r, c)
-
-    return min(candidates, key=rank)
-
-
-
