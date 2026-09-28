@@ -103,11 +103,14 @@ python3 -m nightjar.annaburroo --output runs/annaburroo-source.json
 python3 -m nightjar.annaburroo_compare --output runs/annaburroo-fm1-diagnostic.json
 python3 -m nightjar.annaburroo_temporal --output runs/annaburroo-temporal-fm1.json
 python3 -m nightjar.annaburroo_rothermel_sensitivity --output runs/annaburroo-rothermel-sensitivity.json
+python3 -m nightjar.fire_rothermel examples/cured_grass_fire.json --output runs/cured-grass-fire.json
 ```
 
 Its 120 eligible plots yield 0.5264 m/s mean absolute head-rate error for unchanged FM1. A second, no-fit comparison using 576 timed head-distance observations from the same plots finds 73.81 m mean absolute error in final head position per fire. Scope and exclusions are in [VALIDATION_ANNABURROO.md](docs/VALIDATION_ANNABURROO.md). These are grassland transfer diagnostics on the same experiment, not a validation of Spanish incidents or grid perimeters; the training gate remains open.
 
 A fuel-bed and ignition-growth sensitivity check keeps Rothermel. Among 73 plots reported 100% cured, measured grass load, height, and surface/volume ratio reduce final-distance MAE from 70.85 m (FM1) to 56.74 m. Treating partly cured plots as entirely dead instead raises their error to 144.97 m. Illustrative growth timescales remain unvalidated, so no simulator default changes. [Method and limits](docs/VALIDATION_ANNABURROO.md).
+
+`cured_grass_fire.json` demonstrates a separate, fully cured, one-class Rothermel fuel configuration with explicit measured load, height, and surface/volume ratio. Its grid geometry is synthetic and its 12% extinction moisture remains an FM1 assumption. The integrated synthetic episode can use the same fuel schema; the existing FM1 example remains unchanged. This is an interface example, not a validated fire replay.
 
 ## Scope and limitations
 

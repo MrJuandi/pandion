@@ -7,7 +7,7 @@ from math import hypot
 
 
 def candidate_cells(observation: dict) -> list[list[int]]:
-    """Return observed unburned FM1 cells adjacent to an observed active fire.
+    """Return observed unburned fuel cells adjacent to an observed active fire.
 
     Only delivered cell records in ``observation['fire']['cells']`` are read;
     unknown cells never count as either burning or unburned.
@@ -35,7 +35,7 @@ def candidate_cells(observation: dict) -> list[list[int]]:
             if not (0 <= nr < rows and 0 <= nc < cols):
                 continue
             record = cells[nr][nc]
-            if (nr, nc) not in treated and fuel[nr][nc] == "FM1" and isinstance(record, dict) and record.get("fire_detected") is False:
+            if (nr, nc) not in treated and fuel[nr][nc] in ("FM1", "CURED_GRASS") and isinstance(record, dict) and record.get("fire_detected") is False:
                 candidates.add((nr, nc))
     return [[r, c] for r, c in sorted(candidates)]
 

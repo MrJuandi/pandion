@@ -1,0 +1,141 @@
+{
+  "schema_version": "rothermel-fuels-0.1",
+  "scenario_id": "synthetic-cured-grass-001",
+  "provenance": "synthetic",
+  "seed": 42,
+  "crs": "LOCAL_METERS",
+  "rows": 5,
+  "cols": 5,
+  "cell_size_m": 100,
+  "horizon_s": 600,
+  "fuel_model": [
+    [
+      "CURED_GRASS",
+      "CURED_GRASS",
+      "CURED_GRASS",
+      "CURED_GRASS",
+      "CURED_GRASS"
+    ],
+    [
+      "CURED_GRASS",
+      "CURED_GRASS",
+      "CURED_GRASS",
+      "CURED_GRASS",
+      "CURED_GRASS"
+    ],
+    [
+      "CURED_GRASS",
+      "CURED_GRASS",
+      "CURED_GRASS",
+      "CURED_GRASS",
+      "CURED_GRASS"
+    ],
+    [
+      "CURED_GRASS",
+      "CURED_GRASS",
+      "CURED_GRASS",
+      "CURED_GRASS",
+      "CURED_GRASS"
+    ],
+    [
+      "CURED_GRASS",
+      "CURED_GRASS",
+      "CURED_GRASS",
+      "CURED_GRASS",
+      "CURED_GRASS"
+    ]
+  ],
+  "dead_fuel_moisture_fraction": [
+    [
+      0.074,
+      0.074,
+      0.074,
+      0.074,
+      0.074
+    ],
+    [
+      0.074,
+      0.074,
+      0.074,
+      0.074,
+      0.074
+    ],
+    [
+      0.074,
+      0.074,
+      0.074,
+      0.074,
+      0.074
+    ],
+    [
+      0.074,
+      0.074,
+      0.074,
+      0.074,
+      0.074
+    ],
+    [
+      0.074,
+      0.074,
+      0.074,
+      0.074,
+      0.074
+    ]
+  ],
+  "elevation_m": [
+    [
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    [
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    [
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    [
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    [
+      0,
+      0,
+      0,
+      0,
+      0
+    ]
+  ],
+  "midflame_wind_to_m_s": [
+    4.6,
+    0
+  ],
+  "ignitions": [
+    [
+      2,
+      2
+    ]
+  ],
+  "fuel_properties": {
+    "CURED_GRASS": {
+      "load_kg_m2": 0.403,
+      "depth_m": 0.23,
+      "sav_cm_inv": 97.7,
+      "moisture_extinction_fraction": 0.12,
+      "curing_percent": 100
+    }
+  }
+}

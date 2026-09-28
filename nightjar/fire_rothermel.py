@@ -1,4 +1,4 @@
-"""FM1 Rothermel surface spread coupled to a directed grid-arrival solver."""
+"""Rothermel surface spread coupled to a directed grid-arrival solver."""
 
 from __future__ import annotations
 
@@ -10,12 +10,32 @@ from math import hypot, isfinite
 from pathlib import Path
 
 from .fire import NEIGHBORS
-from .rothermel import FM1_MOISTURE_EXTINCTION, fm1_directional_rate
+from .rothermel import (FM1_MOISTURE_EXTINCTION, fm1_directional_rate,
+                        one_class_directional_rate)
+
+
+def burnable(cfg: dict, r: int, c: int) -> bool:
+    fuel = cfg["fuel_model"][r][c]
+    if fuel == "NONE":
+        return False
+    extinction = (FM1_MOISTURE_EXTINCTION if fuel == "FM1"
+                  else cfg["fuel_properties"][fuel]["moisture_extinction_fraction"])
+    return cfg["moisture"][r][c] < extinction
+
+
+def directional_rate(cfg: dict, r: int, c: int, gradient: tuple[float, float],
+                     direction: tuple[float, float]) -> float:
+    fuel = cfg["fuel_model"][r][c]
+    if fuel == "FM1":
+        return fm1_directional_rate(cfg["moisture"][r][c], cfg["wind"], gradient, direction)
+    return one_class_directional_rate(cfg["moisture"][r][c], cfg["wind"], gradient, direction,
+                                      **cfg["fuel_properties"][fuel])
 
 
 def validate_scenario(scenario: dict) -> dict:
-    if scenario.get("schema_version") != "rothermel-fm1-0.1":
-        raise ValueError("schema_version must be 'rothermel-fm1-0.1'")
+    schema = scenario.get("schema_version")
+    if schema not in ("rothermel-fm1-0.1", "rothermel-fuels-0.1"):
+        raise ValueError("schema_version must be rothermel-fm1-0.1 or rothermel-fuels-0.1")
     if scenario.get("provenance") != "synthetic" or scenario.get("crs") != "LOCAL_METERS":
         raise ValueError("this scenario must declare synthetic provenance and LOCAL_METERS CRS")
     if not isinstance(scenario.get("scenario_id"), str) or not scenario["scenario_id"]:
@@ -35,8 +55,22 @@ def validate_scenario(scenario: dict) -> dict:
     for name, grid in (("fuel_model", fuel), ("dead_fuel_moisture_fraction", moisture), ("elevation_m", elevation)):
         if not isinstance(grid, list) or len(grid) != rows or any(not isinstance(row, list) or len(row) != cols for row in grid):
             raise ValueError(f"{name} must have shape [{rows}, {cols}]")
-    if any(v not in ("FM1", "NONE") for row in fuel for v in row):
-        raise ValueError("fuel_model entries must be FM1 or NONE")
+    allowed = ("FM1", "NONE") if schema == "rothermel-fm1-0.1" else ("FM1", "CURED_GRASS", "NONE")
+    if any(v not in allowed for row in fuel for v in row):
+        raise ValueError(f"fuel_model entries must be in {allowed}")
+    fuel_properties = {}
+    if schema == "rothermel-fuels-0.1":
+        supplied = scenario.get("fuel_properties")
+        if not isinstance(supplied, dict) or set(supplied) != {"CURED_GRASS"}:
+            raise ValueError("fuel_properties must define CURED_GRASS exactly")
+        values = supplied["CURED_GRASS"]
+        required = {"load_kg_m2", "depth_m", "sav_cm_inv", "moisture_extinction_fraction", "curing_percent"}
+        if not isinstance(values, dict) or set(values) != required or values["curing_percent"] != 100:
+            raise ValueError("CURED_GRASS requires explicit properties and curing_percent=100")
+        numeric = {key: float(values[key]) for key in required if key != "curing_percent"}
+        if any(not isfinite(value) or value <= 0 for value in numeric.values()) or numeric["moisture_extinction_fraction"] > 1:
+            raise ValueError("CURED_GRASS properties must be positive and finite; extinction <= 1")
+        fuel_properties = {"CURED_GRASS": numeric}
     moisture = [[float(v) for v in row] for row in moisture]
     elevation = [[float(v) for v in row] for row in elevation]
     if any(not isfinite(v) or not 0 <= v <= 1 for row in moisture for v in row):
@@ -56,12 +90,13 @@ def validate_scenario(scenario: dict) -> dict:
         if not isinstance(item, list) or len(item) != 2 or any(not isinstance(v, int) or isinstance(v, bool) for v in item):
             raise ValueError("each ignition must be [row, col]")
         r, c = item
-        if not (0 <= r < rows and 0 <= c < cols) or fuel[r][c] != "FM1" or moisture[r][c] >= FM1_MOISTURE_EXTINCTION:
-            raise ValueError("ignitions must be within burnable, non-extinct FM1 cells")
+        cfg = {"fuel_model": fuel, "moisture": moisture, "fuel_properties": fuel_properties}
+        if not (0 <= r < rows and 0 <= c < cols) or not burnable(cfg, r, c):
+            raise ValueError("ignitions must be within burnable, non-extinct cells")
     return {
         "rows": rows, "cols": cols, "cell_size_m": cell_size, "horizon_s": horizon,
         "fuel_model": fuel, "moisture": moisture, "elevation": elevation,
-        "wind": wind, "ignitions": ignitions,
+        "wind": wind, "ignitions": ignitions, "fuel_properties": fuel_properties,
     }
 
 
@@ -70,8 +105,8 @@ def run_fire_rothermel(scenario: dict) -> dict:
     rows, cols, cell = cfg["rows"], cfg["cols"], cfg["cell_size_m"]
     fuel, moisture, elevation = cfg["fuel_model"], cfg["moisture"], cfg["elevation"]
 
-    def burnable(r: int, c: int) -> bool:
-        return fuel[r][c] == "FM1" and moisture[r][c] < FM1_MOISTURE_EXTINCTION
+    def can_burn(r: int, c: int) -> bool:
+        return burnable(cfg, r, c)
 
     def gradient(r: int, c: int) -> tuple[float, float]:
         west, east = max(c - 1, 0), min(c + 1, cols - 1)
@@ -92,21 +127,21 @@ def run_fire_rothermel(scenario: dict) -> dict:
             continue
         for dr, dc in NEIGHBORS:
             nr, nc = r + dr, c + dc
-            if not (0 <= nr < rows and 0 <= nc < cols) or not burnable(nr, nc):
+            if not (0 <= nr < rows and 0 <= nc < cols) or not can_burn(nr, nc):
                 continue
-            if dr and dc and (not burnable(r + dr, c) or not burnable(r, c + dc)):
+            if dr and dc and (not can_burn(r + dr, c) or not can_burn(r, c + dc)):
                 continue
             length = hypot(dc, dr) * cell
             direction = (dc, dr)
-            source_rate = fm1_directional_rate(moisture[r][c], cfg["wind"], gradients[r][c], direction)
-            target_rate = fm1_directional_rate(moisture[nr][nc], cfg["wind"], gradients[nr][nc], direction)
+            source_rate = directional_rate(cfg, r, c, gradients[r][c], direction)
+            target_rate = directional_rate(cfg, nr, nc, gradients[nr][nc], direction)
             candidate = time + length / (2 * source_rate) + length / (2 * target_rate)
             if candidate < arrival[nr][nc]:
                 arrival[nr][nc] = candidate
                 heappush(queue, (candidate, nr, nc))
     reached = sum(t <= cfg["horizon_s"] for row in arrival for t in row)
     return {
-        "replay_schema_version": "rothermel-fm1-0.1",
+        "replay_schema_version": scenario["schema_version"],
         "scenario_id": scenario["scenario_id"], "seed": scenario["seed"],
         "scenario_sha256": sha256(json.dumps(scenario, sort_keys=True, separators=(",", ":")).encode()).hexdigest(),
         "provenance": "synthetic", "crs": "LOCAL_METERS",

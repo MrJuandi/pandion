@@ -100,6 +100,27 @@ def fm1_directional_rate(moisture_fraction: float, wind_to_m_s: tuple[float, flo
     wind_speed = hypot(*wind_to_m_s)
     slope = hypot(*upslope_gradient)
     pieces = fm1_components(moisture_fraction, wind_speed, slope)
+    return _directional_rate(pieces, wind_to_m_s, upslope_gradient, direction)
+
+
+def one_class_directional_rate(moisture_fraction: float, wind_to_m_s: tuple[float, float],
+                               upslope_gradient: tuple[float, float], direction: tuple[float, float],
+                               *, load_kg_m2: float, depth_m: float, sav_cm_inv: float,
+                               moisture_extinction_fraction: float) -> float:
+    """Directional rate for an explicitly configured one-class dead fuel bed."""
+    wind_speed = hypot(*wind_to_m_s)
+    slope = hypot(*upslope_gradient)
+    pieces = one_class_components(moisture_fraction, wind_speed, load_kg_m2, depth_m,
+                                  sav_cm_inv, moisture_extinction_fraction)
+    beta = load_kg_m2 * LB_FT2_PER_KG_M2 / (depth_m * FT_PER_M * PARTICLE_DENSITY_LB_FT3)
+    pieces["phi_s"] = 5.275 * beta**-0.3 * slope**2
+    return _directional_rate(pieces, wind_to_m_s, upslope_gradient, direction)
+
+
+def _directional_rate(pieces: dict[str, float], wind_to_m_s: tuple[float, float],
+                      upslope_gradient: tuple[float, float], direction: tuple[float, float]) -> float:
+    wind_speed = hypot(*wind_to_m_s)
+    slope = hypot(*upslope_gradient)
     r0 = pieces["r0_m_s"]
     if r0 == 0:
         return 0.0

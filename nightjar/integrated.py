@@ -13,10 +13,10 @@ from random import Random
 
 from .aircraft import CAPACITY_L, run_episode as run_aircraft, validate_scenario as validate_aircraft
 from .fire import NEIGHBORS
-from .fire_rothermel import validate_scenario as validate_fire
+from .fire_rothermel import (burnable as fuel_burnable, directional_rate,
+                             validate_scenario as validate_fire)
 from .observation import build_reports, observe
 from .policies import candidate_cells, choose_order
-from .rothermel import FM1_MOISTURE_EXTINCTION, fm1_directional_rate
 
 
 def run_integrated(scenario: dict, policy: str, *, policy_seed: int | None = None) -> dict:
@@ -54,7 +54,7 @@ def run_integrated(scenario: dict, policy: str, *, policy_seed: int | None = Non
     rng = Random(scenario["seed"] if policy_seed is None else policy_seed)
 
     def burnable(r: int, c: int) -> bool:
-        return fire["fuel_model"][r][c] == "FM1" and fire["moisture"][r][c] < FM1_MOISTURE_EXTINCTION
+        return fuel_burnable(fire, r, c)
 
     elevation = fire["elevation"]
     gradients = []
@@ -99,8 +99,8 @@ def run_integrated(scenario: dict, policy: str, *, policy_seed: int | None = Non
                 if dr and dc and (not burnable(r + dr, c) or not burnable(r, c + dc) or barrier[r + dr][c] or barrier[r][c + dc]):
                     continue
                 direction = (dc, dr)
-                source_rate = fm1_directional_rate(fire["moisture"][r][c], fire["wind"], gradients[r][c], direction)
-                target_rate = fm1_directional_rate(fire["moisture"][nr][nc], fire["wind"], gradients[nr][nc], direction)
+                source_rate = directional_rate(fire, r, c, gradients[r][c], direction)
+                target_rate = directional_rate(fire, nr, nc, gradients[nr][nc], direction)
                 distance = hypot(dc, dr) * cell
                 candidate = time + distance / (2 * source_rate) + distance / (2 * target_rate)
                 if candidate < best[nr][nc]:
