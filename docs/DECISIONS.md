@@ -45,5 +45,6 @@
 | O-08 | Is a browser replay enough? | Prototype after Stage 0; choose desktop packaging only if concrete workflows require it. |
 | O-09 | Which synthetic cases distinguish learned decisions reliably? | Partly addressed under D-23: `nightjar-discrimination-family-0.1` implements multi-foci spread, edge water sources, and 24 scenarios across disjoint splits. The development cases exceed 4.0 ha unmitigated; discrimination and spread in unopened splits remain untested. |
 | O-10 | What would establish a meaningful learned-policy gain in this simulator? | Resolved under D-24: primary endpoint final affected area in ha, minimum effect >= 0.50 ha vs greedy heuristic, non-inferiority vs containment heuristic, paired dominance in >= 50% cases, and zero rejected orders. |
+| O-11 | How should validation reuse after an earlier budget be handled before making any held-out claim? | The 16x8 PPO result reused validation after observing 8x8 and is therefore adaptive exploratory evidence, not an independent test. Define a fresh, unopened evaluation protocol and keep the reserved split unopened until checkpoint and budget choices are fixed. |
 
 Open questions are tracked here so they are resolved deliberately rather than embedded as undocumented defaults.

@@ -130,7 +130,13 @@ For exploratory PPO research (Stage 1), install `requirements-rl.txt` (`torch>=2
 python3 -m nightjar.ppo --output runs/ppo-smoke.json --updates 1 --episodes-per-update 1
 ```
 
-The command writes no artifact unless `--output` is supplied, and never opens validation or reserved scenarios. Results are synthetic diagnostics only. The `nightjar.model` module provides observation tensorization (9 spatial raster channels and 10 vector features, including public normalized elevation and slope magnitude), discrete action mapping ($2 + H \times W$), and a hybrid CNN+MLP `SpatialActorCritic` with invalid-action masking:
+The command writes no artifact unless `--output` is supplied, and never opens validation or reserved scenarios. Results are synthetic diagnostics only. To train multiple candidates on development and select one deterministically on validation, save per-case metrics, provenance, and a checkpoint with:
+
+```sh
+python3 -m nightjar.ppo --select --output runs/ppo-selection.json --checkpoint runs/ppo-selection.pt --candidates 2 --updates 1 --episodes-per-update 1
+```
+
+Selection minimizes mean validation affected area, breaking exact ties by seed and candidate index; reserved scenarios are never evaluated. Each validation case records PPO, `heuristic`, and `containment_heuristic` metrics matched by `scenario_id`, with paired PPO-minus-baseline means, counts, wins/losses, and rejected-order criteria for the selected candidate. The completed 16x8 five-seed run selected a validation mean of 8.625 ha, a 0.53125 ha reduction versus the heuristic. Because validation was reused after 8x8, this is adaptive exploratory evidence only; the reserved split remains unopened and the results make no physical claims. The `nightjar.model` module provides observation tensorization (9 spatial raster channels and 10 vector features, including public normalized elevation and slope magnitude), discrete action mapping ($2 + H \times W$), and a hybrid CNN+MLP `SpatialActorCritic` with invalid-action masking:
 
 ```python
 from nightjar.model import ActionMapper, ObservationTensorizer, SpatialActorCritic
