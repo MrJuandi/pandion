@@ -1,0 +1,35 @@
+{
+  "schema_version": "standard-fuel-0.1",
+  "scenario_id": "synthetic-standard-fuels",
+  "seed": 0,
+  "provenance": "synthetic",
+  "crs": "LOCAL_METERS",
+  "rows": 5,
+  "cols": 5,
+  "cell_size_m": 25,
+  "horizon_s": 3600,
+  "fuel_model": [
+    [101, 101, 101, 141, 141],
+    [101, 101, 101, 141, 141],
+    [101, 101, 0, 141, 141],
+    [101, 101, 101, 141, 141],
+    [101, 101, 101, 141, 141]
+  ],
+  "elevation_m": [
+    [0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0]
+  ],
+  "fuel_moisture_fraction": {
+    "dead_1h": 0.06,
+    "dead_10h": 0.08,
+    "dead_100h": 0.1,
+    "dead_herbaceous": 0.06,
+    "live_herbaceous": 0.8,
+    "live_woody": 1.0
+  },
+  "midflame_wind_to_m_s": [1, 0],
+  "ignitions": [[2, 0]]
+}

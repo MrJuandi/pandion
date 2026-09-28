@@ -79,6 +79,16 @@ python3 -m nightjar.integrated_benchmark examples/synthetic_integrated.json --ou
 python3 -m unittest discover -s tests -v
 ```
 
+An optional synthetic path uses [Pyretechnics](https://github.com/pyregence/pyretechnics) and numbered standard fire-behavior fuel models. Install its pinned dependency in a virtual environment, then run:
+
+```sh
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements-standard.txt
+.venv/bin/python -m nightjar.fire_standard examples/standard_fuel_fire.json --output runs/standard-fuel-fire.json
+```
+
+The example mixes GR1 (101), SH1 (141), and nonburnable (0) cells. It is a synthetic, no-intervention spread example; no geographic land-cover product has been mapped to these codes yet. Its replay does not feed the aircraft episode. See [PHYSICAL_MODEL_V0.md](docs/PHYSICAL_MODEL_V0.md) and [DATA_AND_VALIDATION.md](docs/DATA_AND_VALIDATION.md).
+
 The same unit suite runs in GitHub Actions for pushes and pull requests. Tests that need a downloaded external source skip when the audited file is absent.
 
 `runs/` is ignored by Git. Omit `--output` to print a result to standard output. The aircraft example exercises movement, a full-water drop, return, and refill. The fire examples produce first-arrival times and grid-cell affected area without intervention. The resolution command compares the FM1 assumptions on one physical domain at several cell sizes. Scenario contracts and limitations are in [ARCHITECTURE.md](docs/ARCHITECTURE.md) and [PHYSICAL_MODEL_V0.md](docs/PHYSICAL_MODEL_V0.md). There is no training command yet. The first interface will be a local browser replay and analysis view if experiments show it is useful; scientific artifacts must remain usable without the interface.
