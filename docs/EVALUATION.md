@@ -136,9 +136,53 @@ Against the heuristic, PPO had 5 wins, 2 losses, and 1 zero-difference tie: mean
 | Zero rejected orders | Pass | 0 in all 8 PPO and baseline paired episodes |
 | Reserved one-time protocol | Preserved | Reserved split unopened and unevaluated |
 
-The 16x8 selection improves on the prior selected 8x8 result (seed `2`, `8.8125 ha`, `0.34375 ha` heuristic reduction) by `0.1875 ha` in selected validation mean and reduction. This is adaptive reuse of the same validation family after observing the 8x8 result, not an independent held-out claim. Both runs are synthetic and conditional on the fixed discrimination-family scenarios, observation schedule, PPO implementation, and provisional permanent suppression effect; they do not establish physical transfer or generalisation to independent incidents. The reserved split remains unopened, with no training or execution on reserved scenarios.
+The 16x8 selection improves on the prior selected 8x8 result (seed `2`, `8.8125 ha`, `0.34375 ha` heuristic reduction) by `0.1875 ha` in selected validation mean and reduction. This is adaptive reuse of the same validation family after observing the 8x8 result, not an independent held-out claim. Both runs are synthetic and conditional on the fixed discrimination-family scenarios, observation schedule, PPO implementation, and provisional permanent suppression effect; they do not establish physical transfer or generalisation to independent incidents.
 
 Source and provenance: the result is recorded from ignored artifact `runs/ppo-matched-5seeds-16x8.json`, schema `nightjar-ppo-selection-0.1`, synthetic scenario provenance, and the uncommitted working-tree code version (no fabricated commit hash). The selected checkpoint is `runs/ppo-matched-5seeds-16x8.pt`, SHA-256 `c88258584e7b79d10ab56a6908609e6b209bcc72d89039ccf495bd88b532ad0d`; the observed PyTorch version was `2.2.2`. The prior 8x8 artifact remains documented above and is unchanged.
+
+### One-time reserved split evaluation (2026-09-28)
+
+Under the predeclared protocol, the selected 16x8 checkpoint (`runs/ppo-matched-5seeds-16x8.pt`, SHA-256 `c88258584e7b79d10ab56a6908609e6b209bcc72d89039ccf495bd88b532ad0d`) was evaluated strictly once across all eight previously unopened reserved scenarios (`discrimination-reserved-00` to `07`), alongside observation-matched baselines (`no_intervention`, `heuristic`, `containment_heuristic`, and ten choice seeds for `random_valid`):
+
+```text
+python3 -m nightjar.evaluate_reserved --checkpoint runs/ppo-matched-5seeds-16x8.pt --output runs/reserved-evaluation/report.json --replays-dir runs/reserved-evaluation/replays
+```
+
+| Scenario | PPO seed 2 (ha) | Heuristic (ha) | Containment (ha) | Random mean (ha) | No intervention (ha) |
+|---|---:|---:|---:|---:|---:|
+| discrimination-reserved-00 | 7.25 | 6.50 | 6.50 | 7.475 | 8.75 |
+| discrimination-reserved-01 | 8.00 | 7.75 | 8.25 | 8.525 | 9.50 |
+| discrimination-reserved-02 | 5.50 | 5.25 | 5.50 | 6.825 | 8.25 |
+| discrimination-reserved-03 | 6.25 | 6.75 | 4.00 | 5.550 | 7.00 |
+| discrimination-reserved-04 | 2.50 | 3.50 | 3.25 | 2.925 | 4.25 |
+| discrimination-reserved-05 | 8.75 | 9.75 | 9.75 | 9.850 | 11.50 |
+| discrimination-reserved-06 | 8.25 | 5.50 | 5.75 | 7.350 | 9.00 |
+| discrimination-reserved-07 | 7.25 | 7.25 | 7.25 | 7.600 | 8.75 |
+| **Mean** | **6.71875 ha** | **6.53125 ha** | **6.28125 ha** | **7.01250 ha** | **8.37500 ha** |
+
+Paired comparison summary:
+- **Vs greedy heuristic:** PPO had 3 wins, 4 losses, and 1 tie, with a mean increase in burned area of `+0.1875 ha` (`PPO - heuristic = +0.1875 ha`).
+- **Vs containment heuristic:** PPO had 3 wins, 3 losses, and 2 ties, with a mean increase of `+0.4375 ha` (`PPO - containment = +0.4375 ha`).
+- **Vs valid random mean:** PPO had 6 wins and 2 losses, reducing burned area by a mean of `0.29375 ha` (`6.71875 ha` vs `7.01250 ha`).
+- **Vs no intervention:** PPO reduced burned area in all 8 cases (mean reduction of `1.65625 ha`).
+- **Rejected orders:** `0` in all 8 PPO episodes and all baseline episodes.
+
+| Predeclared criterion | Reserved result | Status |
+|---|---|---|
+| Reduction versus heuristic >= `0.50 ha` | `-0.1875 ha` | **Fail** |
+| Non-inferior versus containment (`PPO - baseline <= 0`) | `+0.4375 ha` | **Fail** |
+| Heuristic wins >= 50% | 3/8 wins = 37.5% | **Fail** |
+| Heuristic losses <= 25% | 4/8 losses = 50.0% | **Fail** |
+| Zero rejected orders | 0 in all episodes | **Pass** |
+| Overall predeclared criteria | 1 of 5 passed | **Fail** |
+
+Interpretation and failure analysis:
+The learned policy failed to generalize its validation advantage to the reserved split. In particular, on `discrimination-reserved-06`, PPO finished at `8.25 ha` compared to `5.50 ha` for the greedy heuristic and `5.75 ha` for containment (`+2.75 ha` loss), largely due to early sub-optimal drop allocation between the two competing fronts under dynamic observation delay. While PPO learned feasible, non-rejecting aircraft dispatch and consistently improved over no intervention and random choice, it failed to surpass transparent heuristics on unseen scenarios.
+
+This confirms the hypothesis recorded in `DECISIONS.md` (O-11): the apparent 16x8 validation advantage was an artifact of adaptive validation reuse after the 8x8 run. The reserved scenarios are now opened and documented; they cannot be reused as an untouched test set for future iterations of this policy.
+
+Source and provenance: recorded from ignored artifact `runs/reserved-evaluation/report.json`, schema `nightjar-reserved-evaluation-0.1`, git working-tree code, PyTorch 2.2.2. Full replays for all policies and choice seeds are stored under `runs/reserved-evaluation/replays/`.
+
 
 ### Predeclared model improvement criteria (fixed before future evaluation)
 
