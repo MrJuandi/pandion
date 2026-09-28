@@ -124,6 +124,20 @@ while not done:
 
 `env.action_mask` lists valid orders for the current delivered observation; `step` rejects others. The reward is negative newly affected area in hectares. This interface remains an exploratory synthetic contract.
 
+For neural policy research (Stage 1), install `requirements-rl.txt` (`torch>=2.0.0`). The `nightjar.model` module provides observation tensorization (9 spatial raster channels and 10 vector features, including public normalized elevation and slope magnitude), discrete action mapping ($2 + H \times W$), and a hybrid CNN+MLP `SpatialActorCritic` with invalid-action masking:
+
+```python
+from nightjar.model import ActionMapper, ObservationTensorizer, SpatialActorCritic
+
+mapper = env.action_mapper()
+tensorizer = env.observation_tensorizer()
+model = SpatialActorCritic(grid_rows=11, grid_cols=11)
+
+# Step using discrete action indices with action masking
+action_idx = model.select_action(observation, tensorizer, mapper, deterministic=True)
+observation, reward, done, info = env.step_discrete(action_idx)
+```
+
 The observation example reads the FM1 replay and a synthetic schedule of capture and delivery times. It exposes only delivered, covered cells. It is an information-flow test, not a real satellite sensor model.
 
 An independent-data source audit is also available:
