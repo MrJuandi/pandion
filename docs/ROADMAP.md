@@ -32,7 +32,7 @@ The current status of physical and result-bearing training requirements is track
 - Designed and verified the new untouched test family (`discrimination_family`) and stronger baseline (`containment_heuristic`) with predeclared improvement criteria before the next model-selection run. Keep learned-policy claims exploratory and simulator-specific.
 - Extend the implemented synthetic no-intervention, random-valid, and observation-matched heuristic baselines to validated scenarios.
 - Freeze primary metric, splits, and evaluation script.
-- Train CNN + non-spatial encoder with PPO; add recurrence only as a measured experiment.
+- Implemented an exploratory minimal CNN + non-spatial encoder PPO smoke path on development scenarios only; it is not a model-selection result. Add recurrence only as a measured experiment.
 - Run independent training seeds and paired held-out tests; inspect failure cases.
 - Build a local browser replay if it helps audit observations, orders, and outcomes.
 

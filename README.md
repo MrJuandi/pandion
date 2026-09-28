@@ -2,7 +2,7 @@
 
 Research project for learning and evaluating decisions in wildfire response. The long-term goal is a decision-making system that assigns missions to heterogeneous resources using the information available at the time of each decision. Development begins with one water-dropping aircraft, then two aircraft, before introducing other resource types.
 
-**Status:** early Stage 0. The repository contains deterministic aircraft and fire components plus a small synthetic integrated episode. Its full-load drop blocks not-yet-burning grid cells under a provisional, unsourced water rule. Synthetic scenario families and a headless decision interface are available for evaluation design; no trained controller is part of the current code. This is not a physically validated or operational decision tool.
+**Status:** early Stage 0. The repository contains deterministic aircraft and fire components plus a small synthetic integrated episode. Its full-load drop blocks not-yet-burning grid cells under a provisional, unsourced water rule. Synthetic scenario families, a headless decision interface, and an exploratory PPO smoke path are available for evaluation design. This is not a physically validated or operational decision tool.
 
 ## Research question
 
@@ -124,7 +124,13 @@ while not done:
 
 `env.action_mask` lists valid orders for the current delivered observation; `step` rejects others. The reward is negative newly affected area in hectares. This interface remains an exploratory synthetic contract.
 
-For neural policy research (Stage 1), install `requirements-rl.txt` (`torch>=2.0.0`). The `nightjar.model` module provides observation tensorization (9 spatial raster channels and 10 vector features, including public normalized elevation and slope magnitude), discrete action mapping ($2 + H \times W$), and a hybrid CNN+MLP `SpatialActorCritic` with invalid-action masking:
+For exploratory PPO research (Stage 1), install `requirements-rl.txt` (`torch>=2.0.0`) and run the development-only smoke training command:
+
+```sh
+python3 -m nightjar.ppo --output runs/ppo-smoke.json --updates 1 --episodes-per-update 1
+```
+
+The command writes no artifact unless `--output` is supplied, and never opens validation or reserved scenarios. Results are synthetic diagnostics only. The `nightjar.model` module provides observation tensorization (9 spatial raster channels and 10 vector features, including public normalized elevation and slope magnitude), discrete action mapping ($2 + H \times W$), and a hybrid CNN+MLP `SpatialActorCritic` with invalid-action masking:
 
 ```python
 from nightjar.model import ActionMapper, ObservationTensorizer, SpatialActorCritic
