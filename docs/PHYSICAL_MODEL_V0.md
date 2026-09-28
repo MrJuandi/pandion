@@ -1,6 +1,6 @@
 # Initial physical-model specification
 
-**Status:** selected starting references, 2026-09-28. A one-size dead-fuel Rothermel/Albini FM1 calculation and a synthetic integrated episode exist. The episode's permanent water barrier is an unsourced test rule, not a validated water-effect model. Published component equations and aircraft figures do not validate Nightjar's incident predictions.
+**Status:** selected starting references, 2026-09-28. A one-size dead-fuel Rothermel/Albini FM1 calculation, a separate synthetic standard-fuel calculation, and a synthetic integrated episode exist. The episode's permanent water barrier is an unsourced test rule, not a validated water-effect model. Published component equations and aircraft figures do not validate Nightjar's incident predictions.
 
 ## Surface-fire spread
 
@@ -28,7 +28,7 @@ The seven-case follow-up (`python3 -m nightjar.sensitivity --varied`, 2026-09-27
 
 `nightjar.fire_standard` accepts a synthetic grid of standard fuel-model numbers and uses Pyretechnics 2026.8.10 to compute local Rothermel surface-fire rates for each cell. The included example uses Scott and Burgan GR1 (101) and SH1 (141), with 0 as Nightjar's explicit nonburnable mask. The scenario supplies six dead/live moisture fractions, fixed midflame wind, elevation, and ignition. Dynamic models use Pyretechnics' live-herbaceous moisture transfer. Its directional rates are coupled to the same eight-neighbour, half-edge, shortest-arrival approximation as the FM1 prototype. This coupling is Nightjar's numerical choice; it is not Pyretechnics' level-set solver or a validated fire perimeter model. The result counts whole arrived cells at the horizon. No crown fire, spotting, temporal weather, or water effects are modeled.
 
-Midflame wind is specified as east/north **wind-to** components in m/s and converted to Pyretechnics' m/min and upwind azimuth. Elevation gradients yield slope and downslope aspect. Fuel codes are standard fire-behavior model identifiers, not land-cover classes. The example's fuel assignment and all environmental values are synthetic. Pyretechnics' equation implementation and the standard catalogue are documented in [REFERENCES.md](REFERENCES.md); independent numerical and physical validation remains open.
+Midflame wind is specified as east/north **wind-to** components in m/s and converted to Pyretechnics' m/min and upwind azimuth. Elevation gradients yield slope and downslope aspect. Fuel codes are standard fire-behavior model identifiers, not land-cover classes. The example's fuel assignment and all environmental values are synthetic. Pyretechnics' equation implementation and the standard catalogue are documented in [REFERENCES.md](REFERENCES.md); independent numerical and physical validation remains open. The scenario contract and evidence sequence are in [STANDARD_FUEL_PATH.md](STANDARD_FUEL_PATH.md).
 
 ## First aircraft: CL-415
 
