@@ -58,6 +58,10 @@ The step reward is `-(A_t - A_{t-1})` hectares, with `A` the simulator's cumulat
 
 `python3 -m nightjar.challenge_family --output-dir runs/challenge-family` uses the same integrated solver, action contract, FM1 fuel model, and 35 m provisional water radius. It generates an 11×11 grid with seeded `NONE` cells, a seeded ignition and wind vector, a 1,200 s horizon, and full-grid synthetic surveys captured every 60 s with 30, 90, or 150 s delivery delay after the initial report. Four development indices were chosen after exploratory baseline inspection; four initially reserved indices use a separate seed stream. This command writes all eight scenario files and their hashes, but runs baselines only on development. It emits 48 full development replays (one no-intervention, one heuristic, ten seeded random choices per case). A prior exploratory controller trial opened the four initially reserved outcomes; they cannot be reused as untouched tests. The scenario files and replay carry synthetic provenance, schema, local CRS, units, seed, and a declared synthetic UTC origin.
 
+### Browser replay tool (`nightjar.viewer`)
+
+`python3 -m nightjar.viewer REPLAY1.json [REPLAY2.json ...] [--output runs/viewer.html]` generates a self-contained offline HTML5 interactive visualization. It animates fire spread arrival, delivered observation latency, candidate cell targets, water drops, and aircraft trajectory over the scenario horizon. When passed multiple replays for the same scenario, it supports synchronized side-by-side and tabbed multi-policy comparisons (e.g. comparing PPO against `containment_heuristic`).
+
 ## 1. Separation of concerns
 
 1. **Scenario data:** georeferenced terrain, fuels or land cover, water sources, assets, and time-indexed weather. Every layer has provenance and a native resolution.

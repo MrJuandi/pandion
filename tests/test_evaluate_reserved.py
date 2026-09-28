@@ -1,0 +1,111 @@
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+try:
+    import torch
+    HAS_TORCH = True
+except ImportError:
+    HAS_TORCH = False
+
+from nightjar.evaluate_reserved import (
+    _extract_metrics,
+    _paired_comparison,
+    run_reserved_evaluation,
+)
+
+
+class EvaluateReservedTests(unittest.TestCase):
+    def test_extract_metrics(self):
+        replay = {
+            "affected_area_ha": 4.5,
+            "drops": [{}, {}],
+            "aircraft_metrics": {
+                "water_dropped_l": 12274.0,
+                "flight_s": 120.0,
+                "rejected_orders": 0,
+            },
+        }
+        metrics = _extract_metrics(replay)
+        self.assertEqual(metrics["affected_area_ha"], 4.5)
+        self.assertEqual(metrics["drops"], 2)
+        self.assertEqual(metrics["water_dropped_l"], 12274.0)
+        self.assertEqual(metrics["flight_s"], 120.0)
+        self.assertEqual(metrics["rejected_orders"], 0)
+
+    def test_paired_comparison_computations(self):
+        ppo = [
+            {"affected_area_ha": 3.0, "rejected_orders": 0},
+            {"affected_area_ha": 5.0, "rejected_orders": 0},
+            {"affected_area_ha": 4.0, "rejected_orders": 0},
+            {"affected_area_ha": 6.0, "rejected_orders": 0},
+        ]
+        baseline = [
+            {"affected_area_ha": 4.0, "rejected_orders": 0},  # win (+1.0 reduction)
+            {"affected_area_ha": 4.5, "rejected_orders": 0},  # loss (-0.5 reduction)
+            {"affected_area_ha": 4.0, "rejected_orders": 0},  # tie (0.0)
+            {"affected_area_ha": 7.0, "rejected_orders": 0},  # win (+1.0 reduction)
+        ]
+        result = _paired_comparison(ppo, baseline)
+        self.assertEqual(result["paired_count"], 4)
+        self.assertEqual(result["wins"], 2)
+        self.assertEqual(result["losses"], 1)
+        self.assertEqual(result["ties"], 1)
+        self.assertEqual(result["win_rate"], 0.5)
+        self.assertEqual(result["loss_rate"], 0.25)
+        self.assertEqual(result["tie_rate"], 0.25)
+        self.assertAlmostEqual(result["mean_reduction_ha"], 0.375)
+        self.assertAlmostEqual(result["mean_ppo_minus_baseline_ha"], -0.375)
+        self.assertTrue(result["all_zero_rejected_orders"])
+
+    def test_missing_checkpoint_raises_file_not_found(self):
+        with self.assertRaises(FileNotFoundError):
+            run_reserved_evaluation(Path("non_existent_checkpoint.pt"))
+
+    @unittest.skipUnless(HAS_TORCH, "PyTorch is required")
+    def test_reserved_evaluation_evaluates_only_reserved_split(self):
+        evaluated_scenarios = []
+
+        def mock_rollout(model, scenario, device=None):
+            evaluated_scenarios.append(scenario["scenario_id"])
+            return {
+                "affected_area_ha": 5.0,
+                "drops": [],
+                "aircraft_metrics": {"water_dropped_l": 0.0, "flight_s": 0.0, "rejected_orders": 0},
+            }
+
+        def mock_baseline(scenario, policy, policy_seed=None):
+            return {
+                "affected_area_ha": 6.0,
+                "drops": [],
+                "aircraft_metrics": {"water_dropped_l": 0.0, "flight_s": 0.0, "rejected_orders": 0},
+            }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ckpt_path = Path(tmpdir) / "dummy.pt"
+            torch.save(
+                {
+                    "schema_version": "dummy",
+                    "model_state_dict": {},
+                    "model_config": {"grid_rows": 11, "grid_cols": 11},
+                },
+                ckpt_path,
+            )
+
+            with patch("nightjar.evaluate_reserved.SpatialActorCritic") as mock_sac, \
+                 patch("nightjar.evaluate_reserved._rollout_ppo_with_replay", side_effect=mock_rollout), \
+                 patch("nightjar.evaluate_reserved.run_integrated", side_effect=mock_baseline):
+                mock_model = MagicMock()
+                mock_sac.return_value = mock_model
+
+                report = run_reserved_evaluation(ckpt_path)
+
+            self.assertEqual(len(evaluated_scenarios), 8)
+            self.assertTrue(all(sid.startswith("discrimination-reserved-") for sid in evaluated_scenarios))
+            self.assertEqual(report["split"], "reserved")
+            self.assertIn("predeclared_criteria", report)
+
+
+if __name__ == "__main__":
+    unittest.main()

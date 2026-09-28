@@ -80,6 +80,7 @@ python3 -m nightjar.integrated_benchmark examples/synthetic_integrated.json --ou
 python3 -m nightjar.scenario_family --output-dir runs/scenario-family
 python3 -m nightjar.challenge_family --output-dir runs/challenge-family
 python3 -m nightjar.discrimination_family --output-dir runs/discrimination-family
+python3 -m nightjar.viewer runs/integrated-heuristic.json --output runs/viewer.html
 python3 -m unittest discover -s tests -v
 ```
 
@@ -95,7 +96,7 @@ The example mixes GR1 (101), SH1 (141), and nonburnable (0) cells. It is a synth
 
 The same unit suite runs in GitHub Actions for pushes and pull requests. Tests that need a downloaded external source skip when the audited file is absent.
 
-`runs/` is ignored by Git. Omit `--output` to print a result to standard output for commands that accept it. The aircraft example exercises movement, a full-water drop, return, and refill. The fire examples produce first-arrival times and grid-cell affected area without intervention. The resolution command compares the FM1 assumptions on one physical domain at several cell sizes. Scenario contracts and limitations are in [ARCHITECTURE.md](docs/ARCHITECTURE.md) and [PHYSICAL_MODEL_V0.md](docs/PHYSICAL_MODEL_V0.md). A local browser replay and analysis view remains optional; scientific artifacts are usable without it.
+`runs/` is ignored by Git. Omit `--output` to print a result to standard output for commands that accept it. The aircraft example exercises movement, a full-water drop, return, and refill. The fire examples produce first-arrival times and grid-cell affected area without intervention. The resolution command compares the FM1 assumptions on one physical domain at several cell sizes. Scenario contracts and limitations are in [ARCHITECTURE.md](docs/ARCHITECTURE.md) and [PHYSICAL_MODEL_V0.md](docs/PHYSICAL_MODEL_V0.md). The local browser replay tool (`nightjar.viewer`) generates a self-contained offline HTML5 viewer to audit fire arrival, delivered observations, flight path, and drop decisions interactively or compare multiple policies side-by-side.
 
 The integrated example compares no intervention, a seeded valid random choice, and a deterministic downwind heuristic over the same synthetic scenario. At its 600 s horizon, the example gives 2.00 ha without intervention, 0.75 ha with the heuristic, and 1.30 ha mean over ten random-policy seeds. These figures depend on the assumed permanent one-cell water barrier and do not estimate real suppression effectiveness; see [EVALUATION.md](docs/EVALUATION.md).
 
@@ -136,7 +137,15 @@ The command writes no artifact unless `--output` is supplied, and never opens va
 python3 -m nightjar.ppo --select --output runs/ppo-selection.json --checkpoint runs/ppo-selection.pt --candidates 2 --updates 1 --episodes-per-update 1
 ```
 
-Selection minimizes mean validation affected area, breaking exact ties by seed and candidate index; reserved scenarios are never evaluated. Each validation case records PPO, `heuristic`, and `containment_heuristic` metrics matched by `scenario_id`, with paired PPO-minus-baseline means, counts, wins/losses, and rejected-order criteria for the selected candidate. The completed 16x8 five-seed run selected a validation mean of 8.625 ha, a 0.53125 ha reduction versus the heuristic. Because validation was reused after 8x8, this is adaptive exploratory evidence only; the reserved split remains unopened and the results make no physical claims. The `nightjar.model` module provides observation tensorization (9 spatial raster channels and 10 vector features, including public normalized elevation and slope magnitude), discrete action mapping ($2 + H \times W$), and a hybrid CNN+MLP `SpatialActorCritic` with invalid-action masking:
+Selection minimizes mean validation affected area, breaking exact ties by seed and candidate index; reserved scenarios are never evaluated. Each validation case records PPO, `heuristic`, and `containment_heuristic` metrics matched by `scenario_id`, with paired PPO-minus-baseline means, counts, wins/losses, and rejected-order criteria for the selected candidate. The completed 16x8 five-seed run selected a validation mean of 8.625 ha, a 0.53125 ha reduction versus the heuristic.
+
+To evaluate a selected checkpoint strictly once against all eight reserved scenarios and baselines under the predeclared protocol:
+
+```sh
+python3 -m nightjar.evaluate_reserved --checkpoint runs/ppo-matched-5seeds-16x8.pt --output runs/reserved-evaluation/report.json
+```
+
+On the held-out reserved split, the selected policy achieved zero rejected orders and improved over valid random choice (`6.719 ha` vs `7.013 ha`, 6 wins), but failed to surpass transparent heuristics (`6.531 ha` greedy, `6.281 ha` containment); see [EVALUATION.md](docs/EVALUATION.md). The `nightjar.model` module provides observation tensorization (9 spatial raster channels and 10 vector features, including public normalized elevation and slope magnitude), discrete action mapping ($2 + H \times W$), and a hybrid CNN+MLP `SpatialActorCritic` with invalid-action masking:
 
 ```python
 from nightjar.model import ActionMapper, ObservationTensorizer, SpatialActorCritic
