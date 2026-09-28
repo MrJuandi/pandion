@@ -34,3 +34,4 @@ Dataset inclusion requires temporal alignment, provenance, and licensing checks 
 
 - [Gould, Cruz, and Sullivan (2024), The 1986 Annaburroo experimental grassland fires: data](https://connectsci.au/wf/article/33/5/WF23100/22126/The-1986-Annaburroo-experimental-grassland-fires): plot variables, experimental context, definition of the width-adjusted steady-state spread rate, and burn-period time and cumulative head-distance fields.
 - [CSIRO Data Access Portal, Annaburroo collection csiro:58746](https://data.csiro.au/collection/csiro:58746): collection version 1 and downloadable data. See [the source audit and diagnostic](VALIDATION_ANNABURROO.md).
+- [Cheney, Gould, and Catchpole (1998), Prediction of Fire Spread in Grasslands](https://doi.org/10.1071/WF9980001): candidate grassland rate model with 10 m wind, dead-fuel moisture, curing, and pasture type; developed partly from Annaburroo experiments, so those fires are not an independent test set for it.
