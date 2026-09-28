@@ -1,6 +1,6 @@
 # Annaburroo grass-fire external diagnostic
 
-**Status, 2026-09-27:** a no-fit diagnostic of the fixed Anderson FM1 head-spread calculation, **not** validation of Spanish incident spread, grid geometry, or suppression response.
+**Status, 2026-09-28:** a no-fit out-of-domain diagnostic of fixed Anderson FM1 on different Australian grass fuels, **not** a validation or falsification of Rothermel, the FM1 parameter set in matching FM1 fuel, Spanish incident spread, grid geometry, or suppression response.
 
 ## Source and reproduction
 
@@ -29,7 +29,7 @@ Use every line-ignition plot average with numeric `MidFlwind.ms`, numeric `DFMC.
 | ER fuel type MAE, n=70 | 0.5068 m/s |
 | TH fuel type MAE, n=50 | 0.5538 m/s |
 
-These errors are substantial relative to the mean observed rate. They are diagnostic of transferring *fixed FM1* to these Australian grass plots, which vary in grass species, load, height, curing, treatment, and ignition geometry. Their plot averages are from one experiment and are not independent geographic wildfires. The comparison assumes level ground because plot slopes are not supplied in the selected table; it does not estimate measurement uncertainty. Thus it cannot establish fitness for a Spanish forest fire, an aircraft-drop effect, or a policy-training environment. A later calibrated fuel model must use separate training and test incidents and preserve these unfitted results as a reference.
+These errors describe transferring *fixed FM1* to Australian grass plots with different species, load, height, curing, treatment, and ignition geometry. The plots are **not FM1 fuel beds under matched conditions**. Their plot averages are from one experiment and are not independent geographic wildfires. The comparison assumes level ground because plot slopes are not supplied in the selected table; it does not estimate measurement uncertainty. It therefore cannot identify an error in the Rothermel equation or establish whether FM1 works for matching FM1 fuel. Nor can it establish fitness for a Spanish forest fire, an aircraft-drop effect, or a policy-training environment. A later fuel-matched comparison must use separate training and test incidents and preserve these unfitted results as a reference.
 
 ## Temporal head-distance diagnostic, 2026-09-28
 
@@ -54,7 +54,7 @@ The script checks both table hashes listed above and writes each fire's timed ob
 | ER final-distance MAE, 70 fires | 72.14 m |
 | TH final-distance MAE, 50 fires | 76.15 m |
 
-Four plots (`B032`, `B033`, `B041`, `B044`) report 12.1% dead-fuel moisture, just above the fixed FM1 extinction threshold, yet their observed heads traveled 93–116.7 m. They remain in the error calculation rather than being removed as difficult cases. Period rate and cumulative distance are related measurements of the same fronts, not two independent validations. The same 120 fires were used in the plot-average rate diagnostic above; this is a second endpoint on the **same data**, not an independent held-out validation. No uncertainty bounds are supplied for distances or wind conversion. The archived fire-isocrone maps are JPEG images with hand-drawn contours; an A023 map was inspected, but no pixel-to-ground transformation or repeatable contour extraction is established. This check therefore scores the tabulated **one-dimensional head position**, not full perimeters, area, or the 8-neighbour grid solver. Fixed FM1 fails this transfer check and cannot support the first result-bearing training run.
+Four plots (`B032`, `B033`, `B041`, `B044`) report 12.1% dead-fuel moisture, just above the fixed FM1 extinction threshold, yet their observed heads traveled 93–116.7 m. They remain in the error calculation rather than being removed as difficult cases. Their spread does not refute the FM1 threshold because the experimental grass is not the FM1 fuel bed. Period rate and cumulative distance are related measurements of the same fronts, not two independent validations. The same 120 fires were used in the plot-average rate diagnostic above; this is a second endpoint on the **same data**, not an independent held-out validation. No uncertainty bounds are supplied for distances or wind conversion. The archived fire-isocrone maps are JPEG images with hand-drawn contours; an A023 map was inspected, but no pixel-to-ground transformation or repeatable contour extraction is established. This check therefore scores the tabulated **one-dimensional head position**, not full perimeters, area, or the 8-neighbour grid solver. Neither this comparison nor its variants can qualify or disqualify the current simulator for result-bearing training; fuel-matched validation remains absent.
 
 ## Diagnosis and next model comparison
 
@@ -83,4 +83,13 @@ python3 -m nightjar.annaburroo_rothermel_sensitivity --output runs/annaburroo-ro
 | Measured bed, all dead | 60 s | 76.04 m | −23.78 m |
 | Measured bed, all dead | 120 s | 81.18 m | −52.07 m |
 
-Simply replacing the fixed fuel-bed dimensions does **not** resolve the error; it worsens final-distance MAE under this one-dead-class approximation. The illustrative growth curves reduce FM1 error, but choosing 60 s because it scores best here would fit the evaluation data. These results only prioritize the next work: source a grass ignition-growth relation, represent live/dead curing and moisture in a multi-class fuel bed, and evaluate on independent fires. They do not identify a valid parameter, validate grid spread, or change the simulator used for aircraft comparisons.
+Across all 120 fires, replacing fixed fuel-bed dimensions worsens final-distance MAE under the all-dead approximation. The illustrative growth curves reduce error on these same fires, but choosing 60 s because it scores best here would fit the evaluation data. These results do not identify a valid growth parameter, validate grid spread, or change the simulator used for aircraft comparisons.
+
+The aggregate hides an important fuel-condition split. The source reports `Cure.%` as a **visual estimate**; the [article](https://connectsci.au/wf/article/33/5/WF23100/22126/The-1986-Annaburroo-experimental-grassland-fires) says green growth under taller cured grass was judged to have little effect, but this is not a measured live-fuel moisture or mass. Stratifying the same no-growth comparison by reported curing gives:
+
+| Reported curing | Fires | FM1 final MAE | Measured bed, all-dead final MAE |
+|---|---:|---:|---:|
+| 100% | 73 | 70.85 m | 56.74 m |
+| Below 100% | 47 | 78.41 m | 144.97 m |
+
+Thus measured bed properties help in the **fully cured subset**; the poor aggregate result is driven by the partly cured subset under the all-dead assumption. This is an exploratory subgroup comparison on the same fires, not a validation of the measured-bed implementation. A practical next model is to use measured load, height, and SAV for fully cured fuel and a [dynamic live/dead herbaceous model](https://doi.org/10.2737/RMRS-GTR-153) for partly cured fuel. That published load-transfer method requires live herbaceous moisture, which these Annaburroo tables do not measure. Visual curing can define a sensitivity range but cannot supply a validated moisture value. The combined model must be checked on separate fires before replacing the simulator default.

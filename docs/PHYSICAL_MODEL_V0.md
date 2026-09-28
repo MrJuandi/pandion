@@ -26,7 +26,7 @@ The seven-case follow-up (`python3 -m nightjar.sensitivity --varied`, 2026-09-27
 
 The [Annaburroo external diagnostics](VALIDATION_ANNABURROO.md) now test the unchanged FM1 head rate and a separate rate-times-time head position against Australian grass experiments. The temporal check finds 73.81 m mean absolute final-distance error across 120 fires and four observed fires above FM1's extinction moisture. These are limitations of this fuel-model transfer; the temporal test does not exercise the grid or constitute a held-out Spanish incident validation.
 
-A generalized one-class Rothermel calculation has also been checked against the FM1 constants and used in an [Annaburroo sensitivity comparison](VALIDATION_ANNABURROO.md). Substituting measured grass load, height and SAV while treating all fuel as dead worsens the immediate-speed final-distance MAE to 91.30 m. Illustrative ignition-growth curves reduce the FM1 error, but their timescales are not validated and are not used by the grid simulator.
+A generalized one-class Rothermel calculation has also been checked against the FM1 constants and used in an [Annaburroo sensitivity comparison](VALIDATION_ANNABURROO.md). Substituting measured grass load, height and SAV improves the immediate-speed error in the 73 fully cured plots but worsens it sharply in 47 partly cured plots when all fuel is treated as dead. Illustrative ignition-growth curves reduce error on the same fires, but their timescales are not validated and are not used by the grid simulator.
 
 ## First aircraft: CL-415
 

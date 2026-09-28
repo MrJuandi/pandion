@@ -75,14 +75,24 @@ def compare(plot_table: Path, period_table: Path) -> dict:
                 period_errors.extend(growth_distance(rate, p["time_since_ignition_s"], tau_s)
                                      - p["observed_head_distance_m"] for p in fire["periods"])
                 rows.append({"fire_id": fire["fire_id"], "predicted_rate_m_s": rate,
+                             "curing_percent": float(plots[fire["fire_id"]]["Cure.%"]),
                              "observed_final_distance_m": final["observed_head_distance_m"],
                              "predicted_final_distance_m": predicted, "final_error_m": error})
+            by_curing = {}
+            for group, predicate in (("fully_cured_100_percent", lambda row: row["curing_percent"] == 100),
+                                     ("partly_cured_below_100_percent", lambda row: row["curing_percent"] < 100)):
+                group_errors = [row["final_error_m"] for row in rows if predicate(row)]
+                if group_errors:
+                    by_curing[group] = {"fires": len(group_errors),
+                                        "final_distance_mae_m": mean(map(abs, group_errors)),
+                                        "final_distance_bias_m": mean(group_errors)}
             variants[f"{fuel_bed}_tau_{tau_s}s"] = {
                 "fuel_bed": fuel_bed, "tau_s": tau_s, "fires": len(rows),
                 "final_distance_mae_m": mean(map(abs, errors)),
                 "final_distance_median_absolute_error_m": median(map(abs, errors)),
                 "final_distance_bias_m": mean(errors),
                 "period_point_mae_m": mean(map(abs, period_errors)),
+                "by_curing": by_curing,
                 "per_fire": rows,
             }
     return {"schema_version": "annaburroo-rothermel-sensitivity-0.1",
