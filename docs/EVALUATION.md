@@ -48,14 +48,14 @@ The linear scorer tied the heuristic in three cases and improved one by a single
 
 ### Multi-foci decision discrimination family (2026-09-28)
 
-`python3 -m nightjar.discrimination_family --output-dir runs/discrimination-family` generates 24 synthetic scenarios under schema `nightjar-discrimination-family-0.1` partitioned into strictly disjoint splits: eight development (`discrimination-dev-00` to `07`, seeds `500000–500007`), eight validation (`discrimination-val-00` to `07`, seeds `600000–600007`), and eight reserved (`discrimination-reserved-00` to `07`, seeds `700000–700007`).
+`python3 -m nightjar.discrimination_family --output-dir runs/discrimination-family` generates 24 synthetic scenarios under schema `nightjar-discrimination-family-0.1` partitioned into strictly disjoint splits: eight development (`discrimination-development-00` to `07`, seeds `500000–500007`), eight validation (`discrimination-validation-00` to `07`, seeds `600000–600007`), and eight reserved (`discrimination-reserved-00` to `07`, seeds `700000–700007`).
 
 The family addresses the floor effects and forced single-front convergence observed in earlier cases:
 1. **Multi-foci ignitions:** Each scenario features two distinct ignitions placed in separate quadrants (Manhattan distance $\ge 4$ cells), creating a real spatial dispatch dilemma.
 2. **Asymmetric transit and water refill:** Water refill sources are positioned on boundaries or corners rather than the center (`[0, 250]`, `[500, 250]`, `[250, 0]`, `[250, 500]`), introducing cycle-time asymmetry between fronts.
-3. **Guaranteed non-trivial spread:** Immediate ignition neighborhoods are protected against nonburnable cells, ensuring unmitigated burned area exceeds 4.0 ha (16 cells) across all scenarios (mean 10.44 ha).
+3. **Observed non-trivial development spread:** Immediate ignition neighborhoods are protected against nonburnable cells. All eight evaluated development cases exceeded 4.0 ha without intervention (mean 10.44 ha). This construction alone does not guarantee that threshold for validation or reserved cases, whose outcomes remain unopened.
 4. **Stronger informed reference:** Introduces `containment_heuristic`, which balances directional spread, downstream unburned fuel exposure, multi-burning neighbor bottlenecks, and cycle transit distance.
-5. **Strict split separation:** Only the development split is evaluated and reported (104 full replays: `no_intervention`, `heuristic`, `containment_heuristic`, and ten random-choice seeds per scenario). Validation and reserved splits remain strictly unopened and unexecuted.
+5. **Strict split separation:** Only the development split is evaluated and reported (104 full replays: `no_intervention`, `heuristic`, `containment_heuristic`, and ten random-choice seeds per scenario). Validation and reserved outcomes remain unopened and unexecuted; their scenario specifications and hashes are written to the manifest.
 
 | Development case | No intervention | Downwind heuristic | Containment heuristic | Random mean, ten choice seeds |
 |---|---:|---:|---:|---:|
@@ -82,7 +82,7 @@ To prevent post-hoc metric selection or claims based on marginal discretization 
 6. **One-time reserved protocol:** The eight reserved scenarios (`discrimination-reserved-00` to `07`) must remain unopened during model search and hyperparameter tuning, and may be run strictly once on the final selected checkpoint.
 
 
-The current synthetic aircraft episode reports flight seconds, water dropped in litres, and rejected-order count for accounting checks. It has no fire-outcome metric, controller comparison, or benchmark result; these accounting quantities are not the endpoints below.
+The standalone synthetic aircraft episode reports flight seconds, water dropped in litres, and rejected-order count for accounting checks. The integrated synthetic episode adds affected area and controller comparisons; those simulator-conditional results do not establish physical fire outcomes.
 
 The separate synthetic fire episode reports the number of grid cells first reached by the horizon multiplied by cell area. This is an implementation diagnostic, not the predeclared primary endpoint for controller comparison; it uses an unsourced rate model and has no intervention or validation data.
 
