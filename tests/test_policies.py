@@ -80,6 +80,39 @@ class PolicyTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             choose_order("oracle", observation())
 
+    def test_containment_heuristic_selects_valid_candidate_and_is_deterministic(self):
+        obs = observation(position=(20.0, 0.0), wind=(1.0, 0.0))
+        order1 = choose_order("containment_heuristic", obs)
+        order2 = choose_order("containment_heuristic", obs)
+        self.assertEqual(order1, order2)
+        self.assertEqual(order1["type"], "DROP")
+        self.assertIn(order1["target_m"], [[20.0, 0.0], [10.0, 10.0]])
+
+    def test_containment_heuristic_prioritizes_bottleneck(self):
+        # Grid 3x3 where cell (0, 1) and (1, 0) are burning.
+        # Set (1, 1) to NONE, so (0, 0) is the unique candidate touching both (2 burning neighbors).
+        # Candidates (0, 2) and (2, 0) touch only 1 burning neighbor.
+        cells = [
+            [dict(fire_detected=False), dict(fire_detected=True), dict(fire_detected=False)],
+            [dict(fire_detected=True), dict(fire_detected=False), dict(fire_detected=False)],
+            [dict(fire_detected=False), dict(fire_detected=False), dict(fire_detected=False)],
+        ]
+        obs = observation(cells=cells, position=(0.0, 0.0), wind=(0.0, 0.0))
+        obs["fuel_model"][1][1] = "NONE"
+        order = choose_order("containment_heuristic", obs)
+        # Candidate (0, 0) has coordinate x=0, y=0.
+        self.assertEqual(order["target_m"], [0.0, 0.0])
+
+    def test_containment_heuristic_does_not_read_latent_state(self):
+        first = observation()
+        second = observation()
+        first["latent_state"] = {"secret": 123}
+        second["latent_state"] = {"secret": 456}
+        self.assertEqual(
+            choose_order("containment_heuristic", first),
+            choose_order("containment_heuristic", second),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
