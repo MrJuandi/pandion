@@ -59,9 +59,15 @@ class EvaluateReservedTests(unittest.TestCase):
         self.assertAlmostEqual(result["mean_ppo_minus_baseline_ha"], -0.375)
         self.assertTrue(result["all_zero_rejected_orders"])
 
+    @unittest.skipUnless(HAS_TORCH, "PyTorch is required")
     def test_missing_checkpoint_raises_file_not_found(self):
         with self.assertRaises(FileNotFoundError):
             run_reserved_evaluation(Path("non_existent_checkpoint.pt"))
+
+    def test_missing_torch_raises_import_error(self):
+        if not HAS_TORCH:
+            with self.assertRaises(ImportError):
+                run_reserved_evaluation(Path("non_existent_checkpoint.pt"))
 
     @unittest.skipUnless(HAS_TORCH, "PyTorch is required")
     def test_reserved_evaluation_evaluates_only_reserved_split(self):
