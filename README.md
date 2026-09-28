@@ -101,9 +101,10 @@ The independent grass-rate diagnostic requires `curl` and retrieves two small ta
 ```sh
 python3 -m nightjar.annaburroo --output runs/annaburroo-source.json
 python3 -m nightjar.annaburroo_compare --output runs/annaburroo-fm1-diagnostic.json
+python3 -m nightjar.annaburroo_temporal --output runs/annaburroo-temporal-fm1.json
 ```
 
-Its 120 eligible plots yield 0.5264 m/s mean absolute error for unchanged FM1; scope and exclusions are in [VALIDATION_ANNABURROO.md](docs/VALIDATION_ANNABURROO.md). This does not close the training gate.
+Its 120 eligible plots yield 0.5264 m/s mean absolute head-rate error for unchanged FM1. A second, no-fit comparison using 576 timed head-distance observations from the same plots finds 73.81 m mean absolute error in final head position per fire. Scope and exclusions are in [VALIDATION_ANNABURROO.md](docs/VALIDATION_ANNABURROO.md). These are grassland transfer diagnostics on the same experiment, not a validation of Spanish incidents or grid perimeters; the training gate remains open.
 
 ## Scope and limitations
 

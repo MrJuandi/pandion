@@ -4,7 +4,7 @@
 
 ## Source and reproduction
 
-The [CSIRO Annaburroo collection](https://data.csiro.au/collection/csiro:58746), collection version 1, file ID `64873323`, contains the [1986 experimental grassland fire data described by Cruz et al. (2024)](https://connectsci.au/wf/article/33/5/WF23100/22126/The-1986-Annaburroo-experimental-grassland-fires). The collection's downloadable archive is 593,231,549 bytes and marked CC BY 4.0. `nightjar.annaburroo` retrieves only the two CSV members by HTTP byte range; it requires `curl`. Raw tables and generated reports remain in ignored `data/raw/` and `runs/`.
+The [CSIRO Annaburroo collection](https://data.csiro.au/collection/csiro:58746), collection version 1, file ID `64873323`, contains the [1986 experimental grassland fire data described by Gould et al. (2024)](https://connectsci.au/wf/article/33/5/WF23100/22126/The-1986-Annaburroo-experimental-grassland-fires). The collection's downloadable archive is 593,231,549 bytes and marked CC BY 4.0. `nightjar.annaburroo` retrieves only the two CSV members by HTTP byte range; it requires `curl`. Raw tables and generated reports remain in ignored `data/raw/` and `runs/`.
 
 ```sh
 python3 -m nightjar.annaburroo --output runs/annaburroo-source.json
@@ -30,3 +30,28 @@ Use every line-ignition plot average with numeric `MidFlwind.ms`, numeric `DFMC.
 | TH fuel type MAE, n=50 | 0.5538 m/s |
 
 These errors are substantial relative to the mean observed rate. They are diagnostic of transferring *fixed FM1* to these Australian grass plots, which vary in grass species, load, height, curing, treatment, and ignition geometry. Their plot averages are from one experiment and are not independent geographic wildfires. The comparison assumes level ground because plot slopes are not supplied in the selected table; it does not estimate measurement uncertainty. Thus it cannot establish fitness for a Spanish forest fire, an aircraft-drop effect, or a policy-training environment. A later calibrated fuel model must use separate training and test incidents and preserve these unfitted results as a reference.
+
+## Temporal head-distance diagnostic, 2026-09-28
+
+The [source article's variable definitions](https://connectsci.au/wf/article/33/5/WF23100/22126/The-1986-Annaburroo-experimental-grassland-fires) identify `TimeSinceIgn` as the seconds since ignition, `CumDist.m` as observed head-fire travel from ignition at each mapped isochrone, and `ROS.ms` as period forward spread rate. The burn-period table has 699 rows. This diagnostic joins those rows to the plot-average table by `FireID`, then uses every record with numeric plot-average `MidFlwind.ms` and `DFMC.%`, positive elapsed time, and nonnegative head distance and period rate. It uses the unchanged FM1 flat-ground head rate times elapsed time, with no fitted speed, initial offset, or acceleration, and compares the same head rate with each period's `ROS.ms`. FM1 rate is set to zero at or above its 12% extinction moisture. The plot-average midflame wind is a **derived** quantity based on measured 2 m wind and a wind profile; it is held constant across each fire here. The real burn-period wind, grass structure, curing, direction changes, and line-ignition acceleration are not reconstructed.
+
+```sh
+python3 -m nightjar.annaburroo --output runs/annaburroo-source.json
+python3 -m nightjar.annaburroo_temporal --output runs/annaburroo-temporal-fm1.json
+```
+
+The script checks both table hashes listed above and writes each fire's timed observed and predicted distance to ignored `runs/`. Its 120 eligible fire plots contribute 576 period observations. Another 123 period rows have no matching plot-average record and are excluded because the chosen midflame-wind input is unavailable: 96 have zero ignition-line length (point ignitions), while 27 report a nonzero line length. There is no selection by prediction error or outcome. The 576 observations are repeated measurements within 120 fires and are **not** 576 independent cases.
+
+| Statistic | Result |
+|---|---:|
+| Mean observed final head distance | 124.27 m |
+| Mean predicted final head distance | 162.52 m |
+| Final-distance mean absolute error across 120 fires | 73.81 m |
+| Final-distance median absolute error | 51.59 m |
+| Signed final-distance bias (prediction minus observation) | +38.25 m |
+| Period-point mean absolute error (descriptive only) | 51.81 m |
+| Mean of per-fire period-rate MAE | 0.610 m/s |
+| ER final-distance MAE, 70 fires | 72.14 m |
+| TH final-distance MAE, 50 fires | 76.15 m |
+
+Four plots (`B032`, `B033`, `B041`, `B044`) report 12.1% dead-fuel moisture, just above the fixed FM1 extinction threshold, yet their observed heads traveled 93–116.7 m. They remain in the error calculation rather than being removed as difficult cases. Period rate and cumulative distance are related measurements of the same fronts, not two independent validations. The same 120 fires were used in the plot-average rate diagnostic above; this is a second endpoint on the **same data**, not an independent held-out validation. No uncertainty bounds are supplied for distances or wind conversion. The archived fire-isocrone maps are JPEG images with hand-drawn contours; an A023 map was inspected, but no pixel-to-ground transformation or repeatable contour extraction is established. This check therefore scores the tabulated **one-dimensional head position**, not full perimeters, area, or the 8-neighbour grid solver. Fixed FM1 fails this transfer check and cannot support the first result-bearing training run.

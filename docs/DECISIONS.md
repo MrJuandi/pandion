@@ -21,6 +21,7 @@
 | D-15 | Introduce explicit observation capture, delivery, coverage, and age before a controller interface. | The synthetic schedule exposes information leaks early while making no claim about real sensor accuracy. |
 | D-16 | Preserve an unfitted Anderson FM1 comparison to CSIRO Annaburroo grass-plot rates as an external diagnostic. | It tests model transfer without selecting parameters on evaluation data. The measured 0.5264 m/s mean absolute error and differences in fuel/ignition context preclude a validation claim. |
 | D-17 | Integrate the existing fire, aircraft, and observation components first with a permanent, centre-based 35 m water barrier in a synthetic example. | This explicit and reversible hypothesis checks event ordering, information flow, action execution, and comparative metrics. It is not a sourced deposition or suppression law. |
+| D-18 | Add an unfitted temporal head-distance check on all eligible Annaburroo burn periods before attempting perimeter reconstruction. | `CumDist.m` and `TimeSinceIgn` provide an auditable one-dimensional position endpoint. Hand-annotated isochrone JPEGs lack a documented pixel-to-ground transform; the check must not be presented as 2-D grid validation or as independent of D-16's plots. |
 
 ## Decisions requiring evidence or owner input before implementation/publication
 

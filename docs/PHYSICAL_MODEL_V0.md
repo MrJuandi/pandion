@@ -24,6 +24,8 @@ For the fixed homogeneous 600 s sensitivity case, affected area was 3.0, 2.0, 1.
 
 The seven-case follow-up (`python3 -m nightjar.sensitivity --varied`, 2026-09-27) changed the 25 m to 5 m affected-area estimate by between −3.94% and +19.05% of the 5 m estimate. The largest percentage difference was the calm case, where only a few cells burned by 600 s. Wind reversal produced mirrored areas; lower moisture increased spread. These cases expose grid dependence and do not establish a universal acceptable resolution. The source audit in [VALIDATION_EMSR578.md](VALIDATION_EMSR578.md) identifies observed perimeters but cannot validate this FM1 model with the currently available inputs.
 
+The [Annaburroo external diagnostics](VALIDATION_ANNABURROO.md) now test the unchanged FM1 head rate and a separate rate-times-time head position against Australian grass experiments. The temporal check finds 73.81 m mean absolute final-distance error across 120 fires and four observed fires above FM1's extinction moisture. These are limitations of this fuel-model transfer; the temporal test does not exercise the grid or constitute a held-out Spanish incident validation.
+
 ## First aircraft: CL-415
 
 Model one water-scooping CL-415. The figures below are from a Canadian government airtanker guide describing typical operating conditions; they are **indicated airspeeds**, not ground speeds or universal operating limits. The guide warns that its elicited operating figures may differ from manufacturer specifications. [McFayden et al., *Reference Guide to the Drop Effectiveness of Skimmer and Rotary Wing Airtankers* (2023), section 6.1](https://publications.gc.ca/collections/collection_2023/rncan-nrcan/Fo123-2-35-2023-eng.pdf).

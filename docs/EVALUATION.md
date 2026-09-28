@@ -12,6 +12,8 @@ A seven-case synthetic comparison found 25 m versus 5 m area differences from �
 
 The [Annaburroo fixed-FM1 external diagnostic](VALIDATION_ANNABURROO.md) has 0.5264 m/s mean absolute head-rate error across 120 eligible experimental plots. This is a physical-model transfer check, not a controller benchmark or a geographic test split.
 
+The same 120 fires also provide 576 timed head-distance and period-rate observations. A no-fit FM1 rate-times-time comparison has 73.81 m mean absolute **final-distance** error per fire, 51.59 m median absolute error, and +38.25 m signed bias. The mean of per-fire absolute period-rate errors is 0.610 m/s. The period points are clustered within fires; neither this diagnostic nor the prior plot-rate check validates 2-D perimeters. [Source, method and per-fire results](VALIDATION_ANNABURROO.md).
+
 The first **integrated synthetic smoke comparison** is reproducible with `python3 -m nightjar.integrated_benchmark examples/synthetic_integrated.json --output runs/integrated-comparison.json` (2026-09-28). All three policies use the same 11×11 FM1 grid, fixed wind, fire ignition, aircraft and survey schedule. The random policy varies only its choice seed (`0`–`9`); neither the fire nor aircraft executor draws randomness. The primary diagnostic is full-cell affected area at 600 s, not a predeclared real-data endpoint.
 
 | Policy | Affected area | Drops | Interpretation |
