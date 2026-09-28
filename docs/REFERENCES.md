@@ -9,6 +9,7 @@ This is a starting reading list, not a systematic review. Claims and implementat
 - [Anderson (1982), USDA Forest Service](https://doi.org/10.2737/INT-GTR-122): original 13 fire-behavior fuel models; FM1 short-grass parameters used in the first Rothermel subset.
 - [McFayden et al., *Reference Guide to the Drop Effectiveness of Skimmer and Rotary Wing Airtankers* (Canadian Forest Service, 2023)](https://publications.gc.ca/collections/collection_2023/rncan-nrcan/Fo123-2-35-2023-eng.pdf): CL-415 capacity, typical indicated airspeeds, drop conditions, footprint measurements, and simplified cycle timing; transfer to Nightjar conditions requires validation.
 - [Avincis CL-415 specification](https://www.avincis.com/wp-content/uploads/2024/11/A4-CL-415-Specifications-Flyer-Low-Res.pdf): operator specification of 6,137 L water-tank capacity.
+- The integrated example's 35 m permanent water barrier is an unsourced software-test assumption. None of the aircraft references above supports that footprint or effect.
 - [Copernicus EMSR578 activation](https://mapping.emergency.copernicus.eu/activations/EMSR578/): June 2022 Catalonia wildfire mapping with AOI01 delineation and monitoring products; the [CEMS data terms](https://mapping.emergency.copernicus.eu/terms-and-conditions/) govern use and attribution. Source audit and limitations are in [VALIDATION_EMSR578.md](VALIDATION_EMSR578.md).
 
 - [SimFire](https://github.com/mitrefireline/simfire) and [SimHarness](https://github.com/mitrefireline/simharness): open wildfire simulation and RL harness. Relevant for environment boundaries, mitigation actions, and baseline design.
@@ -28,7 +29,7 @@ This is a starting reading list, not a systematic review. Claims and implementat
 - [ECMWF ERA5 hourly reanalysis](https://www.ecmwf.int/en/forecasts/datasets/era5-hourly-data-single-levels-1940-present).
 
 Dataset inclusion requires temporal alignment, provenance, and licensing checks described in [DATA_AND_VALIDATION.md](DATA_AND_VALIDATION.md).
-# External grass-fire diagnostic
+## External grass-fire diagnostic
 
 - [Cruz et al. (2024), The 1986 Annaburroo experimental grassland fires: data](https://connectsci.au/wf/article/33/5/WF23100/22126/The-1986-Annaburroo-experimental-grassland-fires): plot variables, experimental context, and definition of the width-adjusted steady-state spread rate.
 - [CSIRO Data Access Portal, Annaburroo collection csiro:58746](https://data.csiro.au/collection/csiro:58746): collection version 1 and downloadable data. See [the source audit and diagnostic](VALIDATION_ANNABURROO.md).

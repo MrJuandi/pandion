@@ -37,6 +37,8 @@ The [Annaburroo diagnostic](VALIDATION_ANNABURROO.md) compares the unchanged FM1
 
 `examples/synthetic_observation_schedule.json` tests information timing and coverage on a synthetic arrival map. Its capture and delivery times are illustrative, not measurements of a real sensor. Tests confirm no change to the controller view from unobserved cells or undelivered reports. Real acquisition cadence, missed detections, and uncertainty distributions still need sourced definitions before training.
 
+`examples/synthetic_integrated.json` combines the FM1 grid, one aircraft, and a repeated full-grid survey. Every spatial input, aircraft speed, refill time, survey time, and `water_effect.radius_m: 35` is synthetic. The 35 m permanent barrier blocks future arrivals at cell centres but leaves already reached cells burning; it has no empirical water footprint, dose, or persistence basis. Its only legitimate use is an integration and evaluation smoke test. A sensitivity range for water effect, independent spread data, measured aircraft cycles, and observed drop response are still required before interpreting policy outcomes physically. The integrated replay records what the controller received, its orders, and the hidden outcome separately.
+
 Before policy training, test and document:
 
 - Spread direction and rate response to wind, slope, fuel, and moisture, with units and plausible parameter ranges from identified fire-behavior literature or data.

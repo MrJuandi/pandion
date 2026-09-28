@@ -20,6 +20,7 @@
 | D-14 | Audit Copernicus EMSR578 AOI01 as a candidate independent observation series without using it to calibrate or claim validation. | It supplies versioned, timed burned-area polygons, but its vegetation, interventions, and weather history are not represented by current FM1 simulations. |
 | D-15 | Introduce explicit observation capture, delivery, coverage, and age before a controller interface. | The synthetic schedule exposes information leaks early while making no claim about real sensor accuracy. |
 | D-16 | Preserve an unfitted Anderson FM1 comparison to CSIRO Annaburroo grass-plot rates as an external diagnostic. | It tests model transfer without selecting parameters on evaluation data. The measured 0.5264 m/s mean absolute error and differences in fuel/ignition context preclude a validation claim. |
+| D-17 | Integrate the existing fire, aircraft, and observation components first with a permanent, centre-based 35 m water barrier in a synthetic example. | This explicit and reversible hypothesis checks event ordering, information flow, action execution, and comparative metrics. It is not a sourced deposition or suppression law. |
 
 ## Decisions requiring evidence or owner input before implementation/publication
 

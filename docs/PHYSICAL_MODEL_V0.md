@@ -1,6 +1,6 @@
 # Initial physical-model specification
 
-**Status:** selected starting references, 2026-09-27. Synthetic aircraft and unmitigated fire episodes are implemented separately. A one-size dead-fuel Rothermel/Albini FM1 calculation is implemented; no water-effect model exists. Published component equations and aircraft figures do not validate Nightjar's incident predictions.
+**Status:** selected starting references, 2026-09-28. A one-size dead-fuel Rothermel/Albini FM1 calculation and a synthetic integrated episode exist. The episode's permanent water barrier is an unsourced test rule, not a validated water-effect model. Published component equations and aircraft figures do not validate Nightjar's incident predictions.
 
 ## Surface-fire spread
 
@@ -48,4 +48,4 @@ The Canadian guide also uses a **158 KIAS blended speed plus a 3.0-minute increm
 4. **Fire response:** do not equate litres dropped with hectares extinguished. A water-effect model needs a stated mechanism, persistence, and sensitivity range before policy comparisons.
 5. **Evaluation:** keep scenario, simulator, observation, action, and replay interfaces separate; compare unmitigated spread with independent observations before claims about suppression.
 
-The implemented aircraft slice is a **synthetic kinematics and accounting episode**: one CL-415-shaped resource travels between a target and a declared source, consumes time, transfers at most 6,137 L, and produces a deterministic replay. Its `50/55 m/s` ground speeds and `180 s` refill service time in the example scenario are deliberately synthetic test inputs, not converted CL-415 airspeeds or measured pickup timings. Waterbody eligibility and approach remain unmodeled. The FM1 spread episode is separate; water effectiveness and aircraft interaction remain to be specified and validated.
+The standalone aircraft slice is a **synthetic kinematics and accounting episode**: one CL-415-shaped resource travels between a target and a declared source, consumes time, transfers at most 6,137 L, and produces a deterministic replay. Its `50/55 m/s` ground speeds and `180 s` refill service time in that example are deliberately synthetic test inputs, not converted CL-415 airspeeds or measured pickup timings. Waterbody eligibility and approach remain unmodeled. The integrated example reuses this executor with a synthetic 60 s refill and the 35 m permanent cell-barrier rule described in [ARCHITECTURE.md](ARCHITECTURE.md). That rule is deliberately provisional; a sourced drop footprint, dose, persistence, and effect on burning fuel remain to be specified and validated.

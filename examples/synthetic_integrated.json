@@ -1,0 +1,557 @@
+{
+  "schema_version": "integrated-synthetic-0.1",
+  "scenario_id": "synthetic-integrated-fm1-01",
+  "seed": 42,
+  "provenance": "synthetic",
+  "crs": "LOCAL_METERS",
+  "fire": {
+    "schema_version": "rothermel-fm1-0.1",
+    "scenario_id": "synthetic-integrated-fm1-01",
+    "seed": 42,
+    "provenance": "synthetic",
+    "crs": "LOCAL_METERS",
+    "rows": 11,
+    "cols": 11,
+    "cell_size_m": 50,
+    "horizon_s": 600,
+    "fuel_model": [
+      [
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1"
+      ],
+      [
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1"
+      ],
+      [
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1"
+      ],
+      [
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1"
+      ],
+      [
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1"
+      ],
+      [
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1"
+      ],
+      [
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1"
+      ],
+      [
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1"
+      ],
+      [
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1"
+      ],
+      [
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1"
+      ],
+      [
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1",
+        "FM1"
+      ]
+    ],
+    "dead_fuel_moisture_fraction": [
+      [
+        0.06,
+        0.06,
+        0.06,
+        0.06,
+        0.06,
+        0.06,
+        0.06,
+        0.06,
+        0.06,
+        0.06,
+        0.06
+      ],
+      [
+        0.06,
+        0.06,
+        0.06,
+        0.06,
+        0.06,
+        0.06,
+        0.06,
+        0.06,
+        0.06,
+        0.06,
+        0.06
+      ],
+      [
+        0.06,
+        0.06,
+        0.06,
+        0.06,
+        0.06,
+        0.06,
+        0.06,
+        0.06,
+        0.06,
+        0.06,
+        0.06
+      ],
+      [
+        0.06,
+        0.06,
+        0.06,
+        0.06,
+        0.06,
+        0.06,
+        0.06,
+        0.06,
+        0.06,
+        0.06,
+        0.06
+      ],
+      [
+        0.06,
+        0.06,
+        0.06,
+        0.06,
+        0.06,
+        0.06,
+        0.06,
+        0.06,
+        0.06,
+        0.06,
+        0.06
+      ],
+      [
+        0.06,
+        0.06,
+        0.06,
+        0.06,
+        0.06,
+        0.06,
+        0.06,
+        0.06,
+        0.06,
+        0.06,
+        0.06
+      ],
+      [
+        0.06,
+        0.06,
+        0.06,
+        0.06,
+        0.06,
+        0.06,
+        0.06,
+        0.06,
+        0.06,
+        0.06,
+        0.06
+      ],
+      [
+        0.06,
+        0.06,
+        0.06,
+        0.06,
+        0.06,
+        0.06,
+        0.06,
+        0.06,
+        0.06,
+        0.06,
+        0.06
+      ],
+      [
+        0.06,
+        0.06,
+        0.06,
+        0.06,
+        0.06,
+        0.06,
+        0.06,
+        0.06,
+        0.06,
+        0.06,
+        0.06
+      ],
+      [
+        0.06,
+        0.06,
+        0.06,
+        0.06,
+        0.06,
+        0.06,
+        0.06,
+        0.06,
+        0.06,
+        0.06,
+        0.06
+      ],
+      [
+        0.06,
+        0.06,
+        0.06,
+        0.06,
+        0.06,
+        0.06,
+        0.06,
+        0.06,
+        0.06,
+        0.06,
+        0.06
+      ]
+    ],
+    "elevation_m": [
+      [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    ],
+    "midflame_wind_to_m_s": [
+      2,
+      0
+    ],
+    "ignitions": [
+      [
+        5,
+        5
+      ]
+    ]
+  },
+  "aircraft": {
+    "schema_version": "0.1",
+    "scenario_id": "synthetic-integrated-fm1-01",
+    "seed": 42,
+    "provenance": "synthetic",
+    "crs": "LOCAL_METERS",
+    "horizon_s": 600,
+    "decision_interval_s": 60,
+    "water_source_m": [
+      250,
+      250
+    ],
+    "aircraft": {
+      "initial_position_m": [
+        250,
+        250
+      ],
+      "initial_water_l": 6137,
+      "loaded_ground_speed_m_s": 50,
+      "empty_ground_speed_m_s": 55,
+      "refill_time_s": 60
+    }
+  },
+  "observation_schedule": [
+    {
+      "source_id": "synthetic-survey",
+      "observed_at_s": 0,
+      "available_at_s": 0,
+      "coverage": "all"
+    },
+    {
+      "source_id": "synthetic-survey",
+      "observed_at_s": 60,
+      "available_at_s": 90,
+      "coverage": "all"
+    },
+    {
+      "source_id": "synthetic-survey",
+      "observed_at_s": 120,
+      "available_at_s": 150,
+      "coverage": "all"
+    },
+    {
+      "source_id": "synthetic-survey",
+      "observed_at_s": 180,
+      "available_at_s": 210,
+      "coverage": "all"
+    },
+    {
+      "source_id": "synthetic-survey",
+      "observed_at_s": 240,
+      "available_at_s": 270,
+      "coverage": "all"
+    },
+    {
+      "source_id": "synthetic-survey",
+      "observed_at_s": 300,
+      "available_at_s": 330,
+      "coverage": "all"
+    },
+    {
+      "source_id": "synthetic-survey",
+      "observed_at_s": 360,
+      "available_at_s": 390,
+      "coverage": "all"
+    },
+    {
+      "source_id": "synthetic-survey",
+      "observed_at_s": 420,
+      "available_at_s": 450,
+      "coverage": "all"
+    },
+    {
+      "source_id": "synthetic-survey",
+      "observed_at_s": 480,
+      "available_at_s": 510,
+      "coverage": "all"
+    },
+    {
+      "source_id": "synthetic-survey",
+      "observed_at_s": 540,
+      "available_at_s": 570,
+      "coverage": "all"
+    },
+    {
+      "source_id": "synthetic-survey",
+      "observed_at_s": 600,
+      "available_at_s": 630,
+      "coverage": "all"
+    }
+  ],
+  "water_effect": {
+    "radius_m": 35
+  }
+}

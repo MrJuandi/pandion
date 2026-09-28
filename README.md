@@ -2,7 +2,7 @@
 
 Research project for learning and evaluating decisions in wildfire response. The long-term goal is a decision-making system that assigns missions to heterogeneous resources using the information available at the time of each decision. Development begins with one water-dropping aircraft, then two aircraft, before introducing other resource types.
 
-**Status:** early Stage 0. The repository contains separate deterministic episodes for one-aircraft movement/water accounting and unmitigated grid-fire arrival times. Fire options include a synthetic test rate and a limited Rothermel/Albini calculation for the published FM1 short-grass fuel model. The components are not connected; there is no water effectiveness, trained policy, benchmark result, or operational decision tool. No performance or real-world effectiveness is claimed.
+**Status:** early Stage 0. The repository contains deterministic aircraft and fire components plus a small synthetic integrated episode. Its full-load drop blocks not-yet-burning grid cells under a provisional, unsourced water rule. A three-policy comparison exercises information flow and accounting; it is not a physical validation, training result, or operational decision tool.
 
 ## Research question
 
@@ -74,12 +74,16 @@ python3 -m nightjar.fire_rothermel examples/fm1_fire.json --output runs/fm1-fire
 python3 -m nightjar.observation runs/fm1-fire-replay.json examples/synthetic_observation_schedule.json --time-s 400 --output runs/observation-400s.json
 python3 -m nightjar.sensitivity --output runs/fm1-resolution.json
 python3 -m nightjar.sensitivity --varied --output runs/fm1-varied-resolution.json
+python3 -m nightjar.integrated examples/synthetic_integrated.json --policy heuristic --output runs/integrated-heuristic.json
+python3 -m nightjar.integrated_benchmark examples/synthetic_integrated.json --output runs/integrated-comparison.json
 python3 -m unittest discover -s tests -v
 ```
 
 The same unit suite runs in GitHub Actions for pushes and pull requests. Tests that need a downloaded external source skip when the audited file is absent.
 
 `runs/` is ignored by Git. Omit `--output` to print a result to standard output. The aircraft example exercises movement, a full-water drop, return, and refill. The fire examples produce first-arrival times and grid-cell affected area without intervention. The resolution command compares the FM1 assumptions on one physical domain at several cell sizes. Scenario contracts and limitations are in [ARCHITECTURE.md](docs/ARCHITECTURE.md) and [PHYSICAL_MODEL_V0.md](docs/PHYSICAL_MODEL_V0.md). There is no training command yet. The first interface will be a local browser replay and analysis view if experiments show it is useful; scientific artifacts must remain usable without the interface.
+
+The integrated example compares no intervention, a seeded valid random choice, and a deterministic downwind heuristic over the same synthetic scenario. At its 600 s horizon, the example gives 2.00 ha without intervention, 0.75 ha with the heuristic, and 1.30 ha mean over ten random-policy seeds. These figures depend on the assumed permanent one-cell water barrier and do not estimate real suppression effectiveness; see [EVALUATION.md](docs/EVALUATION.md).
 
 The observation example reads the FM1 replay and a synthetic schedule of capture and delivery times. It exposes only delivered, covered cells. It is an information-flow test, not a real satellite sensor model.
 
