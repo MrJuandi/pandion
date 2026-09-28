@@ -103,6 +103,22 @@ class PolicyTests(unittest.TestCase):
         # Candidate (0, 0) has coordinate x=0, y=0.
         self.assertEqual(order["target_m"], [0.0, 0.0])
 
+    def test_containment_heuristic_uses_observed_refill_location(self):
+        obs = observation(position=(10.0, 10.0), wind=(0.0, 0.0))
+        obs["fuel_model"] = [["FM1"] * 3 for _ in range(3)]
+        obs["fire"]["cells"] = [
+            [dict(fire_detected=False), dict(fire_detected=True), dict(fire_detected=False)],
+            [dict(fire_detected=False)] * 3,
+            [dict(fire_detected=False)] * 3,
+        ]
+        obs["fuel_model"][1][1] = "NONE"
+        obs["water_source_m"] = [0.0, 0.0]
+        left = choose_order("containment_heuristic", obs)
+        obs["water_source_m"] = [20.0, 0.0]
+        right = choose_order("containment_heuristic", obs)
+        self.assertEqual(left["target_m"], [0.0, 0.0])
+        self.assertEqual(right["target_m"], [20.0, 0.0])
+
     def test_containment_heuristic_does_not_read_latent_state(self):
         first = observation()
         second = observation()

@@ -154,6 +154,7 @@ def run_integrated(
             "time_s": time_s, "fire": fire_view, "aircraft": deepcopy(aircraft_state),
             "fuel_model": deepcopy(fire["fuel_model"]), "midflame_wind_to_m_s": list(fire["wind"]),
             "cell_size_m": cell, "known_treated_cells": known_treated,
+            "water_source_m": list(aircraft["water_source_m"]),
         }
         candidates = candidate_cells(observation)
         if _stop_after_steps is not None and len(decisions) >= _stop_after_steps:
@@ -203,7 +204,7 @@ def run_integrated(
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("scenario", type=Path)
-    parser.add_argument("--policy", choices=("no_intervention", "random_valid", "heuristic"), required=True)
+    parser.add_argument("--policy", choices=("no_intervention", "random_valid", "heuristic", "containment_heuristic"), required=True)
     parser.add_argument("--policy-seed", type=int)
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
