@@ -13,14 +13,21 @@
 | D-07 | Keep execution dynamics separate from mission selection. | Allow one decision API to scale to additional resources. |
 | D-08 | Use a headless scientific core; decide interface packaging after replay needs are known. | Avoid coupling experiments to a UI. |
 | D-09 | Name the new project Nightjar. | Use a distinctive, memorable name that can cover the planned progression from one aircraft to multiple resources. |
+| D-10 | Use the Rothermel surface-fire equation as the first candidate spread calculation and a CL-415 as the first aircraft reference. | Both have primary technical sources; their use and limitations are specified in [PHYSICAL_MODEL_V0.md](PHYSICAL_MODEL_V0.md). This does not settle fuel models, numerical propagation, ground speed, or suppression effectiveness. |
+| D-11 | Start implementation with a synthetic, deterministic aircraft kinematics and water-accounting episode. | It tests time, mission state, and volume conservation without implying that the unsourced ground-speed and refill proxies are CL-415 performance data. |
+| D-12 | Use a separate synthetic grid-arrival fire episode to test spatial propagation before integrating the aircraft. | Its explicit base rates and exponential directional factors verify interface behavior but are not Rothermel or a physically calibrated fire model. |
+| D-13 | Implement the published one-size dead-fuel Rothermel/Albini equations first with Anderson FM1, then test grid sensitivity. | FM1 has a single dead fuel size and published parameters, allowing a narrow equation check before heterogeneous fuels; the grid coupling and transfer to real vegetation remain unvalidated. |
+| D-14 | Audit Copernicus EMSR578 AOI01 as a candidate independent observation series without using it to calibrate or claim validation. | It supplies versioned, timed burned-area polygons, but its vegetation, interventions, and weather history are not represented by current FM1 simulations. |
+| D-15 | Introduce explicit observation capture, delivery, coverage, and age before a controller interface. | The synthetic schedule exposes information leaks early while making no claim about real sensor accuracy. |
+| D-16 | Preserve an unfitted Anderson FM1 comparison to CSIRO Annaburroo grass-plot rates as an external diagnostic. | It tests model transfer without selecting parameters on evaluation data. The measured 0.5264 m/s mean absolute error and differences in fuel/ignition context preclude a validation claim. |
 
 ## Decisions requiring evidence or owner input before implementation/publication
 
 | ID | Question | How to resolve |
 |---|---|---|
-| O-01 | Which geographic pilot area and incidents? | Choose based on data coverage, independent validation availability, and redistribution terms. |
-| O-02 | Which aircraft class and published performance envelope? | Select a real class with sourced speed, load, flight and refill assumptions; define abstraction limits. |
-| O-03 | Which fire-spread model and spatial/time resolution? | Compare credible models and convergence/sensitivity before policy training. |
+| O-01 | Which geographic pilot area and incidents? | EMSR578 AOI01 is an audited candidate, not a settled pilot. Choose calibration and separate test incidents based on source coverage, fuel/weather reconstruction, independent validation availability, and redistribution terms. |
+| O-02 | How should the CL-415 reference figures become travel, pickup, and drop dynamics? | Specify airspeed-to-groundspeed assumptions, waterbody eligibility, timing, footprint, and effectiveness; validate against independent evidence. |
+| O-03 | Which additional fuel models and spatial/temporal propagation scheme should accompany FM1 Rothermel? | Compare numerical schemes and convergence across varied fuels, wind, and slopes; validate against independent incidents before policy training. |
 | O-04 | What is the first controller's exact decision interval and action granularity? | Match aircraft dynamics, drop scale, and realistically available observations. |
 | O-05 | Which data can be stored publicly? | Review each provider's terms and use manifests/scripts when redistribution is unsuitable. |
 | O-06 | Which license and citation details? | Owner selects the license and citation details before GitHub publication. |

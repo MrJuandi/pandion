@@ -1,6 +1,38 @@
 # System architecture and environment contract
 
-**Status:** proposed design, 2026-09-26. This document specifies boundaries for implementation; numeric parameters remain to be calibrated or sourced.
+**Status:** proposed system design with separate aircraft and unmitigated fire episodes implemented, 2026-09-27. The FM1 one-size Rothermel/Albini subset has a grid solver and a separate synthetic delayed-observation component. Real sensor behavior, water effects, integrated fire outcomes, and learned controllers remain unimplemented.
+
+The first surface-fire equation and CL-415 aircraft reference are documented in [PHYSICAL_MODEL_V0.md](PHYSICAL_MODEL_V0.md). FM1 grid coupling is implemented but not validated against incidents; suppression response remains open.
+
+### Implemented synthetic aircraft contract (`schema_version: "0.1"`)
+
+`python3 -m nightjar SCENARIO.json ORDERS.json [--output REPLAY.json]` runs one headless episode. The scenario requires `scenario_id`, integer `seed`, `provenance: "synthetic"`, `crs: "LOCAL_METERS"`, `horizon_s`, `decision_interval_s`, one `water_source_m: [x_m, y_m]`, and `aircraft` with `initial_position_m`, `initial_water_l`, `loaded_ground_speed_m_s`, `empty_ground_speed_m_s`, and `refill_time_s`. All durations and speeds are positive; positions are finite; initial water is between 0 and 6,137 L. See the executable example in `examples/`.
+
+`ORDERS.json` is a list indexed by decision interval. Each item is `{"type":"HOLD"}`, `{"type":"DROP","target_m":[x,y]}`, or `{"type":"RETURN_TO_REFILL"}`. Missing entries mean `HOLD`. A busy aircraft rejects new missions; `HOLD` lets an existing mission continue. `DROP` travels to the target and releases the entire current load on arrival. `RETURN_TO_REFILL` travels to the one declared source and fills to capacity after the declared service time. Movement is straight line at the scenario's **synthetic ground-speed proxies**; wind, acceleration, approach, airspace, waterbody suitability, partial drops, fuel, and fire are absent. A drop has no effect on any fire state.
+
+The replay contains decision-time observations (time, aircraft state, water-source coordinates), submitted orders, rejection reasons, timed execution events, final aircraft state, and flight time/water/rejection counts. It includes `replay_schema_version`, scenario ID and SHA-256 of the input JSON, seed, CRS, provenance, and units. There is no latent fire state in this component. The seed is recorded for the future stochastic environment; this executor makes no random draw. The aircraft state is considered directly observable in this synthetic slice; future sensor restrictions must be specified explicitly.
+
+### Implemented unmitigated synthetic fire (`schema_version: "fire-synthetic-0.1"`)
+
+`python3 -m nightjar.fire SCENARIO.json [--output REPLAY.json]` computes the first time fire reaches each cell centre on a local metre grid. Inputs are scenario ID, integer seed, synthetic provenance, local CRS, positive row/column counts, `cell_size_m`, `horizon_s`, nonnegative `base_ros_m_s` and finite `elevation_m` grids, `wind_to_m_s: [east, north]`, nonnegative `wind_coefficient_s_m` and `slope_coefficient`, and at least one burnable ignition cell `[row, col]`. Row numbers increase northward and column numbers eastward. A zero base rate is an impassable cell. The replay records arrival seconds (`null` for unreachable cells), affected area in hectares, and the scenario hash.
+
+For each directed horizontal, vertical, or diagonal edge, let `d` be centre-to-centre distance, `u` its unit direction, and `s` signed elevation rise divided by `d`. The synthetic directional multiplier is `exp(k_w * dot(wind_to_m_s, u) + k_s * s)`. Travel time is `d/(2*R_source*multiplier) + d/(2*R_target*multiplier)`. A diagonal cannot pass between blocked orthogonal neighbours. A shortest-path calculation gives first arrival. The exponent is limited to `[-20, 20]` to reject extreme synthetic inputs. An ignition starts at its cell centre at time zero. A cell counts as affected when its centre arrival is at or before the horizon; each counted cell contributes its full area. There is no combustion duration, fuel consumption, reignition, spotting, crown fire, physical time step, or aircraft interaction. The displayed area is grid dependent and is **not** a validated burned-area estimate.
+
+### FM1 Rothermel/Albini calculation (`schema_version: "rothermel-fm1-0.1"`)
+
+`python3 -m nightjar.fire_rothermel SCENARIO.json [--output REPLAY.json]` uses a local-metre grid and arrival-time solver. The scenario requires ID, integer seed, synthetic provenance, local CRS, positive rows/columns, cell size and horizon, `fuel_model` (`FM1` or `NONE` per cell), `dead_fuel_moisture_fraction` in `[0,1]`, `elevation_m`, `midflame_wind_to_m_s: [east,north]`, and ignition cells. FM1 cells at or above 0.12 dead-fuel moisture do not spread; `NONE` blocks travel. The replay records first arrivals, area counted by reached cell centres, units, provenance, seed, and scenario hash. Example: `examples/fm1_fire.json`.
+
+The local FM1 calculation implements the **one-size dead-fuel** equations in Andrews (2018), table 3, with the published FM1 parameters. Wind and slope factors form a head-spread vector; the section 6 ellipse yields rate in the edge direction. Each edge uses half its length at the source and destination rates. A shortest-path solver produces first arrivals. This edge coupling and the 8-neighbour discretization are Nightjar numerical choices. Elevation gradients use centered differences in the interior and one-sided differences at boundaries. Input wind is already at **midflame height**; no 10 m or 20 ft wind conversion is implied. There is no wind-speed cap, spotting, crown fire, fuel consumption, weather change, fire-atmosphere feedback, or suppression. This is a narrow published equation implementation, not a validated incident model.
+
+`python3 -m nightjar.sensitivity [--output RESULT.json]` holds a 1,000 m centre-to-centre domain, flat uniform FM1, 6% dead moisture, 2 m/s eastward midflame wind, one central ignition, and a 600 s horizon fixed while testing 100, 50, 25, 10, and 5 m cells. It reports affected area and successive percent changes. This tests one homogeneous configuration only; it does not certify a grid size for other fuels or topography.
+
+`python3 -m nightjar.sensitivity --varied` repeats 25, 10, and 5 m comparisons for seven uniform moisture, wind, and slope cases. It reports each scenario input hash and the coarse-to-fine area difference. This probes the numerical grid choice; it does not provide a time-varying spread model or incident calibration.
+
+### Synthetic observation timing (`synthetic-fire-observation-0.1`)
+
+`python3 -m nightjar.observation FIRE_REPLAY.json SCHEDULE.json --time-s T [--output VIEW.json]` consumes a precomputed true arrival-time map. Each scheduled report has `source_id`, `observed_at_s`, `available_at_s`, and explicit `coverage_cells`. Capture records whether fire had reached each covered cell at `observed_at_s`. A decision at `T` sees only reports with `available_at_s <= T`; each cell uses the latest delivered capture and carries its source, capture time, and age. Uncovered cells are `null`, not assumed unburned. An observation at a later capture time cannot leak through an earlier delivery. Tests change hidden cells and future arrivals without changing the current view.
+
+This component deliberately uses exact synthetic fire presence in covered cells and a user-provided schedule. Real sensor false detections, omissions, cloud/smoke masks, geolocation uncertainty, and latency distributions are still unimplemented. The CLI creates one view; it is not yet connected to aircraft mission selection or training.
 
 ## 1. Separation of concerns
 

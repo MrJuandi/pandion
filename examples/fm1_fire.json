@@ -1,0 +1,34 @@
+{
+  "schema_version": "rothermel-fm1-0.1",
+  "scenario_id": "synthetic-fm1-001",
+  "provenance": "synthetic",
+  "seed": 42,
+  "crs": "LOCAL_METERS",
+  "rows": 5,
+  "cols": 5,
+  "cell_size_m": 100,
+  "horizon_s": 600,
+  "fuel_model": [
+    ["FM1", "FM1", "FM1", "FM1", "FM1"],
+    ["FM1", "FM1", "FM1", "FM1", "FM1"],
+    ["FM1", "FM1", "FM1", "FM1", "FM1"],
+    ["FM1", "FM1", "FM1", "FM1", "FM1"],
+    ["FM1", "FM1", "FM1", "FM1", "FM1"]
+  ],
+  "dead_fuel_moisture_fraction": [
+    [0.06, 0.06, 0.06, 0.06, 0.06],
+    [0.06, 0.06, 0.06, 0.06, 0.06],
+    [0.06, 0.06, 0.06, 0.06, 0.06],
+    [0.06, 0.06, 0.06, 0.06, 0.06],
+    [0.06, 0.06, 0.06, 0.06, 0.06]
+  ],
+  "elevation_m": [
+    [0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0]
+  ],
+  "midflame_wind_to_m_s": [2, 0],
+  "ignitions": [[2, 2]]
+}

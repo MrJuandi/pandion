@@ -4,12 +4,21 @@ No dates or performance targets are promised. A stage advances when its evidence
 
 ## Stage 0 — reproducible foundation
 
+- Specify the first candidate spread equation and aircraft reference, including their limits, in [PHYSICAL_MODEL_V0.md](PHYSICAL_MODEL_V0.md).
+- Implemented first slice: a versioned synthetic one-aircraft movement and water-accounting episode with deterministic replay and invariant tests. Physical calibration, action candidates, and the full Stage 0 gate remain open.
+- Implemented second slice: a separate unmitigated synthetic grid-arrival episode with directional wind/slope test factors and deterministic checks. Its test-rate model remains available for interface checks.
+- Implemented third slice: the one-size dead-fuel Rothermel/Albini FM1 rate and published directional extension, with a fixed-domain resolution comparison. Broader fuel models, varied-scenario grid studies, independent spread validation, real sensor latency, aircraft interaction, and calibration remain open.
+- Implemented a seven-case synthetic resolution audit and an independent-source audit of three Copernicus EMSR578 AOI01 burned-area products. The audit documents why those observations do not yet validate FM1 or close the Stage 0 gate.
+- Implemented a no-fit external rate diagnostic against 120 eligible CSIRO Annaburroo grass plots. Its 0.5264 m/s mean absolute error shows the need for additional physical work; it is not a Spanish incident or grid-perimeter validation.
+- Implemented a separate synthetic observation-timing component with explicit coverage, capture, delivery, age, and leakage tests. Sensor error and integration with aircraft decisions remain open.
 - Define units, coordinates, time steps, map resolution, scenario format, and provenance manifest.
 - Implement a headless fire environment with one aircraft, scenario loader, observation model, action candidates, aircraft dynamics, and replay log.
 - Audit for hidden-state leakage and test physical invariants, time accounting, termination, action feasibility, and deterministic seed replay.
 - Calibrate unmitigated spread and aircraft/drop assumptions against identified evidence or mark uncertain parameters and ranges.
 
 **Gate:** another developer can load a versioned scenario, reproduce an episode, distinguish true from observed state, and regenerate physical calibration figures.
+
+The current status of each pre-training requirement is tracked in [TRAINING_READINESS.md](TRAINING_READINESS.md). Stage 0 has not passed its gate.
 
 ## Stage 1 — one aircraft decision research
 

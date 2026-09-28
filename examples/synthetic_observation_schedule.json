@@ -1,0 +1,14 @@
+[
+  {
+    "source_id": "simulated-overflight-1",
+    "observed_at_s": 300,
+    "available_at_s": 360,
+    "coverage_cells": [[1, 2], [2, 2], [2, 3], [3, 2]]
+  },
+  {
+    "source_id": "simulated-overflight-2",
+    "observed_at_s": 480,
+    "available_at_s": 540,
+    "coverage_cells": [[2, 2], [2, 3], [2, 4]]
+  }
+]

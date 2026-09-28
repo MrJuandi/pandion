@@ -1,6 +1,6 @@
-# Checklist before creating the public GitHub repository
+# Checklist before publishing the GitHub repository
 
-The owner will create the repository after reviewing the local project. No remote repository or Git history is created by this documentation step.
+The owner will decide when to publish the repository after reviewing it. Git history exists locally and an `origin` remote is configured; the repository's public visibility has not been verified here.
 
 ## Ownership and rights
 
@@ -13,8 +13,8 @@ The owner will create the repository after reviewing the local project. No remot
 
 ## Technical quality
 
-- [ ] README commands match working code; no placeholders presented as implemented features.
-- [ ] CI runs meaningful checks once code exists.
+- [x] README commands match working code as of 2026-09-27; commands were executed locally. New commands require a fresh check.
+- [x] CI runs the standard-library unit suite on push and pull request. External-data tests skip when their raw source is absent.
 - [ ] Configuration, seeds, source versions, and expected outputs are documented.
 - [ ] No large generated checkpoints, private data, credentials, caches, or local paths are committed.
 - [ ] Claims in README match reproducible experiment artifacts.
