@@ -21,6 +21,7 @@
 | D-15 | Introduce explicit observation capture, delivery, coverage, and age before a controller interface. | The synthetic schedule exposes information leaks early while making no claim about real sensor accuracy. |
 | D-16 | Preserve an unfitted Anderson FM1 comparison to CSIRO Annaburroo grass-plot rates as an external diagnostic. | It tests model transfer without selecting parameters on evaluation data. The measured 0.5264 m/s mean absolute error and differences in fuel/ignition context preclude a validation claim. |
 | D-17 | Integrate the existing fire, aircraft, and observation components first with a permanent, centre-based 35 m water barrier in a synthetic example. | This explicit and reversible hypothesis checks event ordering, information flow, action execution, and comparative metrics. It is not a sourced deposition or suppression law. |
+| D-18 | Add a separate Pyretechnics-based standard-fuel surface-fire path while retaining the FM1 prototype. | It supports published fuel-model codes and live/dead moisture without treating Annaburroo plots as a universal FM1 calibration target. The grid-arrival coupling and real vegetation mapping remain unvalidated. |
 
 ## Decisions requiring evidence or owner input before implementation/publication
 
@@ -28,7 +29,7 @@
 |---|---|---|
 | O-01 | Which geographic pilot area and incidents? | EMSR578 AOI01 is an audited candidate, not a settled pilot. Choose calibration and separate test incidents based on source coverage, fuel/weather reconstruction, independent validation availability, and redistribution terms. |
 | O-02 | How should the CL-415 reference figures become travel, pickup, and drop dynamics? | Specify airspeed-to-groundspeed assumptions, waterbody eligibility, timing, footprint, and effectiveness; validate against independent evidence. |
-| O-03 | Which additional fuel models and spatial/temporal propagation scheme should accompany FM1 Rothermel? | Compare numerical schemes and convergence across varied fuels, wind, and slopes; validate against independent incidents before policy training. |
+| O-03 | Which propagation scheme and geographic fuel crosswalk should use the standard catalogue? | Compare numerical schemes and convergence across varied fuels, wind, and slopes; establish a sourced vegetation-to-fuel mapping and validate against independent incidents before policy training. |
 | O-04 | What is the first controller's exact decision interval and action granularity? | Match aircraft dynamics, drop scale, and realistically available observations. |
 | O-05 | Which data can be stored publicly? | Review each provider's terms and use manifests/scripts when redistribution is unsuitable. |
 | O-06 | Which license and citation details? | Owner selects the license and citation details before GitHub publication. |

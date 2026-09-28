@@ -1,6 +1,6 @@
 # Initial physical-model specification
 
-**Status:** selected starting references, 2026-09-28. A one-size dead-fuel Rothermel/Albini FM1 calculation and a synthetic integrated episode exist. The episode's permanent water barrier is an unsourced test rule, not a validated water-effect model. Published component equations and aircraft figures do not validate Nightjar's incident predictions.
+**Status:** selected starting references, 2026-09-28. A one-size dead-fuel Rothermel/Albini FM1 calculation, a separate synthetic standard-fuel calculation, and a synthetic integrated episode exist. The episode's permanent water barrier is an unsourced test rule, not a validated water-effect model. Published component equations and aircraft figures do not validate Nightjar's incident predictions.
 
 ## Surface-fire spread
 
@@ -23,6 +23,12 @@ The input wind is **midflame wind**, not a station or forecast wind without tran
 For the fixed homogeneous 600 s sensitivity case, affected area was 3.0, 2.0, 1.8125, 1.63, and 1.655 ha at 100, 50, 25, 10, and 5 m respectively (run on 2026-09-27 with `python3 -m nightjar.sensitivity`). The 100 m result differs sharply from finer grids; 10 to 5 m changes by +1.53%. This is evidence for one synthetic case only. The 8-neighbour lattice and full-cell area count still need comparison with a finer or alternative propagation scheme and varied wind, moisture, and terrain before fixing resolution.
 
 The seven-case follow-up (`python3 -m nightjar.sensitivity --varied`, 2026-09-27) changed the 25 m to 5 m affected-area estimate by between −3.94% and +19.05% of the 5 m estimate. The largest percentage difference was the calm case, where only a few cells burned by 600 s. Wind reversal produced mirrored areas; lower moisture increased spread. These cases expose grid dependence and do not establish a universal acceptable resolution. The source audit in [VALIDATION_EMSR578.md](VALIDATION_EMSR578.md) identifies observed perimeters but cannot validate this FM1 model with the currently available inputs.
+
+## Standard fuel-model path
+
+`nightjar.fire_standard` accepts a synthetic grid of standard fuel-model numbers and uses Pyretechnics 2026.8.10 to compute local Rothermel surface-fire rates for each cell. The included example uses Scott and Burgan GR1 (101) and SH1 (141), with 0 as Nightjar's explicit nonburnable mask. The scenario supplies six dead/live moisture fractions, fixed midflame wind, elevation, and ignition. Dynamic models use Pyretechnics' live-herbaceous moisture transfer. Its directional rates are coupled to the same eight-neighbour, half-edge, shortest-arrival approximation as the FM1 prototype. This coupling is Nightjar's numerical choice; it is not Pyretechnics' level-set solver or a validated fire perimeter model. The result counts whole arrived cells at the horizon. No crown fire, spotting, temporal weather, or water effects are modeled.
+
+Midflame wind is specified as east/north **wind-to** components in m/s and converted to Pyretechnics' m/min and upwind azimuth. Elevation gradients yield slope and downslope aspect. Fuel codes are standard fire-behavior model identifiers, not land-cover classes. The example's fuel assignment and all environmental values are synthetic. Pyretechnics' equation implementation and the standard catalogue are documented in [REFERENCES.md](REFERENCES.md); independent numerical and physical validation remains open. The scenario contract and evidence sequence are in [STANDARD_FUEL_PATH.md](STANDARD_FUEL_PATH.md).
 
 ## First aircraft: CL-415
 
