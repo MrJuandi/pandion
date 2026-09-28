@@ -7,6 +7,7 @@ prefix. Policies receive only the observation and action mask returned here.
 from __future__ import annotations
 
 from copy import deepcopy
+from typing import Any
 
 from .aircraft import CAPACITY_L
 from .integrated import run_integrated
@@ -116,3 +117,30 @@ class IntegratedTrainingEnv:
             "reward_definition": self.reward_definition,
         }
         return deepcopy(self._observation), float(reward), self._terminated, info
+
+    def action_mapper(self) -> Any:
+        """Return an ActionMapper matched to this scenario's grid dimensions."""
+        from .model import ActionMapper
+        fuel = self._scenario["fire"]["fuel_model"]
+        return ActionMapper(
+            rows=len(fuel),
+            cols=len(fuel[0]),
+            cell_size_m=float(self._scenario["fire"]["cell_size_m"]),
+        )
+
+    def observation_tensorizer(self) -> Any:
+        """Return an ObservationTensorizer matched to this scenario's parameters."""
+        from .model import ObservationTensorizer
+        fuel = self._scenario["fire"]["fuel_model"]
+        return ObservationTensorizer(
+            rows=len(fuel),
+            cols=len(fuel[0]),
+            cell_size_m=float(self._scenario["fire"]["cell_size_m"]),
+            horizon_s=float(self._scenario["fire"]["horizon_s"]),
+        )
+
+    def step_discrete(self, action_index: int) -> tuple[dict, float, bool, dict]:
+        """Apply a discrete action index from ActionMapper and advance one step."""
+        mapper = self.action_mapper()
+        order = mapper.to_order(action_index)
+        return self.step(order)

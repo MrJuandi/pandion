@@ -152,7 +152,8 @@ def run_integrated(
                                 for drop in drops)]
         observation = {
             "time_s": time_s, "fire": fire_view, "aircraft": deepcopy(aircraft_state),
-            "fuel_model": deepcopy(fire["fuel_model"]), "midflame_wind_to_m_s": list(fire["wind"]),
+            "fuel_model": deepcopy(fire["fuel_model"]), "elevation_m": deepcopy(fire["elevation"]),
+            "midflame_wind_to_m_s": list(fire["wind"]),
             "cell_size_m": cell, "known_treated_cells": known_treated,
             "water_source_m": list(aircraft["water_source_m"]),
         }
