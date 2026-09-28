@@ -61,3 +61,26 @@ Four plots (`B032`, `B033`, `B041`, `B044`) report 12.1% dead-fuel moisture, jus
 Applying one predicted rate from ignition is a likely contributor to the distance error: across the same 120 fires, mean observed `ROS.ms` is 0.542 m/s in each fire's first recorded period and 1.096 m/s in its last, while the fixed FM1 prediction averages 1.175 m/s in both. The first and last periods have different times and are descriptive, not a fitted acceleration curve or proof of a single cause. The final-distance bias is positive (+38.25 m) even though the earlier width-adjusted steady-state rate comparison has negative bias (−0.109 m/s), so correcting the steady-state rate alone need not correct growth from ignition. In the plot-average diagnostic, the four fires at 12.1% moisture contribute a zero FM1 rate despite observed spread; this is a separate fuel-model mismatch. Wind and curing also vary between plots.
 
 The next comparison should keep this unchanged FM1 result as a baseline, then implement a source-matched grassland rate equation with its required **10 m wind**, moisture, curing, and pasture/treatment inputs. [Cheney, Gould, and Catchpole (1998)](https://doi.org/10.1071/WF9980001) provide such a model and describe its low-wind and higher-wind branches. A separate ignition-growth treatment must be tested against the timed observations, with parameters and selection fixed before evaluation. The Annaburroo fires contributed to development of the published grassland model, so a better result on these same fires would be a model comparison, **not independent validation**. A separate grassland dataset and later fuel-appropriate Spanish cases with time-matched perimeters are needed before changing the default simulator or using outcomes to judge aircraft decisions.
+
+## Rothermel fuel-bed and ignition-growth sensitivity, 2026-09-28
+
+This experiment keeps Rothermel's one-class dead-fuel equation. A generalized implementation reproduces FM1 when supplied the FM1 constants. The alternative fuel bed uses each plot's measured dry load (`FuelLoad.kgm2`) and grass height (`FuelHt.m`) as Rothermel bed depth, plus the species surface-area/volume ratio (`SAVR.cm`) from the burn-period table. The [source article](https://connectsci.au/wf/article/33/5/WF23100/22126/The-1986-Annaburroo-experimental-grassland-fires) defines these measurements and notes that SAV was measured on selected plants. Other particle properties, 12% moisture extinction, plot-average derived midflame wind, and dead moisture remain FM1 assumptions. Treating **all** measured dry grass load as one dead class ignores the uncuried live fraction; this is a sensitivity case, not a complete Annaburroo fuel model.
+
+Independently, test fixed illustrative ignition-growth timescales `τ = 0, 30, 60, 120 s` using `r(t) = r_steady × (1 − exp(−t/τ))` and its analytic distance integral, with `τ=0` meaning immediate steady speed. No `τ` was estimated from these fires, and this exponential form is an explicit hypothesis rather than a sourced grass-fire growth law. The same 120 fires are used for all variants; the command audits both source hashes and writes per-fire results under ignored `runs/`:
+
+```sh
+python3 -m nightjar.annaburroo_rothermel_sensitivity --output runs/annaburroo-rothermel-sensitivity.json
+```
+
+| Fuel bed | Growth timescale | Final head-distance MAE | Signed bias |
+|---|---:|---:|---:|
+| FM1 | 0 s | 73.81 m | +38.25 m |
+| FM1 | 30 s | 55.23 m | +4.31 m |
+| FM1 | 60 s | 52.50 m | −21.32 m |
+| FM1 | 120 s | 63.08 m | −51.81 m |
+| Measured bed, all dead | 0 s | 91.30 m | +27.68 m |
+| Measured bed, all dead | 30 s | 80.22 m | −1.05 m |
+| Measured bed, all dead | 60 s | 76.04 m | −23.78 m |
+| Measured bed, all dead | 120 s | 81.18 m | −52.07 m |
+
+Simply replacing the fixed fuel-bed dimensions does **not** resolve the error; it worsens final-distance MAE under this one-dead-class approximation. The illustrative growth curves reduce FM1 error, but choosing 60 s because it scores best here would fit the evaluation data. These results only prioritize the next work: source a grass ignition-growth relation, represent live/dead curing and moisture in a multi-class fuel bed, and evaluate on independent fires. They do not identify a valid parameter, validate grid spread, or change the simulator used for aircraft comparisons.

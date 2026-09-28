@@ -24,28 +24,37 @@ PARTICLE_DENSITY_LB_FT3 = 32.0
 TOTAL_MINERAL_FRACTION = 0.0555
 EFFECTIVE_MINERAL_FRACTION = 0.01
 
+LB_FT2_PER_KG_M2 = 0.2048161436225
 
-def fm1_components(moisture_fraction: float, midflame_wind_m_s: float = 0.0, slope: float = 0.0) -> dict[str, float]:
-    """Return no-wind rate and directional factor magnitudes for FM1.
 
-    Wind speed is *midflame* speed; slope is rise/run. All output rates are m/s.
+def one_class_components(moisture_fraction: float, midflame_wind_m_s: float,
+                         load_kg_m2: float, depth_m: float, sav_cm_inv: float,
+                         moisture_extinction: float = FM1_MOISTURE_EXTINCTION) -> dict[str, float]:
+    """Rothermel components for one homogeneous, dead fine-fuel class.
+
+    The caller supplies dry load, bed depth, and surface-area/volume ratio.
+    Other particle properties retain the FM1 assumptions. This does not model
+    live fuel, partial curing, or ignition acceleration.
     """
-    if not isfinite(moisture_fraction) or not 0 <= moisture_fraction <= 1:
-        raise ValueError("dead-fuel moisture must be a fraction in [0, 1]")
-    if not isfinite(midflame_wind_m_s) or not isfinite(slope) or midflame_wind_m_s < 0 or slope < 0:
-        raise ValueError("wind speed and slope magnitude must be nonnegative")
-    sigma = FM1_SAV_FT_INV
-    bulk_density = FM1_LOAD_LB_FT2 / FM1_DEPTH_FT
+    if not all(isfinite(v) for v in (moisture_fraction, midflame_wind_m_s,
+                                      load_kg_m2, depth_m, sav_cm_inv, moisture_extinction)):
+        raise ValueError("fuel and weather inputs must be finite")
+    if not 0 <= moisture_fraction <= 1 or midflame_wind_m_s < 0 or min(load_kg_m2, depth_m, sav_cm_inv, moisture_extinction) <= 0:
+        raise ValueError("fuel inputs outside declared domain")
+    sigma = sav_cm_inv * 30.48
+    load_lb_ft2 = load_kg_m2 * LB_FT2_PER_KG_M2
+    depth_ft = depth_m * FT_PER_M
+    bulk_density = load_lb_ft2 / depth_ft
     beta = bulk_density / PARTICLE_DENSITY_LB_FT3
     beta_opt = 3.348 * sigma ** -0.8189
     beta_ratio = beta / beta_opt
     gamma_max = sigma ** 1.5 / (495 + 0.0594 * sigma ** 1.5)
-    a = 133 * sigma ** -0.7913  # Albini adjustment cited in Andrews table 3.
+    a = 133 * sigma ** -0.7913
     gamma = gamma_max * beta_ratio ** a * exp(a * (1 - beta_ratio))
-    moisture_ratio = min(moisture_fraction / FM1_MOISTURE_EXTINCTION, 1.0)
+    moisture_ratio = min(moisture_fraction / moisture_extinction, 1.0)
     eta_m = max(0.0, 1 - 2.59 * moisture_ratio + 5.11 * moisture_ratio**2 - 3.52 * moisture_ratio**3)
     eta_s = min(0.174 * EFFECTIVE_MINERAL_FRACTION ** -0.19, 1.0)
-    net_load = FM1_LOAD_LB_FT2 * (1 - TOTAL_MINERAL_FRACTION)
+    net_load = load_lb_ft2 * (1 - TOTAL_MINERAL_FRACTION)
     reaction_intensity = gamma * net_load * HEAT_BTU_LB * eta_m * eta_s
     flux_ratio = exp((0.792 + 0.681 * sqrt(sigma)) * (beta + 0.1)) / (192 + 0.2595 * sigma)
     effective_heating = exp(-138 / sigma)
@@ -56,16 +65,29 @@ def fm1_components(moisture_fraction: float, midflame_wind_m_s: float = 0.0, slo
     e = 0.715 * exp(-3.59e-4 * sigma)
     wind_ft_min = midflame_wind_m_s * FT_MIN_PER_M_S
     phi_w = c * wind_ft_min**b * beta_ratio**-e if wind_ft_min else 0.0
+    return {"r0_m_s": r0_ft_min * M_S_PER_FT_MIN, "phi_w": phi_w,
+            "wind_c": c, "wind_b": b, "wind_e": e, "beta_ratio": beta_ratio}
+
+
+def fm1_components(moisture_fraction: float, midflame_wind_m_s: float = 0.0, slope: float = 0.0) -> dict[str, float]:
+    """Return no-wind rate and directional factor magnitudes for FM1.
+
+    Wind speed is *midflame* speed; slope is rise/run. All output rates are m/s.
+    """
+    if not isfinite(moisture_fraction) or not 0 <= moisture_fraction <= 1:
+        raise ValueError("dead-fuel moisture must be a fraction in [0, 1]")
+    if not isfinite(midflame_wind_m_s) or not isfinite(slope) or midflame_wind_m_s < 0 or slope < 0:
+        raise ValueError("wind speed and slope magnitude must be nonnegative")
+    pieces = one_class_components(
+        moisture_fraction, midflame_wind_m_s,
+        FM1_LOAD_LB_FT2 / LB_FT2_PER_KG_M2,
+        FM1_DEPTH_FT / FT_PER_M,
+        FM1_SAV_FT_INV / 30.48,
+    )
+    bulk_density = FM1_LOAD_LB_FT2 / FM1_DEPTH_FT
+    beta = bulk_density / PARTICLE_DENSITY_LB_FT3
     phi_s = 5.275 * beta**-0.3 * slope**2
-    return {
-        "r0_m_s": r0_ft_min * M_S_PER_FT_MIN,
-        "phi_w": phi_w,
-        "phi_s": phi_s,
-        "wind_c": c,
-        "wind_b": b,
-        "wind_e": e,
-        "beta_ratio": beta_ratio,
-    }
+    return {**pieces, "phi_s": phi_s}
 
 
 def fm1_directional_rate(moisture_fraction: float, wind_to_m_s: tuple[float, float], upslope_gradient: tuple[float, float], direction: tuple[float, float]) -> float:

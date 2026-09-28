@@ -26,6 +26,8 @@ The seven-case follow-up (`python3 -m nightjar.sensitivity --varied`, 2026-09-27
 
 The [Annaburroo external diagnostics](VALIDATION_ANNABURROO.md) now test the unchanged FM1 head rate and a separate rate-times-time head position against Australian grass experiments. The temporal check finds 73.81 m mean absolute final-distance error across 120 fires and four observed fires above FM1's extinction moisture. These are limitations of this fuel-model transfer; the temporal test does not exercise the grid or constitute a held-out Spanish incident validation.
 
+A generalized one-class Rothermel calculation has also been checked against the FM1 constants and used in an [Annaburroo sensitivity comparison](VALIDATION_ANNABURROO.md). Substituting measured grass load, height and SAV while treating all fuel as dead worsens the immediate-speed final-distance MAE to 91.30 m. Illustrative ignition-growth curves reduce the FM1 error, but their timescales are not validated and are not used by the grid simulator.
+
 ## First aircraft: CL-415
 
 Model one water-scooping CL-415. The figures below are from a Canadian government airtanker guide describing typical operating conditions; they are **indicated airspeeds**, not ground speeds or universal operating limits. The guide warns that its elicited operating figures may differ from manufacturer specifications. [McFayden et al., *Reference Guide to the Drop Effectiveness of Skimmer and Rotary Wing Airtankers* (2023), section 6.1](https://publications.gc.ca/collections/collection_2023/rncan-nrcan/Fo123-2-35-2023-eng.pdf).

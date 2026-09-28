@@ -102,9 +102,12 @@ The independent grass-rate diagnostic requires `curl` and retrieves two small ta
 python3 -m nightjar.annaburroo --output runs/annaburroo-source.json
 python3 -m nightjar.annaburroo_compare --output runs/annaburroo-fm1-diagnostic.json
 python3 -m nightjar.annaburroo_temporal --output runs/annaburroo-temporal-fm1.json
+python3 -m nightjar.annaburroo_rothermel_sensitivity --output runs/annaburroo-rothermel-sensitivity.json
 ```
 
 Its 120 eligible plots yield 0.5264 m/s mean absolute head-rate error for unchanged FM1. A second, no-fit comparison using 576 timed head-distance observations from the same plots finds 73.81 m mean absolute error in final head position per fire. Scope and exclusions are in [VALIDATION_ANNABURROO.md](docs/VALIDATION_ANNABURROO.md). These are grassland transfer diagnostics on the same experiment, not a validation of Spanish incidents or grid perimeters; the training gate remains open.
+
+A fuel-bed and ignition-growth sensitivity check keeps Rothermel and the same 120 fires. Substituting measured grass load, height, and surface/volume ratio while treating all fuel as dead raises final-distance MAE to 91.30 m; illustrative FM1 growth timescales of 30–60 s lower it to 55.23–52.50 m. These timescales were not measured or validated, so no simulator default changes. [Method and limits](docs/VALIDATION_ANNABURROO.md).
 
 ## Scope and limitations
 
