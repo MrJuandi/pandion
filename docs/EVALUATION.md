@@ -71,6 +71,75 @@ The family addresses the floor effects and forced single-front convergence obser
 
 Decisions show substantial variance across scenarios (affected area differences of up to 1.75 ha / 7 cells between policies). In case `01`, `containment_heuristic` improves over greedy `heuristic` by 1.75 ha by prioritizing downstream fuel corridors; in case `00`, greedy heuristic performs best by cutting off the primary head fire early.
 
+### PPO development/validation selection (exploratory)
+
+`python3 -m nightjar.ppo --select --output runs/ppo-selection.json --checkpoint runs/ppo-selection.pt --candidates 2 --updates 1 --episodes-per-update 1` trains each candidate only on development scenarios, evaluates each deterministically on all eight validation scenarios, and runs `heuristic` and `containment_heuristic` through `run_integrated` on those exact validation scenarios. JSON output stores per-case PPO and baseline metrics matched explicitly by `scenario_id`, plus selected-candidate paired PPO-minus-baseline means/counts, wins/losses, and predeclared criteria (>=0.50 ha reduction versus greedy, non-inferiority versus containment, wins >=50%, losses <=25%, zero rejected orders). Selection minimizes mean validation `affected_area_ha`; exact ties break by candidate seed and then candidate index. The command never evaluates reserved scenarios and uses no reserved rollout.
+
+#### Prior 8x8 result
+
+The frozen exploratory comparison protocol was five independent training seeds (`0`–`4`), eight development episodes per update, and eight updates per seed. The completed run was:
+
+```text
+python3 -m nightjar.ppo --select --output runs/ppo-matched-5seeds.json --checkpoint runs/ppo-matched-5seeds.pt --candidates 5 --updates 8 --episodes-per-update 8
+```
+
+The five validation means (ha) were seed `0`: `9.875`, seed `1`: `8.9375`, seed `2`: `8.8125`, seed `3`: `8.84375`, and seed `4`: `8.84375`. The pre-existing lowest-mean rule selected seed `2`. Its paired validation areas were:
+
+| Scenario | PPO seed 2 (ha) | Heuristic (ha) | Containment (ha) |
+|---|---:|---:|---:|
+| discrimination-validation-00 | 8.50 | 9.00 | 8.25 |
+| discrimination-validation-01 | 11.00 | 10.50 | 11.00 |
+| discrimination-validation-02 | 12.00 | 13.25 | 13.00 |
+| discrimination-validation-03 | 6.50 | 5.50 | 6.25 |
+| discrimination-validation-04 | 9.25 | 10.25 | 9.75 |
+| discrimination-validation-05 | 8.25 | 8.50 | 8.25 |
+| discrimination-validation-06 | 11.25 | 12.50 | 12.50 |
+| discrimination-validation-07 | 3.75 | 3.75 | 1.75 |
+
+Against the heuristic, PPO had 5 wins, 2 losses, and 1 tie, with a `0.34375 ha` mean reduction; PPO minus containment was `-0.03125 ha`. Rejected orders were `0` for every paired validation case. The predeclared criteria were therefore not met because the reduction is below the `0.50 ha` MRE; the other recorded criteria passed. The reserved split remains unopened.
+
+Source and limits: the result is recorded from the ignored artifact `runs/ppo-matched-5seeds.json` (schema `nightjar-ppo-selection-0.1`), using synthetic scenario provenance and the uncommitted working-tree code version (no fabricated commit hash). The observed PyTorch version was `2.2.2`. The provisional permanent suppression effect remains synthetic and is not a physical claim. Because validation outcomes selected seed `2`, this is exploratory validation selection, not an independent test; no reserved result is implied.
+
+#### L1 checkpoint diagnostic
+
+Before increasing the budget, the selected 8x8 checkpoint (`SHA-256 9e4eb448d5fe4be435dc5af84ffebc77d8eeeb379c21314a164b82d61e110208`) was reconstructed on validation cases `01` and `03`. PPO lost to the heuristic by `+0.5 ha` and `+1.0 ha`, respectively. Its initial `DROP` targets diverged from the heuristic at `t=0`; therefore, later same-time actions occur on different trajectories and are not causal evidence about a particular later choice. This is an observation-derived diagnostic only and does not use latent state.
+
+#### L2 matched 16x8 budget result
+
+The frozen exploratory comparison protocol used five independent training seeds (`0`–`4`), 16 updates, and eight development episodes per update. The exact verified command was:
+
+```text
+python3 -m nightjar.ppo --select --output runs/ppo-matched-5seeds-16x8.json --checkpoint runs/ppo-matched-5seeds-16x8.pt --candidates 5 --updates 16 --episodes-per-update 8 --seed 0
+```
+
+The five validation means (ha) were seed `0`: `9.875`, seed `1`: `9.03125`, seed `2`: `8.625`, seed `3`: `8.8125`, and seed `4`: `8.9375`. The lowest-mean rule selected seed `2`. Its paired validation areas were:
+
+| Scenario | PPO seed 2 (ha) | Heuristic (ha) | Containment (ha) |
+|---|---:|---:|---:|
+| discrimination-validation-00 | 8.00 | 9.00 | 8.25 |
+| discrimination-validation-01 | 10.75 | 10.50 | 11.00 |
+| discrimination-validation-02 | 12.00 | 13.25 | 13.00 |
+| discrimination-validation-03 | 6.50 | 5.50 | 6.25 |
+| discrimination-validation-04 | 9.00 | 10.25 | 9.75 |
+| discrimination-validation-05 | 7.75 | 8.50 | 8.25 |
+| discrimination-validation-06 | 11.25 | 12.50 | 12.50 |
+| discrimination-validation-07 | 3.75 | 3.75 | 1.75 |
+
+Against the heuristic, PPO had 5 wins, 2 losses, and 1 zero-difference tie: mean reduction `0.53125 ha` (`PPO - heuristic = -0.53125 ha`). Against containment, it had 6 wins and 2 losses: mean reduction `0.21875 ha` (`PPO - containment = -0.21875 ha`). All paired episodes had zero rejected orders.
+
+| Predeclared criterion | Result | Evidence |
+|---|---|---|
+| Reduction versus heuristic >= `0.50 ha` | Pass | `0.53125 ha` mean reduction |
+| Non-inferior versus containment (`PPO - baseline <= 0`) | Pass | `-0.21875 ha` |
+| Heuristic wins >= 50% | Pass | 5/8 wins = 62.5% |
+| Heuristic losses <= 25% | Pass | 2/8 losses = 25% |
+| Zero rejected orders | Pass | 0 in all 8 PPO and baseline paired episodes |
+| Reserved one-time protocol | Preserved | Reserved split unopened and unevaluated |
+
+The 16x8 selection improves on the prior selected 8x8 result (seed `2`, `8.8125 ha`, `0.34375 ha` heuristic reduction) by `0.1875 ha` in selected validation mean and reduction. This is adaptive reuse of the same validation family after observing the 8x8 result, not an independent held-out claim. Both runs are synthetic and conditional on the fixed discrimination-family scenarios, observation schedule, PPO implementation, and provisional permanent suppression effect; they do not establish physical transfer or generalisation to independent incidents. The reserved split remains unopened, with no training or execution on reserved scenarios.
+
+Source and provenance: the result is recorded from ignored artifact `runs/ppo-matched-5seeds-16x8.json`, schema `nightjar-ppo-selection-0.1`, synthetic scenario provenance, and the uncommitted working-tree code version (no fabricated commit hash). The selected checkpoint is `runs/ppo-matched-5seeds-16x8.pt`, SHA-256 `c88258584e7b79d10ab56a6908609e6b209bcc72d89039ccf495bd88b532ad0d`; the observed PyTorch version was `2.2.2`. The prior 8x8 artifact remains documented above and is unchanged.
+
 ### Predeclared model improvement criteria (fixed before future evaluation)
 
 To prevent post-hoc metric selection or claims based on marginal discretization noise, any future learned controller must satisfy the following predeclared criteria on the validation set before opening the reserved split:
