@@ -19,7 +19,6 @@ from typing import Any, Sequence
 from zipfile import ZipFile
 
 import numpy as np
-from matplotlib.path import Path as MplPath
 
 
 # ---------------------------------------------------------------------------
@@ -395,13 +394,44 @@ def evaluate_spatial_overlap(
 # Polygon Rasterization Helpers
 # ---------------------------------------------------------------------------
 
+def _points_in_polygon(points: np.ndarray, poly_pts: np.ndarray) -> np.ndarray:
+    """Vectorized ray-casting point-in-polygon test using NumPy.
+
+    Determines if points (N, 2) are inside polygon (M, 2) by testing horizontal
+    ray intersections across all edges.
+    """
+    if len(poly_pts) < 3 or len(points) == 0:
+        return np.zeros(len(points), dtype=bool)
+
+    x = points[:, 0]
+    y = points[:, 1]
+    inside = np.zeros(len(points), dtype=bool)
+
+    p1 = poly_pts
+    p2 = np.roll(poly_pts, -1, axis=0)
+
+    for i in range(len(poly_pts)):
+        x1, y1 = p1[i]
+        x2, y2 = p2[i]
+        cond = (y1 > y) != (y2 > y)
+        if not np.any(cond):
+            continue
+        dy = y2 - y1
+        if dy == 0.0:
+            continue
+        x_intersect = x1 + (x2 - x1) * (y[cond] - y1) / dy
+        inside[cond] ^= (x[cond] < x_intersect)
+
+    return inside
+
+
 def _rasterize_polygons(
     features: list[dict],
     grid_points: np.ndarray,
     target_grid: np.ndarray,
     value_lookup: Any,
 ) -> None:
-    """Rasterize a list of GeoJSON features onto target_grid using bounding box filtered MplPath.
+    """Rasterize a list of GeoJSON features onto target_grid using bounding box filtered ray-casting.
 
     value_lookup can be a constant value or a callable taking feature['properties'].
     """
@@ -422,25 +452,27 @@ def _rasterize_polygons(
         for poly in polys:
             if not poly or not poly[0]:
                 continue
-            outer = [wgs84_to_utm31n(lon, lat) for lon, lat in poly[0]]
-            path = MplPath(outer)
-            bb = path.get_extents()
+            outer = np.array([wgs84_to_utm31n(lon, lat) for lon, lat in poly[0]], dtype=float)
+            bb_x0 = float(outer[:, 0].min())
+            bb_x1 = float(outer[:, 0].max())
+            bb_y0 = float(outer[:, 1].min())
+            bb_y1 = float(outer[:, 1].max())
 
             sub_idx = np.where(
-                (grid_points[:, 0] >= bb.x0) & (grid_points[:, 0] <= bb.x1) &
-                (grid_points[:, 1] >= bb.y0) & (grid_points[:, 1] <= bb.y1)
+                (grid_points[:, 0] >= bb_x0) & (grid_points[:, 0] <= bb_x1) &
+                (grid_points[:, 1] >= bb_y0) & (grid_points[:, 1] <= bb_y1)
             )[0]
             if len(sub_idx) == 0:
                 continue
 
-            in_poly = path.contains_points(grid_points[sub_idx])
+            in_poly = _points_in_polygon(grid_points[sub_idx], outer)
 
             # Handle interior holes
             for hole in poly[1:]:
                 if not hole:
                     continue
-                hole_path = MplPath([wgs84_to_utm31n(lon, lat) for lon, lat in hole])
-                in_hole = hole_path.contains_points(grid_points[sub_idx])
+                hole_pts = np.array([wgs84_to_utm31n(lon, lat) for lon, lat in hole], dtype=float)
+                in_hole = _points_in_polygon(grid_points[sub_idx], hole_pts)
                 in_poly = in_poly & ~in_hole
 
             target_grid[sub_idx[in_poly]] = val
