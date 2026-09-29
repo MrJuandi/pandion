@@ -296,11 +296,10 @@ def run_geographic_integrated(
             if r not in delivered_reports:
                 delivered_reports.append(r)
 
+    pending_observation = None
+
     # Main decision and event progression loop
     while cur_sim_time < horizon_s:
-        if _stop_after_steps is not None and step_count >= _stop_after_steps:
-            break
-
         sync_observations(cur_sim_time)
         advance_fire(cur_sim_time)
 
@@ -324,6 +323,10 @@ def run_geographic_integrated(
             "elevation_m": [[0.0] * cols for _ in range(rows)] if scenario.get("elevation_m") is None else scenario["elevation_m"],
             "known_treated_cells": known_treated_cells,
         }
+
+        if _stop_after_steps is not None and step_count >= _stop_after_steps:
+            pending_observation = current_obs
+            break
 
         # Policy order selection
         if _actions is not None and step_count < len(_actions):
@@ -396,16 +399,20 @@ def run_geographic_integrated(
                 "aircraft_water_l": aircraft_water,
             })
 
-    # Final fire advancement to horizon
-    advance_fire(horizon_s)
-    sync_observations(horizon_s)
+    if _stop_after_steps is None:
+        # Final fire advancement to horizon only if running full episode
+        advance_fire(horizon_s)
+        sync_observations(horizon_s)
+        eval_time = horizon_s
+    else:
+        eval_time = cur_sim_time
 
-    # Compute final metrics
-    burned_cells_final = sum(1 for r in range(rows) for c in range(cols) if arrival[r][c] is not None and arrival[r][c] <= horizon_s)
+    # Compute metrics
+    burned_cells_final = sum(1 for r in range(rows) for c in range(cols) if arrival[r][c] is not None and arrival[r][c] <= eval_time + 1e-9)
     final_burned_ha = round(burned_cells_final * cell_area_ha, 4)
     initial_burned_ha = round(initial_burned_count * cell_area_ha, 4)
 
-    return {
+    result = {
         "schema_version": REPLAY_SCHEMA_VERSION,
         "scenario_id": scenario.get("scenario_id", "geographic-scenario"),
         "policy": policy,
@@ -423,16 +430,21 @@ def run_geographic_integrated(
             "net_expansion_ha": round(final_burned_ha - initial_burned_ha, 4),
             "burned_cells_count": burned_cells_final,
         },
+        "affected_area_ha": final_burned_ha,
         "aircraft_metrics": {
             "drops_count": drops_count,
             "refills_count": refills_count,
             "total_water_dropped_l": total_water_dropped_l,
             "total_flight_distance_km": round(total_flight_dist_m / 1000.0, 3),
             "rejected_orders_count": 0,
+            "rejected_orders": 0,
         },
         "decisions": decisions_log,
         "drops": drops_log,
     }
+    if _stop_after_steps is not None:
+        result["pending_observation"] = pending_observation
+    return result
 
 
 def main() -> None:
