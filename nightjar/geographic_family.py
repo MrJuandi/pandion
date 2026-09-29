@@ -183,19 +183,36 @@ def generate_geographic_scenario(
 
     act_id = cems_scenario.get("activation_id", "EMSR578")
     scenario_id = f"geographic-{split[:3]}-{act_id.lower()}-{index:02d}"
+    base_provenance = deepcopy(cems_scenario.get("provenance", {}))
+    source_kind = cems_scenario.get("source_kind") or (
+        "copernicus_cems" if base_provenance.get("source_zip_sha256") else "synthetic_fixture"
+    )
+    source_grid = cems_scenario["grid"]
+    crop = {"r0": tactical["r0"], "c0": tactical["c0"], "rows": tactical["rows"], "cols": tactical["cols"],
+            "origin_utm_easting_m": tactical["origin_utm_easting_m"],
+            "origin_utm_northing_m": tactical["origin_utm_northing_m"], "crs": deepcopy(cems_scenario.get("crs", {}))}
 
-    return {
+    scenario = {
         "schema_version": "nightjar-geographic-scenario-0.1",
+        "source_kind": source_kind,
         "scenario_id": scenario_id,
         "split": split,
         "seed": seed,
         "activation_id": act_id,
         "name": f"{cems_scenario.get('name', 'Wildfire')} Tactical Scenario {index:02d}",
         "provenance": {
+            **base_provenance,
             "family": FAMILY_SCHEMA_VERSION,
             "source_activation": act_id,
-            "crs": cems_scenario.get("crs", {}),
-            "source_license": "Copernicus terms of use (attribution required)",
+            "source_kind": source_kind,
+            "parent_scenario_hash": canonical_hash(cems_scenario),
+            "base_grid": {"rows": source_grid["rows"], "cols": source_grid["cols"],
+                          "origin_utm_easting_m": source_grid["origin_utm_easting_m"],
+                          "origin_utm_northing_m": source_grid["origin_utm_northing_m"],
+                          "cell_size_m": source_grid["cell_size_m"]},
+            "crop": crop,
+            "assumptions": {"fuel_crosswalk": "inferred", "wind": "synthetic", "moisture": "synthetic",
+                            "survey_schedule": "synthetic", "topography": "flat"},
         },
         "crs": cems_scenario.get("crs", {}),
         "grid": {
@@ -226,6 +243,8 @@ def generate_geographic_scenario(
         },
         "observation_schedule": obs_schedule,
     }
+    scenario["scenario_hash"] = canonical_hash(scenario)
+    return scenario
 
 
 def build_synthetic_cems_fixture(
@@ -279,6 +298,8 @@ def build_synthetic_cems_fixture(
         "fuel_grid": fuel_grid,
         "water_mask": water_mask,
         "burn_mask": burn_mask,
+        "source_kind": "synthetic_fixture",
+        "provenance": {"source": "Nightjar generated offline fixture", "source_kind": "synthetic_fixture"},
         "water_scooping_waypoints": [
             {
                 "name": "Reservoir Waypoint",
@@ -298,19 +319,54 @@ def build_geographic_family(
     num_dev: int = 8,
     num_val: int = 8,
     num_res: int = 8,
+    *,
+    synthetic: bool = False,
 ) -> dict[str, Any]:
-    """Build the complete multi-incident geographic scenario family across splits."""
-    if cems_scenarios is None:
-        cems_scenarios = {}
+    """Build an incident-separated family; fixtures require explicit synthetic=True."""
+    if min(num_dev, num_val, num_res) <= 0:
+        raise ValueError("num_dev, num_val, and num_res must all be positive")
+    if num_res < 2:
+        raise ValueError("num_res must be at least 2 to include EMSR592 and EMSR600")
 
-    # Ensure base scenarios exist for each split
-    dev_base = cems_scenarios.get("EMSR578") or build_synthetic_cems_fixture("EMSR578", utm_zone=31)
-    val_base = cems_scenarios.get("EMSR590") or build_synthetic_cems_fixture("EMSR590", utm_zone=30)
-    res_base = cems_scenarios.get("EMSR592") or build_synthetic_cems_fixture("EMSR592", utm_zone=30)
+    required = ("EMSR578", "EMSR590", "EMSR592", "EMSR600")
+    bases = dict(cems_scenarios or {})
+    if synthetic:
+        if bases and any(value.get("source_kind") != "synthetic_fixture" for value in bases.values()):
+            raise ValueError("synthetic=True accepts only explicitly labeled synthetic fixture bases")
+        for activation_id in required:
+            if activation_id not in bases:
+                zone = 31 if activation_id == "EMSR578" else 30
+                bases[activation_id] = build_synthetic_cems_fixture(activation_id, utm_zone=zone)
+    else:
+        missing = [activation_id for activation_id in required if activation_id not in bases]
+        if missing:
+            raise ValueError("Missing real CEMS scenario bases: " + ", ".join(missing) +
+                             ". Provide all four verified products or use synthetic=True explicitly.")
 
+    fixture_ids = [key for key, value in bases.items()
+                   if value.get("source_kind") == "synthetic_fixture" or str(value.get("scenario_id", "")).startswith("fixture-")]
+    if fixture_ids and not synthetic:
+        raise ValueError("Synthetic fixture bases require synthetic=True: " + ", ".join(sorted(fixture_ids)))
+    if not synthetic:
+        for key, value in bases.items():
+            provenance = value.get("provenance", {})
+            stage = provenance.get("source_stage")
+            product = ACTIVATIONS.get(key, {}).get("products", {}).get(stage)
+            if (value.get("activation_id") != key or product is None
+                    or provenance.get("source_zip_sha256") != product["sha256"]
+                    or provenance.get("source_product_code") != product["product_code"]
+                    or provenance.get("source_product_filename") != product["vector_filename"]
+                    or provenance.get("image_acquired_at_utc") != product["acquired_at_utc"]):
+                raise ValueError(f"{key} is missing verified Copernicus source provenance")
+    # Preserve the exact base object used by its canonical hash. Source kind is
+    # inferred from provenance in generate_geographic_scenario.
+    dev_base, val_base = bases["EMSR578"], bases["EMSR590"]
+    reserved_bases = [bases["EMSR592"], bases["EMSR600"]]
     dev_scenarios = [generate_geographic_scenario(dev_base, i, "development") for i in range(num_dev)]
     val_scenarios = [generate_geographic_scenario(val_base, i, "validation") for i in range(num_val)]
-    res_scenarios = [generate_geographic_scenario(res_base, i, "reserved") for i in range(num_res)]
+    res_scenarios = [
+        generate_geographic_scenario(reserved_bases[i % 2], i, "reserved") for i in range(num_res)
+    ]
 
     all_scenarios = {
         "development": dev_scenarios,
@@ -321,7 +377,8 @@ def build_geographic_family(
     manifest = {
         "schema_version": FAMILY_SCHEMA_VERSION,
         "family_id": "geographic-family-0.1",
-        "description": "Multi-incident real-world geographic decision benchmark for wildfire aerial response.",
+        "description": "Multi-incident geographic decision scenarios for wildfire aerial response.",
+        "source_kind": "synthetic_fixture" if synthetic else "copernicus_cems",
         "counts": {
             "development": len(dev_scenarios),
             "validation": len(val_scenarios),
@@ -329,9 +386,8 @@ def build_geographic_family(
             "total": len(dev_scenarios) + len(val_scenarios) + len(res_scenarios),
         },
         "incidents_by_split": {
-            "development": ["EMSR578 (Artesa de Segre / UTM 31N)"],
-            "validation": ["EMSR590 (Monfragüe / Casas de Miravete / UTM 30N)"],
-            "reserved": ["EMSR592 (Sierra de Mijas / UTM 30N)", "EMSR600 (Vall d'Ebo / UTM 30N)"],
+            split: sorted({s["activation_id"] for s in scens})
+            for split, scens in all_scenarios.items()
         },
         "scenarios": {
             split: [
@@ -339,7 +395,9 @@ def build_geographic_family(
                     "scenario_id": s["scenario_id"],
                     "activation_id": s["activation_id"],
                     "seed": s["seed"],
-                    "hash": canonical_hash(s),
+                    "source_kind": s["source_kind"],
+                    "source_zip_sha256": s["provenance"].get("source_zip_sha256"),
+                    "hash": s["scenario_hash"],
                 }
                 for s in scens
             ]
@@ -355,26 +413,38 @@ def build_geographic_family(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--output-dir", type=Path, default=Path("runs/geographic-family"))
+    parser.add_argument("--output-dir", type=Path, default=Path("runs/geographic-family-real-v2"))
+    parser.add_argument("--raw-dir", type=Path, default=Path("data/raw/cems"))
+    parser.add_argument("--synthetic", action="store_true", help="explicitly generate labeled synthetic fixtures")
     parser.add_argument("--num-dev", type=int, default=8)
     parser.add_argument("--num-val", type=int, default=8)
     parser.add_argument("--num-res", type=int, default=8)
     args = parser.parse_args()
 
+    try:
+        cems_scenarios = {}
+        if not args.synthetic:
+            zip_paths = {activation_id: args.raw_dir / f"{activation_id.lower()}_del.zip"
+                         for activation_id in ("EMSR578", "EMSR590", "EMSR592", "EMSR600")}
+            missing = [str(path) for path in zip_paths.values() if not path.is_file()]
+            if missing:
+                raise FileNotFoundError("Missing required local CEMS products: " + ", ".join(missing) +
+                                        ". Place all four verified _del.zip files in --raw-dir; no download is attempted.")
+            cems_scenarios = {activation_id: build_cems_scenario(activation_id, path)
+                              for activation_id, path in zip_paths.items()}
+        result = build_geographic_family(
+            cems_scenarios=cems_scenarios,
+            num_dev=args.num_dev,
+            num_val=args.num_val,
+            num_res=args.num_res,
+            synthetic=args.synthetic,
+        )
+        if args.output_dir.exists() and any(args.output_dir.iterdir()):
+            raise FileExistsError(f"Refusing to mix with existing family data in {args.output_dir}; choose a new empty directory.")
+    except (ValueError, FileNotFoundError, FileExistsError) as exc:
+        parser.error(str(exc))
+
     args.output_dir.mkdir(parents=True, exist_ok=True)
-
-    # Check for local real EMSR578 raw package
-    cems_scenarios = {}
-    real_emsr578_zip = Path("data/raw/emsr578/del.zip")
-    if real_emsr578_zip.exists():
-        cems_scenarios["EMSR578"] = build_cems_scenario("EMSR578", real_emsr578_zip)
-
-    result = build_geographic_family(
-        cems_scenarios=cems_scenarios,
-        num_dev=args.num_dev,
-        num_val=args.num_val,
-        num_res=args.num_res,
-    )
 
     # Write manifest and scenarios
     manifest_path = args.output_dir / "manifest.json"

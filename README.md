@@ -81,10 +81,12 @@ python3 -m nightjar.scenario_family --output-dir runs/scenario-family
 python3 -m nightjar.challenge_family --output-dir runs/challenge-family
 python3 -m nightjar.discrimination_family --output-dir runs/discrimination-family
 python3 -m nightjar.cems_catalog list
-python3 -m nightjar.geographic_family --output-dir runs/geographic-family
-python3 -m nightjar.geographic_integrated runs/geographic-family/development/geographic-dev-emsr578-00.json --policy heuristic --output runs/geographic-integrated-dev00.json
-python3 -m nightjar.geographic_benchmark runs/geographic-family/development/geographic-dev-emsr578-00.json --output runs/geographic-benchmark-dev00.json
-python3 -m nightjar.geographic_ppo --smoke
+python3 -m nightjar.geographic_family --raw-dir data/raw/cems --output-dir runs/geographic-family-real-v2
+# Offline fixtures must be requested explicitly and are labeled synthetic:
+python3 -m nightjar.geographic_family --synthetic --output-dir runs/geographic-family-synthetic
+python3 -m nightjar.geographic_integrated runs/geographic-family-real-v2/development/geographic-dev-emsr578-00.json --policy heuristic --output runs/geographic-family-real-v2/smoke-development-00.json
+python3 -m nightjar.geographic_benchmark runs/geographic-family-real-v2/development/geographic-dev-emsr578-00.json --output runs/geographic-family-real-v2/benchmark-development-00.json
+python3 -m nightjar.geographic_ppo --smoke --scenarios-dir runs/geographic-family-real-v2
 python3 -m nightjar.evaluate_reserved --split-version v2
 python3 -m nightjar.viewer runs/integrated-heuristic.json --output runs/viewer.html
 python3 -m unittest discover -s tests -v
@@ -98,7 +100,7 @@ python3 -m venv .venv
 .venv/bin/python -m nightjar.fire_standard examples/standard_fuel_fire.json --output runs/standard-fuel-fire.json
 ```
 
-The example mixes GR1 (101), SH1 (141), and nonburnable (0) cells. It is a synthetic, no-intervention spread example; no geographic land-cover product has been mapped to these codes yet. Its replay does not feed the aircraft episode. See [STANDARD_FUEL_PATH.md](docs/STANDARD_FUEL_PATH.md) for the full contract, evidence, and next steps.
+The example mixes GR1 (101), SH1 (141), and nonburnable (0) cells. It is a synthetic, no-intervention spread example with hand-assigned fuels; geographic land-cover mapping is implemented separately in `nightjar.cems_catalog`. Its replay does not feed the aircraft episode. See [STANDARD_FUEL_PATH.md](docs/STANDARD_FUEL_PATH.md) for the full contract, evidence, and next steps.
 
 The same unit suite runs in GitHub Actions for pushes and pull requests. Tests that need a downloaded external source skip when the audited file is absent.
 
@@ -114,7 +116,7 @@ A prior exploratory linear-controller trial did not show a convincing gain over 
 
 The discrimination-family command generates 24 synthetic scenarios under `nightjar-discrimination-family-0.1` partitioned into disjoint development, validation, and unopened reserved splits (eight scenarios each). It features multi-foci ignitions in separate quadrants, edge water refill locations, and observation delays of 60–120 s. All eight evaluated development cases exceed 4.0 ha unmitigated; that threshold has not been verified for the unopened splits. The command evaluates only the development split (104 full replays) across four policies: `no_intervention` (10.44 ha mean), greedy `heuristic` (8.94 ha mean), `containment_heuristic` (9.34 ha mean), and `random_valid` (9.23 ha mean). Validation and reserved outcomes remain unopened for future model selection and testing; see [EVALUATION.md](docs/EVALUATION.md).
 
-The geographic family command (`nightjar.geographic_family`) builds real-world tactical suites (`nightjar-geographic-family-0.1`) across Spanish wildfire activations (EMSR578, EMSR590, EMSR592, EMSR600) with Scott & Burgan 40 fuels and georeferenced waterbodies. The `nightjar.geographic_integrated` module simulates CL-415 aerial firefighting missions (cruise $80\text{ m/s}$, drop $55\text{ m/s}$, scooping $180\text{ s}$) over these landscapes with physical Rothermel propagation and zero-leakage observation schedules. Multi-policy comparisons are executed via `nightjar.geographic_benchmark`:
+The geographic family command requires the four verified local CEMS products `emsr578_del.zip`, `emsr590_del.zip`, `emsr592_del.zip`, and `emsr600_del.zip` under `data/raw/cems/` (or `--raw-dir`). It never downloads during generation. Fetching existing catalog products is explicit, for example `.venv/bin/python -m nightjar.cems_catalog fetch --activation EMSR578`; repeat for EMSR590, EMSR592, and EMSR600 before generating. Fetch verifies each registered SHA-256. Run `.venv/bin/python -m nightjar.geographic_family --raw-dir data/raw/cems --output-dir runs/geographic-family-real-v2` only after all four are present; output must be new/empty. Development uses EMSR578, validation EMSR590, and reserved scenarios round-robin EMSR592/EMSR600. Use `--synthetic` only for offline fixtures; the manifest and each scenario identify `synthetic_fixture`. Flat topography (no DEM) and modeled environmental settings remain assumptions; this is not physical validation. See [DATA_AND_VALIDATION.md](docs/DATA_AND_VALIDATION.md) for source provenance and limitations.
 
 
 The same fixed scenario now has a small headless interface for exploratory controller code:

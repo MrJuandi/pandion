@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 from zipfile import ZipFile
 
 from nightjar.cems_catalog import (
@@ -68,12 +69,19 @@ class TestCemsCatalog(unittest.TestCase):
                 zf.writestr("EMSR590_AOI01_DEL_PRODUCT_hydrographyA_r1_v1.json", json.dumps(mock_hydro))
                 zf.writestr("EMSR590_AOI01_DEL_PRODUCT_observedEventA_r1_v1.json", json.dumps(mock_obs))
 
-            scenario = build_cems_scenario("EMSR590", zip_path, cell_size_m=500.0, stage="del")
+            with self.assertRaisesRegex(ValueError, "differs from registered hash"):
+                build_cems_scenario("EMSR590", zip_path, cell_size_m=500.0, stage="del")
+            from hashlib import sha256
+            fixture_hash = sha256(zip_path.read_bytes()).hexdigest()
+            with patch.dict(ACTIVATIONS["EMSR590"]["products"]["del"], {"sha256": fixture_hash}):
+                scenario = build_cems_scenario("EMSR590", zip_path, cell_size_m=500.0, stage="del")
             self.assertEqual(scenario["schema_version"], "nightjar-cems-scenario-0.1")
             self.assertEqual(scenario["activation_id"], "EMSR590")
             self.assertEqual(scenario["crs"]["utm_zone"], 30)
             self.assertEqual(scenario["crs"]["code"], "EPSG:25830")
             self.assertEqual(scenario["default_split"], "validation")
+            self.assertEqual(scenario["provenance"]["source_zip_sha256"], fixture_hash)
+            self.assertEqual(scenario["provenance"]["source_stage"], "del")
             self.assertGreater(scenario["initial_perimeter"]["burned_cells_count"], 0)
             # Check fuel code 146 (SH6 from 322) was rasterized
             fuel_grid = scenario["fuel_grid"]
