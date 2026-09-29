@@ -17,10 +17,8 @@ from typing import Any
 
 from .aircraft import CAPACITY_L
 from .geographic_benchmark import run_geographic_benchmark
-from .geographic_family import (
-    build_synthetic_cems_fixture,
-    generate_geographic_scenario,
-)
+from .geographic_family import canonical_hash
+from .cems_catalog import ACTIVATIONS
 from .geographic_training_env import GeographicTrainingEnv
 from .model import (
     HAS_TORCH,
@@ -45,35 +43,91 @@ def _require_torch() -> None:
         raise ImportError("PyTorch is required for Geographic PPO; install requirements-rl.txt (torch>=2.0.0).")
 
 
-def load_geographic_split(split: str, scenarios_dir: Path | str = "runs/geographic-family") -> list[dict]:
-    """Load scenarios for a split from disk if available, or generate reproducible fallback fixtures."""
+def load_geographic_split(
+    split: str, scenarios_dir: Path | str = "runs/geographic-family-real-v2", *, synthetic: bool = False
+) -> list[dict]:
+    """Load a manifest-verified split; synthetic fixtures must already exist and be explicitly selected."""
+    if split not in ("development", "validation", "reserved"):
+        raise ValueError(f"Unknown geographic split: {split}")
     scenarios_dir = Path(scenarios_dir)
     split_dir = scenarios_dir / split
-    if split_dir.exists():
-        scenarios = []
-        for p in sorted(split_dir.glob("*.json")):
-            try:
-                scenarios.append(json.loads(p.read_text()))
-            except Exception:
-                continue
-        if scenarios:
-            return scenarios
-
-    # Fallback to generating scenarios on-the-fly using reviewed CEMS activation fixtures
-    act_name = "EMSR578" if split == "development" else ("EMSR590" if split == "validation" else "EMSR592")
-    zone = 31 if act_name == "EMSR578" else 30
-    fixture = build_synthetic_cems_fixture(act_name, utm_zone=zone, rows=35, cols=35)
-    return [
-        generate_geographic_scenario(
-            fixture,
-            index=i,
-            split=split,
-            window_rows=30,
-            window_cols=30,
-            horizon_s=1800.0,
+    manifest_path = scenarios_dir / "manifest.json"
+    if not split_dir.is_dir():
+        if synthetic:
+            raise FileNotFoundError(f"Synthetic mode requires an existing explicitly generated split directory: {split_dir}")
+        raise FileNotFoundError(f"Geographic split directory not found: {split_dir}")
+    paths = sorted(split_dir.glob("*.json"))
+    if not paths:
+        raise ValueError(f"Geographic split contains no scenario JSON files: {split_dir}")
+    if not manifest_path.is_file():
+        raise FileNotFoundError(f"Geographic family manifest not found: {manifest_path}")
+    try:
+        manifest = json.loads(manifest_path.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"Invalid geographic family manifest {manifest_path}: {exc}") from exc
+    if not isinstance(manifest, dict):
+        raise ValueError(f"Invalid geographic family manifest object: {manifest_path}")
+    manifest_scenarios = manifest.get("scenarios")
+    if not isinstance(manifest_scenarios, dict):
+        raise ValueError(f"Manifest has no valid scenario split mapping: {manifest_path}")
+    split_entries = manifest_scenarios.get(split)
+    if not isinstance(split_entries, list) or any(not isinstance(entry, dict) or "scenario_id" not in entry for entry in split_entries):
+        raise ValueError(f"Invalid or missing manifest entries for split '{split}' in {manifest_path}")
+    expected = {entry["scenario_id"]: entry for entry in split_entries}
+    if len(expected) != len(split_entries):
+        raise ValueError(f"Duplicate scenario IDs in manifest split '{split}': {manifest_path}")
+    designated = {"development": {"EMSR578"}, "validation": {"EMSR590"},
+                  "reserved": {"EMSR592", "EMSR600"}}[split]
+    scenarios = []
+    for path in paths:
+        try:
+            scenario = json.loads(path.read_text())
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ValueError(f"Invalid scenario JSON {path}: {exc}") from exc
+        if not isinstance(scenario, dict):
+            raise ValueError(f"Scenario JSON must contain an object: {path}")
+        sid = scenario.get("scenario_id")
+        entry = expected.get(sid)
+        if entry is None:
+            raise ValueError(f"Scenario is absent from manifest: {path}")
+        activation_id = scenario.get("activation_id")
+        if (not isinstance(activation_id, str) or scenario.get("split") != split
+                or activation_id != entry.get("activation_id")
+                or activation_id not in designated or entry.get("activation_id") not in designated):
+            raise ValueError(f"Scenario split/activation does not match requested '{split}' partition: {path}")
+        actual_hash = canonical_hash({k: v for k, v in scenario.items() if k != "scenario_hash"})
+        if scenario.get("scenario_hash") != actual_hash or entry.get("hash") != actual_hash:
+            raise ValueError(f"Scenario embedded or manifest hash mismatch: {path}")
+        kind = scenario.get("source_kind")
+        provenance = scenario.get("provenance")
+        if not isinstance(provenance, dict):
+            raise ValueError(f"Scenario has invalid provenance object: {path}")
+        source_hash = provenance.get("source_zip_sha256")
+        valid_source_hash = (kind == "synthetic_fixture" and source_hash is None) or (
+            kind == "copernicus_cems" and source_hash in {
+                product["sha256"] for product in ACTIVATIONS[activation_id]["products"].values()
+            }
         )
-        for i in range(4)
-    ]
+        if (kind != manifest.get("source_kind") or kind != entry.get("source_kind")
+                or source_hash != entry.get("source_zip_sha256") or not valid_source_hash
+                or kind not in (("synthetic_fixture",) if synthetic else ("copernicus_cems",))):
+            raise ValueError(f"Unexpected or unregistered source provenance in {path}: {kind!r}")
+        scenarios.append(scenario)
+    if set(expected) != {scenario["scenario_id"] for scenario in scenarios}:
+        raise ValueError(f"Scenario membership does not match manifest for {split_dir}")
+    return scenarios
+
+
+def _dataset_report(scenarios_dir: Path | str, splits: dict[str, list[dict]]) -> dict[str, Any]:
+    return {
+        "scenarios_dir": str(Path(scenarios_dir)),
+        "splits": {
+            split: [{"scenario_id": scenario["scenario_id"],
+                     "scenario_hash": canonical_hash({k: v for k, v in scenario.items() if k != "scenario_hash"}),
+                     "source_kind": scenario["source_kind"]} for scenario in scenarios]
+            for split, scenarios in splits.items()
+        },
+    }
 
 
 def returns_and_advantages(rewards: list[float], values: list[float], gamma: float = 0.99) -> tuple[Any, Any]:
@@ -298,7 +352,8 @@ def main() -> None:
     parser.add_argument("--select", action="store_true", help="Train candidates and select on validation")
     parser.add_argument("--eval", action="store_true", help="Evaluate checkpoint against baselines")
     parser.add_argument("--split", choices=("development", "validation", "reserved"), default="development")
-    parser.add_argument("--scenarios-dir", type=Path, default=Path("runs/geographic-family"))
+    parser.add_argument("--scenarios-dir", type=Path, default=Path("runs/geographic-family-real-v2"))
+    parser.add_argument("--synthetic", action="store_true", help="load an explicitly generated synthetic family")
     parser.add_argument("--updates", type=int, default=1)
     parser.add_argument("--episodes-per-update", type=int, default=1)
     parser.add_argument("--candidates", type=int, default=2)
@@ -314,7 +369,7 @@ def main() -> None:
     device = torch.device("cpu")
     recurrent = not args.feedforward
 
-    dev_scenarios = load_geographic_split("development", args.scenarios_dir)
+    dev_scenarios = load_geographic_split("development", args.scenarios_dir, synthetic=args.synthetic)
 
     if args.smoke or (not args.train and not args.select and not args.eval):
         print(f"Running Geographic PPO smoke test (recurrent={recurrent})...")
@@ -329,6 +384,7 @@ def main() -> None:
         _, metrics = rollout_geographic(model, dev_scenarios[0], device=device, deterministic=True)
         report = {
             "schema_version": SMOKE_SCHEMA_VERSION,
+            "dataset": _dataset_report(args.scenarios_dir, {"development": dev_scenarios}),
             "recurrent": recurrent,
             "loss": losses[0],
             "evaluation_metrics": metrics,
@@ -361,6 +417,7 @@ def main() -> None:
         _, eval_m = rollout_geographic(model, dev_scenarios[0], device=device, deterministic=True)
         report = {
             "schema_version": "nightjar-geographic-ppo-train-0.1",
+            "dataset": _dataset_report(args.scenarios_dir, {"development": dev_scenarios}),
             "recurrent": recurrent,
             "updates": args.updates,
             "final_loss": losses[-1] if losses else 0.0,
@@ -373,7 +430,7 @@ def main() -> None:
         return
 
     if args.select:
-        val_scenarios = load_geographic_split("validation", args.scenarios_dir)
+        val_scenarios = load_geographic_split("validation", args.scenarios_dir, synthetic=args.synthetic)
         if args.eval_scenarios is not None:
             val_scenarios = val_scenarios[:args.eval_scenarios]
         print(f"Training {args.candidates} candidates on {len(dev_scenarios)} development scenarios...")
@@ -402,6 +459,7 @@ def main() -> None:
             total_drops = sum(r["drops_count"] for r in val_results)
 
             candidate_reports.append({
+                "dataset": _dataset_report(args.scenarios_dir, {"development": dev_scenarios, "validation": val_scenarios}),
                 "candidate_index": c_idx,
                 "seed": c_seed,
                 "mean_burned_ha": round(mean_burned, 2),
@@ -422,6 +480,7 @@ def main() -> None:
 
         report = {
             "schema_version": SELECTION_SCHEMA_VERSION,
+            "dataset": _dataset_report(args.scenarios_dir, {"development": dev_scenarios, "validation": val_scenarios}),
             "recurrent": recurrent,
             "candidates_count": args.candidates,
             "best_mean_burned_ha": round(best_mean_burned, 2),
@@ -436,7 +495,7 @@ def main() -> None:
     if args.eval:
         if not args.checkpoint or not args.checkpoint.exists():
             raise FileNotFoundError(f"Checkpoint file required for --eval: {args.checkpoint}")
-        target_scenarios = load_geographic_split(args.split, args.scenarios_dir)
+        target_scenarios = load_geographic_split(args.split, args.scenarios_dir, synthetic=args.synthetic)
         if args.eval_scenarios is not None:
             target_scenarios = target_scenarios[:args.eval_scenarios]
 
@@ -483,7 +542,9 @@ def main() -> None:
 
         if args.output:
             args.output.parent.mkdir(parents=True, exist_ok=True)
-            args.output.write_text(json.dumps({"schema_version": EVAL_SCHEMA_VERSION, "reports": eval_reports}, indent=2))
+            args.output.write_text(json.dumps({"schema_version": EVAL_SCHEMA_VERSION,
+                                               "dataset": _dataset_report(args.scenarios_dir, {args.split: target_scenarios}),
+                                               "reports": eval_reports}, indent=2))
             print(f"Wrote evaluation report -> {args.output}")
         return
 

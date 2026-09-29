@@ -31,6 +31,24 @@ class TestGeographicFamily(unittest.TestCase):
         self.assertEqual(len(self.fixture_31["fuel_grid"]), 60)
         self.assertEqual(len(self.fixture_31["fuel_grid"][0]), 60)
 
+    def test_asymmetric_crop_orientation_origin_and_large_window_bounds(self):
+        base = build_synthetic_cems_fixture("EMSR578", rows=5, cols=7)
+        base["fuel_grid"] = [[r * 10 + c for c in range(7)] for r in range(5)]
+        base["water_mask"] = [[False] * 7 for _ in range(5)]
+        base["water_mask"][4][0] = True
+        base["burn_mask"] = [[False] * 7 for _ in range(5)]
+        base["burn_mask"][0][6] = True
+        sliced = slice_tactical_aoi(base, center_row=4, center_col=0, window_rows=2, window_cols=3)
+        self.assertEqual(sliced["fuel_grid"], [[30, 31, 32], [40, 41, 42]])
+        self.assertEqual(sliced["water_mask"], [[False, False, False], [True, False, False]])
+        self.assertEqual(sliced["burn_mask"], [[False, False, False], [False, False, False]])
+        self.assertEqual((sliced["r0"], sliced["c0"], sliced["rows"], sliced["cols"]), (3, 0, 2, 3))
+        self.assertEqual(sliced["origin_utm_easting_m"], base["grid"]["origin_utm_easting_m"])
+        self.assertEqual(sliced["origin_utm_northing_m"], base["grid"]["origin_utm_northing_m"] + 300)
+        full = slice_tactical_aoi(base, center_row=0, center_col=6, window_rows=10, window_cols=10)
+        self.assertEqual((full["rows"], full["cols"]), (5, 7))
+        self.assertTrue(full["burn_mask"][0][6])
+
     def test_slice_tactical_aoi(self):
         sliced = slice_tactical_aoi(self.fixture_31, window_rows=30, window_cols=30)
         self.assertEqual(sliced["rows"], 30)
@@ -51,6 +69,11 @@ class TestGeographicFamily(unittest.TestCase):
         self.assertIn("crop", scen1["provenance"])
         self.assertEqual(scen1["scenario_hash"], canonical_hash({k: v for k, v in scen1.items() if k != "scenario_hash"}))
         self.assertIn("fuel_grid", scen1["fire"])
+        self.assertIn("water_mask", scen1["fire"])
+        expected_water = slice_tactical_aoi(self.fixture_31, window_rows=30, window_cols=30)["water_mask"]
+        self.assertEqual(scen1["fire"]["water_mask"], expected_water)
+        self.assertEqual(scen1["grid"]["origin_semantics"], "southwest cell boundary")
+        self.assertIn("not measured physical drop centers", scen1["provenance"]["coordinate_contract"]["drop_targets"])
         self.assertIn("burn_mask", scen1["fire"])
         self.assertIn("wind_to_m_s", scen1["fire"])
         self.assertIn("moisture", scen1["fire"])
