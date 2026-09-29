@@ -255,6 +255,7 @@ def train_geographic_ppo(
     lr: float = 3e-4,
     recurrent: bool = True,
     device: Any = None,
+    resume_checkpoint: Path | str | None = None,
 ) -> tuple[Any, list[float]]:
     """Train a SpatialActorCritic policy on geographic development scenarios."""
     _require_torch()
@@ -268,6 +269,10 @@ def train_geographic_ppo(
         action_dim=len(TACTICAL_ACTION_NAMES),
         recurrent=recurrent,
     ).to(device)
+
+    if resume_checkpoint and Path(resume_checkpoint).exists():
+        model.load_state_dict(torch.load(resume_checkpoint, map_location=device))
+        print(f"Resumed model weights from {resume_checkpoint}")
 
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     losses = []
@@ -301,6 +306,7 @@ def main() -> None:
     parser.add_argument("--feedforward", action="store_true", help="Use feedforward instead of LSTM")
     parser.add_argument("--eval-scenarios", type=int, default=None, help="Limit number of validation scenarios to evaluate")
     parser.add_argument("--checkpoint", type=Path)
+    parser.add_argument("--resume", type=Path, help="Path to checkpoint to resume weights from")
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
 
@@ -318,6 +324,7 @@ def main() -> None:
             episodes_per_update=1,
             recurrent=recurrent,
             device=device,
+            resume_checkpoint=args.resume,
         )
         _, metrics = rollout_geographic(model, dev_scenarios[0], device=device, deterministic=True)
         report = {
@@ -344,6 +351,7 @@ def main() -> None:
             lr=args.lr,
             recurrent=recurrent,
             device=device,
+            resume_checkpoint=args.resume,
         )
         if args.checkpoint:
             args.checkpoint.parent.mkdir(parents=True, exist_ok=True)
