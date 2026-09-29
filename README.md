@@ -84,6 +84,7 @@ python3 -m nightjar.cems_catalog list
 python3 -m nightjar.geographic_family --output-dir runs/geographic-family
 python3 -m nightjar.geographic_integrated runs/geographic-family/development/geographic-dev-emsr578-00.json --policy heuristic --output runs/geographic-integrated-dev00.json
 python3 -m nightjar.geographic_benchmark runs/geographic-family/development/geographic-dev-emsr578-00.json --output runs/geographic-benchmark-dev00.json
+python3 -m nightjar.geographic_ppo --smoke
 python3 -m nightjar.evaluate_reserved --split-version v2
 python3 -m nightjar.viewer runs/integrated-heuristic.json --output runs/viewer.html
 python3 -m unittest discover -s tests -v
@@ -167,6 +168,13 @@ model = SpatialActorCritic(grid_rows=11, grid_cols=11, recurrent=True)
 state = None
 action_idx, state = model.select_action(observation, tensorizer, mapper, deterministic=True, state=state)
 observation, reward, done, info = env.step_discrete(action_idx)
+```
+
+For real-world geographic decision research with Copernicus CEMS scenarios:
+
+```sh
+python3 -m nightjar.geographic_ppo --smoke
+python3 -m nightjar.geographic_ppo --select --updates 1 --episodes-per-update 1 --candidates 2 --checkpoint runs/geographic-ppo.pt --output runs/geographic-selection.json
 ```
 
 The observation example reads the FM1 replay and a synthetic schedule of capture and delivery times. It exposes only delivered, covered cells. It is an information-flow test, not a real satellite sensor model.

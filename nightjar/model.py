@@ -16,7 +16,7 @@ import math
 from typing import Any
 
 from .aircraft import CAPACITY_L
-from .policies import candidate_cells, _containment_target
+from .policies import candidate_cells, _containment_target, _is_burnable_fuel
 
 try:
     import torch
@@ -105,16 +105,24 @@ class ObservationTensorizer:
         for r in range(self.rows):
             for c in range(self.cols):
                 # Channel 0: burnable fuel
-                if fuel_model[r][c] != "NONE":
+                if _is_burnable_fuel(fuel_model[r][c]):
                     raster[0][r][c] = 1.0
 
                 cell_obs = fire_cells[r][c]
-                det = cell_obs.get("fire_detected")
-                if det is True:
-                    raster[1][r][c] = 1.0
-                elif det is False:
-                    raster[2][r][c] = 1.0
+                if isinstance(cell_obs, dict):
+                    det = cell_obs.get("fire_detected")
+                    if det is True:
+                        raster[1][r][c] = 1.0
+                    elif det is False:
+                        raster[2][r][c] = 1.0
+                    else:
+                        raster[3][r][c] = 1.0
+
+                    age = cell_obs.get("age_s")
+                    if age is not None and self.horizon_s > 0:
+                        raster[6][r][c] = min(max(age / self.horizon_s, 0.0), 1.0)
                 else:
+                    # Unobserved cell
                     raster[3][r][c] = 1.0
 
                 # Channel 4: known treated
@@ -124,11 +132,6 @@ class ObservationTensorizer:
                 # Channel 5: candidate perimeter
                 if (r, c) in candidates_set:
                     raster[5][r][c] = 1.0
-
-                # Channel 6: observation age
-                age = cell_obs.get("age_s")
-                if age is not None and self.horizon_s > 0:
-                    raster[6][r][c] = min(max(age / self.horizon_s, 0.0), 1.0)
 
                 # Channel 7: normalized public elevation
                 raster[7][r][c] = (float(elevation[r][c]) - z_min) / z_span
@@ -154,7 +157,7 @@ class ObservationTensorizer:
                 raster[8][r][c] = min(max(math.hypot(gx, gy), 0.0), 1.0)
 
                 # Channel 9: spread risk heatmap
-                if fuel_model[r][c] == "NONE" or (r, c) in treated_set:
+                if not _is_burnable_fuel(fuel_model[r][c]) or (r, c) in treated_set:
                     raster[9][r][c] = 0.0
                 elif (r, c) in burning_set:
                     raster[9][r][c] = 1.0
