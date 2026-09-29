@@ -4,10 +4,17 @@ from __future__ import annotations
 
 import random
 from math import hypot
+from typing import Any
+
+
+def _is_burnable_fuel(val: Any) -> bool:
+    if isinstance(val, (int, float)):
+        return val > 0
+    return str(val).upper() not in ("NONE", "0", "")
 
 
 def candidate_cells(observation: dict) -> list[list[int]]:
-    """Return observed unburned FM1 cells adjacent to an observed active fire.
+    """Return observed unburned burnable cells adjacent to an observed active fire.
 
     Only delivered cell records in ``observation['fire']['cells']`` are read;
     unknown cells never count as either burning or unburned.
@@ -35,7 +42,7 @@ def candidate_cells(observation: dict) -> list[list[int]]:
             if not (0 <= nr < rows and 0 <= nc < cols):
                 continue
             record = cells[nr][nc]
-            if (nr, nc) not in treated and fuel[nr][nc] == "FM1" and isinstance(record, dict) and record.get("fire_detected") is False:
+            if (nr, nc) not in treated and _is_burnable_fuel(fuel[nr][nc]) and isinstance(record, dict) and record.get("fire_detected") is False:
                 candidates.add((nr, nc))
     return [[r, c] for r, c in sorted(candidates)]
 
@@ -143,9 +150,9 @@ def _containment_target(observation: dict, candidates: list[list[int]]) -> list[
             for step in range(1, 5):
                 nr, nc = r + step * step_r, c + step * step_c
                 if 0 <= nr < rows and 0 <= nc < cols:
-                    if fuel[nr][nc] == "FM1" and (nr, nc) not in burning and (nr, nc) not in treated:
+                    if _is_burnable_fuel(fuel[nr][nc]) and (nr, nc) not in burning and (nr, nc) not in treated:
                         downstream_fuel += 1
-                    elif fuel[nr][nc] == "NONE":
+                    elif not _is_burnable_fuel(fuel[nr][nc]):
                         break
 
         x, y = c * cell_size, r * cell_size

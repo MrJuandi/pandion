@@ -160,7 +160,9 @@ def generate_geographic_scenario(
     while t <= horizon_s:
         delivered_t = min(horizon_s, t + cadence["delay_s"])
         obs_schedule.append({
+            "source_id": f"survey-{int(t)}s",
             "observed_at_s": round(t, 1),
+            "available_at_s": round(delivered_t, 1),
             "delivered_at_s": round(delivered_t, 1),
             "coverage": "all",
         })
