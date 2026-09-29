@@ -25,7 +25,7 @@ FAMILY_SCHEMA_VERSION = "nightjar-discrimination-family-0.1"
 REPORT_SCHEMA_VERSION = "nightjar-discrimination-report-0.1"
 
 DEVELOPMENT_INDICES = tuple(range(8))
-VALIDATION_INDICES = tuple(range(8))
+VALIDATION_INDICES = tuple(range(32))
 RESERVED_INDICES = tuple(range(8))
 
 SPLIT_BASE_SEEDS = {
@@ -37,6 +37,22 @@ SPLIT_BASE_SEEDS = {
 WIND_CHOICES = [[2, 0], [-2, 0], [0, 2], [0, -2], [3, 1], [-3, -1], [2, -2], [-2, 2]]
 WATER_SOURCE_CHOICES = [[0, 250], [500, 250], [250, 0], [250, 500]]
 AIRCRAFT_POSITION_CHOICES = [[0, 0], [500, 500], [0, 500], [500, 0]]
+
+RANDOMIZED_WATER_SOURCES = [
+    [0, 250], [500, 250], [250, 0], [250, 500],
+    [0, 0], [500, 500], [0, 500], [500, 0],
+]
+RANDOMIZED_AIRCRAFT_POSITIONS = [
+    [0, 0], [500, 500], [0, 500], [500, 0], [250, 250],
+]
+RANDOMIZED_WIND_CHOICES = [
+    [2, 0], [-2, 0], [0, 2], [0, -2],
+    [3, 1], [-3, -1], [2, -2], [-2, 2],
+    [1, 2], [-1, -2], [3, 0], [-3, 0],
+    [0, 3], [0, -3], [1, 1], [-1, -1],
+]
+RANDOMIZED_PROBABILITIES = [0.03, 0.05, 0.08, 0.10, 0.12, 0.15]
+RANDOMIZED_DELAYS = [45, 60, 90, 120, 150]
 
 
 def canonical_hash(value: object) -> str:
@@ -111,6 +127,98 @@ def _one(base: dict, index: int, split: str) -> dict:
     ]
     scenario["generation"] = {
         "generator_version": "discrimination-family-0.1",
+        "generator_seed": seed,
+        "blocked_cell_probability": prob,
+        "blocked_cell_count": sum(value == "NONE" for row in fuel for value in row),
+        "report_delay_s": delay,
+        "ignitions": ignitions,
+        "water_source_m": water_source,
+    }
+
+    validate_fire(scenario["fire"])
+    validate_aircraft(scenario["aircraft"])
+
+    for part in ("fire", "aircraft"):
+        for key in ("scenario_id", "seed", "provenance", "crs", "time_origin_utc", "units"):
+            if scenario[key] != scenario[part][key]:
+                raise ValueError(f"integrated and {part} metadata mismatch for {key}")
+
+    return scenario
+
+
+def generate_domain_randomized_scenario(seed: int, base: dict | None = None) -> dict:
+    """Generate a procedurally randomized training scenario with diverse initial conditions."""
+    if base is None:
+        base = json.loads(SOURCE_PATH.read_text())
+    rng = random.Random(seed)
+
+    # Multi-foci: two ignitions with Manhattan distance >= 4, placed in interior cells [1, 9]
+    ign1 = [rng.randrange(1, 10), rng.randrange(1, 10)]
+    while True:
+        ign2 = [rng.randrange(1, 10), rng.randrange(1, 10)]
+        if abs(ign1[0] - ign2[0]) + abs(ign1[1] - ign2[1]) >= 4:
+            break
+    ignitions = [ign1, ign2]
+
+    wind = rng.choice(RANDOMIZED_WIND_CHOICES)
+    water_source = rng.choice(RANDOMIZED_WATER_SOURCES)
+    position = rng.choice(RANDOMIZED_AIRCRAFT_POSITIONS)
+    prob = rng.choice(RANDOMIZED_PROBABILITIES)
+    delay = rng.choice(RANDOMIZED_DELAYS)
+
+    scenario = deepcopy(base)
+    fuel = scenario["fire"]["fuel_model"]
+
+    # Protect immediate 4-neighborhood of ignitions so spread is never suffocated at t=0
+    protected = set()
+    for r, c in ignitions:
+        protected.add((r, c))
+        for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+            protected.add((r + dr, c + dc))
+
+    for row in range(11):
+        for col in range(11):
+            if (row, col) not in protected and rng.random() < prob:
+                fuel[row][col] = "NONE"
+
+    sid = f"discrimination-random-{seed}"
+    scenario["scenario_id"] = sid
+    scenario["fire"]["scenario_id"] = sid
+    scenario["aircraft"]["scenario_id"] = sid
+    scenario["seed"] = scenario["fire"]["seed"] = scenario["aircraft"]["seed"] = seed
+
+    for document in (scenario, scenario["fire"], scenario["aircraft"]):
+        document.update(
+            provenance="synthetic",
+            crs="LOCAL_METERS",
+            time_origin_utc=TIME_ORIGIN_UTC,
+            units=deepcopy(UNITS),
+        )
+
+    scenario["fire"].update(
+        rows=11,
+        cols=11,
+        horizon_s=1200,
+        ignitions=ignitions,
+        midflame_wind_to_m_s=wind,
+    )
+    scenario["aircraft"].update(
+        horizon_s=1200,
+        water_source_m=water_source,
+    )
+    scenario["aircraft"]["aircraft"]["initial_position_m"] = position
+    scenario["water_effect"]["radius_m"] = 35
+    scenario["observation_schedule"] = [
+        {
+            "source_id": "synthetic-survey",
+            "observed_at_s": t,
+            "available_at_s": 0 if t == 0 else t + delay,
+            "coverage": "all",
+        }
+        for t in range(0, 1201, 60)
+    ]
+    scenario["generation"] = {
+        "generator_version": "discrimination-domain-random-0.1",
         "generator_seed": seed,
         "blocked_cell_probability": prob,
         "blocked_cell_count": sum(value == "NONE" for row in fuel for value in row),

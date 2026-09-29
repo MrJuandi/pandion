@@ -10,6 +10,7 @@ from nightjar.discrimination_family import (
     RESERVED_INDICES,
     build_scenarios,
     canonical_hash,
+    generate_domain_randomized_scenario,
     write_family,
 )
 from nightjar.integrated import run_integrated
@@ -26,7 +27,7 @@ class DiscriminationFamilyTests(unittest.TestCase):
             [[canonical_hash(s) for s in group] for group in (dev, val, reserved)],
             [[canonical_hash(s) for s in group] for group in (again_dev, again_val, again_res)],
         )
-        self.assertEqual((len(dev), len(val), len(reserved)), (8, 8, 8))
+        self.assertEqual((len(dev), len(val), len(reserved)), (8, 32, 8))
 
         all_scenarios = dev + val + reserved
         # Check all seeds disjoint
@@ -73,7 +74,7 @@ class DiscriminationFamilyTests(unittest.TestCase):
                 for row in manifest["scenarios"]
                 if row["split"] in ("validation", "reserved")
             }
-            self.assertEqual(len(unopened), 16)
+            self.assertEqual(len(unopened), 40)
             self.assertFalse(unopened & {row["scenario_id"] for row in report["runs"]})
             self.assertFalse(any((root / "replays" / sid).exists() for sid in unopened))
             for row in report["runs"]:
@@ -81,6 +82,31 @@ class DiscriminationFamilyTests(unittest.TestCase):
                 scenario_spec = next(x for x in manifest["scenarios"] if x["scenario_id"] == row["scenario_id"])
                 self.assertEqual(replay["scenario_sha256"], scenario_spec["sha256"])
                 self.assertEqual(row["scenario_sha256"], scenario_spec["sha256"])
+
+    def test_generate_domain_randomized_scenario(self):
+        s1 = generate_domain_randomized_scenario(seed=42)
+        s2 = generate_domain_randomized_scenario(seed=42)
+        s3 = generate_domain_randomized_scenario(seed=43)
+
+        self.assertEqual(canonical_hash(s1), canonical_hash(s2))
+        self.assertNotEqual(canonical_hash(s1), canonical_hash(s3))
+        self.assertEqual(s1["scenario_id"], "discrimination-random-42")
+        self.assertEqual(s1["fire"]["horizon_s"], 1200)
+        self.assertEqual(s1["aircraft"]["horizon_s"], 1200)
+
+        # Check multi-foci separation
+        ign = s1["fire"]["ignitions"]
+        self.assertEqual(len(ign), 2)
+        dist = abs(ign[0][0] - ign[1][0]) + abs(ign[0][1] - ign[1][1])
+        self.assertGreaterEqual(dist, 4)
+
+        # Check immediate neighborhood of ignitions is burnable
+        fuel = s1["fire"]["fuel_model"]
+        for r, c in ign:
+            self.assertNotEqual(fuel[r][c], "NONE")
+            for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+                if 0 <= r + dr < 11 and 0 <= c + dc < 11:
+                    self.assertNotEqual(fuel[r + dr][c + dc], "NONE")
 
 
 if __name__ == "__main__":

@@ -16,17 +16,19 @@ from .policies import candidate_cells
 
 def valid_actions(observation: dict) -> list[dict]:
     """List orders available from delivered information and aircraft state."""
-    actions = [{"type": "HOLD"}]
     aircraft = observation["aircraft"]
-    if aircraft["phase"] == "idle":
-        if aircraft["water_l"] < CAPACITY_L:
-            actions.append({"type": "RETURN_TO_REFILL"})
-        if aircraft["water_l"] > 0:
-            cell_size = observation["cell_size_m"]
-            actions.extend(
-                {"type": "DROP", "target_m": [c * cell_size, r * cell_size]}
-                for r, c in candidate_cells(observation)
-            )
+    if aircraft["phase"] != "idle":
+        return [{"type": "HOLD"}]
+    if aircraft["water_l"] <= 0:
+        return [{"type": "RETURN_TO_REFILL"}]
+    actions = [{"type": "HOLD"}]
+    if aircraft["water_l"] < CAPACITY_L:
+        actions.append({"type": "RETURN_TO_REFILL"})
+    cell_size = observation["cell_size_m"]
+    actions.extend(
+        {"type": "DROP", "target_m": [c * cell_size, r * cell_size]}
+        for r, c in candidate_cells(observation)
+    )
     return actions
 
 
@@ -34,19 +36,28 @@ class IntegratedTrainingEnv:
     """A deterministic, observation-only environment over an integrated scenario.
 
     Reward is the negative change in cumulative burned area, in hectares,
-    between consecutive decision boundaries. Thus zero means no newly burned
-    area in that interval and larger (less negative) rewards mean less spread.
+    between consecutive decision boundaries, plus an optional drop bonus
+    for newly blocked cells on the active fire perimeter.
     """
 
     reward_units = "ha"
     reward_definition = "-(cumulative_burned_area_t_ha - cumulative_burned_area_previous_ha)"
 
-    def __init__(self, scenario: dict):
+    def __init__(
+        self,
+        scenario: dict,
+        *,
+        drop_bonus_per_cell: float = 0.0,
+        action_mode: str = "spatial",
+    ):
         self._scenario = deepcopy(scenario)
+        self._drop_bonus_per_cell = float(drop_bonus_per_cell)
+        self._action_mode = action_mode
         self._actions: list[dict] = []
         self._observation: dict | None = None
         self._replay: dict | None = None
         self._area_ha = 0.0
+        self._drop_count = 0
         self._terminated = False
 
     def _run_prefix(self) -> dict:
@@ -85,6 +96,7 @@ class IntegratedTrainingEnv:
         self._replay = self._run_prefix()
         self._observation = deepcopy(self._replay["pending_observation"])
         self._area_ha = self._replay["affected_area_ha"]
+        self._drop_count = len(self._replay.get("drops", []))
         return deepcopy(self._observation)
 
     def step(self, action: dict) -> tuple[dict, float, bool, dict]:
@@ -103,6 +115,14 @@ class IntegratedTrainingEnv:
         new_area = self._replay["affected_area_ha"]
         reward = -(new_area - self._area_ha)
         self._area_ha = new_area
+
+        new_drops = self._replay.get("drops", [])
+        if self._drop_bonus_per_cell > 0 and len(new_drops) > self._drop_count:
+            for drop_record in new_drops[self._drop_count:]:
+                blocked = len(drop_record.get("newly_blocked_cells", []))
+                reward += blocked * self._drop_bonus_per_cell
+        self._drop_count = len(new_drops)
+
         next_observation = self._replay.get("pending_observation")
         self._terminated = next_observation is None
         if next_observation is None:
@@ -126,6 +146,7 @@ class IntegratedTrainingEnv:
             rows=len(fuel),
             cols=len(fuel[0]),
             cell_size_m=float(self._scenario["fire"]["cell_size_m"]),
+            action_mode=self._action_mode,
         )
 
     def observation_tensorizer(self) -> Any:
@@ -142,5 +163,5 @@ class IntegratedTrainingEnv:
     def step_discrete(self, action_index: int) -> tuple[dict, float, bool, dict]:
         """Apply a discrete action index from ActionMapper and advance one step."""
         mapper = self.action_mapper()
-        order = mapper.to_order(action_index)
+        order = mapper.to_order(action_index, observation=self._observation)
         return self.step(order)
