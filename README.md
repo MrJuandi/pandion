@@ -129,12 +129,14 @@ For exploratory PPO research (Stage 1), install `requirements-rl.txt` (`torch>=2
 
 ```sh
 python3 -m nightjar.ppo --output runs/ppo-smoke.json --updates 1 --episodes-per-update 1
+# Or with recurrent memory (LSTM), tactical macro-actions, and procedural domain randomization:
+python3 -m nightjar.ppo --recurrent --domain-randomization --action-mode tactical --updates 1 --episodes-per-update 1
 ```
 
 The command writes no artifact unless `--output` is supplied, and never opens validation or reserved scenarios. Results are synthetic diagnostics only. To train multiple candidates on development and select one deterministically on validation, save per-case metrics, provenance, and a checkpoint with:
 
 ```sh
-python3 -m nightjar.ppo --select --output runs/ppo-selection.json --checkpoint runs/ppo-selection.pt --candidates 2 --updates 1 --episodes-per-update 1
+python3 -m nightjar.ppo --select --output runs/ppo-selection.json --checkpoint runs/ppo-selection.pt --candidates 2 --updates 1 --episodes-per-update 1 --action-mode tactical
 ```
 
 Selection minimizes mean validation affected area, breaking exact ties by seed and candidate index; reserved scenarios are never evaluated. Each validation case records PPO, `heuristic`, and `containment_heuristic` metrics matched by `scenario_id`, with paired PPO-minus-baseline means, counts, wins/losses, and rejected-order criteria for the selected candidate. The completed 16x8 five-seed run selected a validation mean of 8.625 ha, a 0.53125 ha reduction versus the heuristic.
@@ -145,17 +147,18 @@ To evaluate a selected checkpoint strictly once against all eight reserved scena
 python3 -m nightjar.evaluate_reserved --checkpoint runs/ppo-matched-5seeds-16x8.pt --output runs/reserved-evaluation/report.json
 ```
 
-On the held-out reserved split, the selected policy achieved zero rejected orders and improved over valid random choice (`6.719 ha` vs `7.013 ha`, 6 wins), but failed to surpass transparent heuristics (`6.531 ha` greedy, `6.281 ha` containment); see [EVALUATION.md](docs/EVALUATION.md). The `nightjar.model` module provides observation tensorization (9 spatial raster channels and 10 vector features, including public normalized elevation and slope magnitude), discrete action mapping ($2 + H \times W$), and a hybrid CNN+MLP `SpatialActorCritic` with invalid-action masking:
+On the held-out reserved split, the selected policy achieved zero rejected orders and improved over valid random choice (`6.719 ha` vs `7.013 ha`, 6 wins), but failed to surpass transparent heuristics (`6.531 ha` greedy, `6.281 ha` containment); see [EVALUATION.md](docs/EVALUATION.md). The `nightjar.model` module provides observation tensorization (10 spatial raster channels including public normalized elevation, slope magnitude, and forward physical spread risk heatmap, plus 10 vector features), discrete action mapping (spatial $2 + H \times W$ or 9 tactical macro-actions), and a hybrid CNN+MLP `SpatialActorCritic` with invalid-action masking and optional recurrent memory (`recurrent=True`):
 
 ```python
 from nightjar.model import ActionMapper, ObservationTensorizer, SpatialActorCritic
 
 mapper = env.action_mapper()
 tensorizer = env.observation_tensorizer()
-model = SpatialActorCritic(grid_rows=11, grid_cols=11)
+model = SpatialActorCritic(grid_rows=11, grid_cols=11, recurrent=True)
 
-# Step using discrete action indices with action masking
-action_idx = model.select_action(observation, tensorizer, mapper, deterministic=True)
+# Step using discrete action indices with action masking and recurrent memory
+state = None
+action_idx, state = model.select_action(observation, tensorizer, mapper, deterministic=True, state=state)
 observation, reward, done, info = env.step_discrete(action_idx)
 ```
 

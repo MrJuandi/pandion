@@ -12,7 +12,7 @@ from typing import Any
 try:
     import torch
     import torch.nn.functional as F
-    from .model import SpatialActorCritic
+    from .model import SpatialActorCritic, TACTICAL_ACTION_NAMES
     HAS_TORCH = True
 except ImportError:  # pragma: no cover - exercised by optional-dependency environments
     torch = None  # type: ignore[assignment]
@@ -20,7 +20,7 @@ except ImportError:  # pragma: no cover - exercised by optional-dependency envir
     SpatialActorCritic = None  # type: ignore[assignment,misc]
     HAS_TORCH = False
 
-from .discrimination_family import build_scenarios
+from .discrimination_family import build_scenarios, generate_domain_randomized_scenario
 from .integrated import run_integrated
 from .training_env import IntegratedTrainingEnv
 
@@ -58,7 +58,8 @@ def returns_and_advantages(rewards: list[float], values: list[float], gamma: flo
 
 
 def _rollout(model: Any, scenario: dict, seed: int, device: Any) -> tuple[list[dict], dict]:
-    env = IntegratedTrainingEnv(scenario)
+    action_mode = getattr(model, "action_mode", "tactical" if getattr(model, "action_dim", None) == 8 else "spatial")
+    env = IntegratedTrainingEnv(scenario, drop_bonus_per_cell=0.25, action_mode=action_mode)
     observation = env.reset(seed=scenario["seed"])
     mapper = env.action_mapper()
     tensorizer = env.observation_tensorizer()
@@ -66,11 +67,19 @@ def _rollout(model: Any, scenario: dict, seed: int, device: Any) -> tuple[list[d
     rewards: list[float] = []
     values: list[float] = []
     done = False
+    state = None
+    is_recurrent = getattr(model, "recurrent", False)
     while not done:
         raster, vector = tensorizer.to_torch(observation, device=device)
         mask = mapper.to_mask_torch(observation, device=device)
         with torch.no_grad():
-            action, log_prob, _, value = model.get_action(raster, vector, mask)
+            if is_recurrent:
+                action, log_prob, _, value, next_state = model.get_action(
+                    raster, vector, mask, state=state
+                )
+                state = next_state
+            else:
+                action, log_prob, _, value = model.get_action(raster, vector, mask)
         next_observation, reward, done, _ = env.step_discrete(int(action.item()))
         records.append({"raster": raster.squeeze(0), "vector": vector.squeeze(0), "mask": mask.squeeze(0),
                         "action": action.squeeze(0), "log_prob": log_prob.squeeze(0)})
@@ -91,17 +100,63 @@ def _rollout(model: Any, scenario: dict, seed: int, device: Any) -> tuple[list[d
     return records, metrics
 
 
-def ppo_update(model: Any, optimizer: Any, records: list[dict], clip_ratio: float = 0.2) -> float:
-    """Apply one full-batch clipped PPO update and return its scalar loss."""
+def ppo_update(
+    model: Any,
+    optimizer: Any,
+    records: list[dict] | list[list[dict]],
+    clip_ratio: float = 0.2,
+) -> float:
+    """Apply one clipped PPO update and return its scalar loss."""
     _require_torch()
-    raster = torch.stack([r["raster"] for r in records])
-    vector = torch.stack([r["vector"] for r in records])
-    masks = torch.stack([r["mask"] for r in records])
-    actions = torch.stack([r["action"] for r in records])
-    old_log_probs = torch.stack([r["log_prob"] for r in records]).detach()
-    returns = torch.stack([r["return"] for r in records]).detach()
-    advantages = torch.stack([r["advantage"] for r in records]).detach()
-    log_probs, entropy, values = model.evaluate_actions(raster, vector, masks, actions)
+    if not records:
+        return 0.0
+
+    if isinstance(records[0], dict):
+        episodes = [records]  # type: ignore[list-item]
+    else:
+        episodes = records  # type: ignore[assignment]
+
+    is_recurrent = getattr(model, "recurrent", False)
+
+    if not is_recurrent:
+        flat_records = [r for ep in episodes for r in ep]
+        raster = torch.stack([r["raster"] for r in flat_records])
+        vector = torch.stack([r["vector"] for r in flat_records])
+        masks = torch.stack([r["mask"] for r in flat_records])
+        actions = torch.stack([r["action"] for r in flat_records])
+        old_log_probs = torch.stack([r["log_prob"] for r in flat_records]).detach()
+        returns = torch.stack([r["return"] for r in flat_records]).detach()
+        advantages = torch.stack([r["advantage"] for r in flat_records]).detach()
+        log_probs, entropy, values = model.evaluate_actions(raster, vector, masks, actions)
+    else:
+        all_log_probs = []
+        all_entropies = []
+        all_values = []
+        all_old_log_probs = []
+        all_returns = []
+        all_advantages = []
+        for ep in episodes:
+            if not ep:
+                continue
+            r_seq = torch.stack([r["raster"] for r in ep])
+            v_seq = torch.stack([r["vector"] for r in ep])
+            m_seq = torch.stack([r["mask"] for r in ep])
+            a_seq = torch.stack([r["action"] for r in ep])
+            lp, ent, val = model.evaluate_actions(r_seq, v_seq, m_seq, a_seq)
+            all_log_probs.append(lp)
+            all_entropies.append(ent)
+            all_values.append(val)
+            all_old_log_probs.append(torch.stack([r["log_prob"] for r in ep]).detach())
+            all_returns.append(torch.stack([r["return"] for r in ep]).detach())
+            all_advantages.append(torch.stack([r["advantage"] for r in ep]).detach())
+
+        log_probs = torch.cat(all_log_probs)
+        entropy = torch.cat(all_entropies)
+        values = torch.cat(all_values)
+        old_log_probs = torch.cat(all_old_log_probs)
+        returns = torch.cat(all_returns)
+        advantages = torch.cat(all_advantages)
+
     ratio = (log_probs - old_log_probs).exp()
     policy_loss = -torch.minimum(ratio * advantages, ratio.clamp(1 - clip_ratio, 1 + clip_ratio) * advantages).mean()
     value_loss = F.mse_loss(values, returns)
@@ -126,13 +181,20 @@ def evaluate(model: Any, scenarios: list[dict], seed: int = 0, device: Any = Non
 
 
 def _rollout_deterministic(model: Any, scenario: dict, seed: int, device: Any) -> tuple[None, dict]:
-    env = IntegratedTrainingEnv(scenario)
+    action_mode = getattr(model, "action_mode", "tactical" if getattr(model, "action_dim", None) == 8 else "spatial")
+    env = IntegratedTrainingEnv(scenario, action_mode=action_mode)
     observation = env.reset(seed=scenario["seed"])
     mapper, tensorizer = env.action_mapper(), env.observation_tensorizer()
     rewards, action_count = [], 0
     done = False
+    state = None
+    is_recurrent = getattr(model, "recurrent", False)
     while not done:
-        action = model.select_action(observation, tensorizer, mapper, deterministic=True, device=device)
+        if is_recurrent:
+            action, next_state = model.select_action(observation, tensorizer, mapper, deterministic=True, state=state, device=device)
+            state = next_state
+        else:
+            action = model.select_action(observation, tensorizer, mapper, deterministic=True, device=device)
         observation, reward, done, _ = env.step_discrete(action)
         rewards.append(reward)
         action_count += 1
@@ -182,39 +244,96 @@ def _paired_summary(metrics: list[dict], baselines: list[dict], policy: str) -> 
             "all_zero_rejected_orders": zero_rejected == len(deltas)}
 
 
-def _train_candidate(*, development: list[dict], updates: int, episodes_per_update: int, seed: int) -> tuple[Any, list[float]]:
+def _train_candidate(
+    *,
+    development: list[dict],
+    updates: int,
+    episodes_per_update: int,
+    seed: int,
+    recurrent: bool = False,
+    domain_randomization: bool = False,
+    action_mode: str = "tactical",
+) -> tuple[Any, list[float]]:
     random.seed(seed)
     torch.manual_seed(seed)
     fuel = development[0]["fire"]["fuel_model"]
-    model = SpatialActorCritic(grid_rows=len(fuel), grid_cols=len(fuel[0]))
+    action_dim = len(TACTICAL_ACTION_NAMES) if action_mode == "tactical" else (2 + len(fuel) * len(fuel[0]))
+    model = SpatialActorCritic(
+        grid_rows=len(fuel),
+        grid_cols=len(fuel[0]),
+        recurrent=recurrent,
+        action_dim=action_dim,
+    )
+    setattr(model, "action_mode", action_mode)
     optimizer = torch.optim.Adam(model.parameters(), lr=3e-4)
     losses = []
     for update in range(updates):
-        records = []
+        episodes_records = []
         for episode in range(episodes_per_update):
-            scenario = development[(update * episodes_per_update + episode) % len(development)]
+            if domain_randomization:
+                scenario_seed = seed * 10000 + update * episodes_per_update + episode
+                scenario = generate_domain_randomized_scenario(seed=scenario_seed)
+            else:
+                scenario = development[(update * episodes_per_update + episode) % len(development)]
             episode_records, _ = _rollout(model, scenario, seed + episode, None)
-            records.extend(episode_records)
-        losses.append(ppo_update(model, optimizer, records))
+            episodes_records.append(episode_records)
+        losses.append(ppo_update(model, optimizer, episodes_records))
     return model, losses
 
 
-def train_smoke(*, updates: int = 1, episodes_per_update: int = 1, seed: int = 0) -> dict:
-    """Train a small model on development scenarios only and return JSON-safe results."""
+def train_smoke(
+    *,
+    updates: int = 1,
+    episodes_per_update: int = 1,
+    seed: int = 0,
+    recurrent: bool = False,
+    domain_randomization: bool = False,
+    action_mode: str = "tactical",
+) -> dict:
+    """Train a small model on development/randomized scenarios and return JSON-safe results."""
     _require_torch()
     development, _, _ = build_scenarios()
-    model, losses = _train_candidate(development=development, updates=updates,
-                                     episodes_per_update=episodes_per_update, seed=seed)
+    model, losses = _train_candidate(
+        development=development,
+        updates=updates,
+        episodes_per_update=episodes_per_update,
+        seed=seed,
+        recurrent=recurrent,
+        domain_randomization=domain_randomization,
+        action_mode=action_mode,
+    )
     metrics = evaluate(model, [development[0]], seed=seed)
-    return {"schema_version": SCHEMA_VERSION, "provenance": "synthetic", "split": "development",
-            "synthetic_no_physical_claim": True, "seeds": {"training": seed},
-            "config": {"updates": updates, "episodes_per_update": episodes_per_update, "clip_ratio": 0.2},
-            "metrics": metrics, "losses": losses}
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "provenance": "synthetic",
+        "split": "domain_randomized" if domain_randomization else "development",
+        "synthetic_no_physical_claim": True,
+        "seeds": {"training": seed},
+        "config": {
+            "updates": updates,
+            "episodes_per_update": episodes_per_update,
+            "clip_ratio": 0.2,
+            "recurrent": recurrent,
+            "domain_randomization": domain_randomization,
+            "action_mode": action_mode,
+        },
+        "metrics": metrics,
+        "losses": losses,
+    }
 
 
-def train_select(*, candidates: int = 2, updates: int = 1, episodes_per_update: int = 1,
-                 seed: int = 0, checkpoint: Path | None = None) -> dict:
-    """Train on development and choose one checkpoint using validation only.
+def train_select(
+    *,
+    candidates: int = 2,
+    updates: int = 1,
+    episodes_per_update: int = 1,
+    seed: int = 0,
+    recurrent: bool = False,
+    domain_randomization: bool = False,
+    action_mode: str = "tactical",
+    checkpoint: Path | None = None,
+) -> dict:
+    """Train on development/randomized scenarios and choose one checkpoint using validation only.
 
     Reserved scenarios are intentionally unpacked but never passed to training or evaluation.
     Ties use validation mean affected area, then candidate seed, then candidate index.
@@ -229,10 +348,18 @@ def train_select(*, candidates: int = 2, updates: int = 1, episodes_per_update: 
     candidate_results = []
     selected_model = None
     selected_key = None
+    fuel = development[0]["fire"]["fuel_model"]
     for index in range(candidates):
         candidate_seed = seed + index
-        model, losses = _train_candidate(development=development, updates=updates,
-                                         episodes_per_update=episodes_per_update, seed=candidate_seed)
+        model, losses = _train_candidate(
+            development=development,
+            updates=updates,
+            episodes_per_update=episodes_per_update,
+            seed=candidate_seed,
+            recurrent=recurrent,
+            domain_randomization=domain_randomization,
+            action_mode=action_mode,
+        )
         metrics = evaluate(model, validation, seed=candidate_seed)
         key = _selection_key(metrics, candidate_seed, index)
         by_id = {item["scenario_id"]: item for item in metrics}
@@ -251,11 +378,14 @@ def train_select(*, candidates: int = 2, updates: int = 1, episodes_per_update: 
         if selected_key is None or key < selected_key:
             selected_key, selected_model = key, model
     result = {"schema_version": SELECTION_SCHEMA_VERSION, "provenance": "synthetic",
-              "synthetic_no_physical_claim": True, "trained_split": "development",
+              "synthetic_no_physical_claim": True,
+              "trained_split": "domain_randomized" if domain_randomization else "development",
               "selection_split": "validation", "reserved_split": "not_evaluated",
               "seeds": {"candidate_start": seed, "selected": selected_key[1]},
               "config": {"candidates": candidates, "updates": updates,
-                         "episodes_per_update": episodes_per_update, "clip_ratio": 0.2},
+                         "episodes_per_update": episodes_per_update, "clip_ratio": 0.2,
+                         "recurrent": recurrent, "domain_randomization": domain_randomization,
+                         "action_mode": action_mode},
               "scenario_provenance": {
                   "development": [{"scenario_id": s["scenario_id"], "sha256": _stable_sha256(s)} for s in development],
                   "validation": [{"scenario_id": s["scenario_id"], "sha256": _stable_sha256(s)} for s in validation],
@@ -283,8 +413,11 @@ def train_select(*, candidates: int = 2, updates: int = 1, episodes_per_update: 
         checkpoint.parent.mkdir(parents=True, exist_ok=True)
         torch.save({"schema_version": SELECTION_SCHEMA_VERSION,
                     "model_state_dict": selected_model.state_dict(),
-                    "model_config": {"grid_rows": len(development[0]["fire"]["fuel_model"]),
-                                     "grid_cols": len(development[0]["fire"]["fuel_model"][0])},
+                    "model_config": {"grid_rows": len(fuel),
+                                     "grid_cols": len(fuel[0]),
+                                     "recurrent": recurrent,
+                                     "action_mode": action_mode,
+                                     "action_dim": len(TACTICAL_ACTION_NAMES) if action_mode == "tactical" else (2 + len(fuel) * len(fuel[0]))},
                     "training_config": result["config"],
                     "selected_candidate_index": result["selected_candidate_index"],
                     "selected_seed": result["seeds"]["selected"]}, checkpoint)
@@ -298,6 +431,9 @@ def main() -> None:
     parser.add_argument("--updates", type=int, default=1)
     parser.add_argument("--episodes-per-update", type=int, default=1)
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--recurrent", action="store_true", help="use recurrent LSTM policy")
+    parser.add_argument("--domain-randomization", action="store_true", help="train with procedural domain randomization")
+    parser.add_argument("--action-mode", choices=["tactical", "spatial"], default="tactical", help="action space mode (default: tactical)")
     parser.add_argument("--select", action="store_true", help="train candidates and select on validation")
     parser.add_argument("--candidates", type=int, default=2)
     parser.add_argument("--checkpoint", type=Path)
@@ -311,9 +447,18 @@ def main() -> None:
                 checkpoint = args.output.with_suffix(".pt")
             result = train_select(candidates=args.candidates, updates=args.updates,
                                   episodes_per_update=args.episodes_per_update,
-                                  seed=args.seed, checkpoint=checkpoint)
+                                  seed=args.seed,
+                                  recurrent=args.recurrent,
+                                  domain_randomization=args.domain_randomization,
+                                  action_mode=args.action_mode,
+                                  checkpoint=checkpoint)
         else:
-            result = train_smoke(updates=args.updates, episodes_per_update=args.episodes_per_update, seed=args.seed)
+            result = train_smoke(updates=args.updates,
+                                 episodes_per_update=args.episodes_per_update,
+                                 seed=args.seed,
+                                 recurrent=args.recurrent,
+                                 domain_randomization=args.domain_randomization,
+                                 action_mode=args.action_mode)
     except ImportError as error:
         parser.error(str(error))
     rendered = json.dumps(result, indent=2, sort_keys=True) + "\n"

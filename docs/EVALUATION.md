@@ -184,6 +184,44 @@ This confirms the hypothesis recorded in `DECISIONS.md` (O-11): the apparent 16x
 Source and provenance: recorded from ignored artifact `runs/reserved-evaluation/report.json`, schema `nightjar-reserved-evaluation-0.1`, git working-tree code, PyTorch 2.2.2. Full replays for all policies and choice seeds are stored under `runs/reserved-evaluation/replays/`.
 
 
+### Tactical PPO with Physical Forward Risk Heatmap and Macro-Action Space (2026-09-29)
+
+Following the identification of observation delay amnesia and spatial action space pathologies (D-28, D-29, D-30), the architecture was extended with:
+1. **Spread Risk Heatmap (Channel 10):** Physical forward risk projection computing directional advection from burning cells, wind alignment ($\exp(0.8 \cdot \text{wind\_align})$), and slope acceleration ($\exp(0.5 \cdot \text{slope\_align})$) strictly from delivered observations.
+2. **Hybrid Tactical Action Space (9 macro-actions):** `HOLD`, `RETURN_TO_REFILL`, `ATTACK_HEAD_NEAREST`, `ATTACK_HEAD_LARGEST`, `ATTACK_CONTAINMENT_NEAREST`, `ATTACK_FLANK_LEFT`, `ATTACK_FLANK_RIGHT`, `ATTACK_REAR`, and `ATTACK_CLOSEST`.
+3. **Recurrent LSTM Core and Procedural Domain Randomization:** Preserving temporal intent under observation delays and generalizing across synthetic fire regimes without behavioral cloning or imitation.
+
+Training command on procedural domain-randomized scenarios with 2 candidates selected on the full 32-scenario validation set (`nightjar-discrimination-family-0.1`):
+
+```text
+python3 -m nightjar.ppo --select --candidates 2 --updates 40 --episodes-per-update 12 --seed 0 --recurrent --domain-randomization --action-mode tactical --output runs/ppo-tactical-v2.json --checkpoint runs/ppo-tactical-v2.pt
+```
+
+Selected candidate 1 (seed 1) validation performance across all 32 validation scenarios:
+- **PPO validation mean affected area:** `7.4219 ha`
+- **Containment heuristic validation mean:** `7.6484 ha` (`0.2266 ha` reduction by PPO)
+- **Greedy heuristic validation mean:** `7.7266 ha` (`0.3047 ha` reduction by PPO)
+
+#### Paired comparisons on 32 validation scenarios:
+
+| Comparison | PPO vs Containment | PPO vs Greedy |
+|---|---:|---:|
+| Mean reduction (ha) | **+0.2266 ha** | **+0.3047 ha** |
+| Wins | 17 (53.1%) | 17 (53.1%) |
+| Losses | 8 (25.0%) | 3 (9.4%) |
+| Ties | 7 (21.9%) | 12 (37.5%) |
+| Zero rejected orders | 32/32 (100%) | 32/32 (100%) |
+
+#### Tactical Policy Behavior:
+Across the 640 decision steps executed across the 32 validation scenarios, the policy learned a dynamic tactical mixture:
+- `RETURN_TO_REFILL`: 224 steps (35.0%)
+- `HOLD`: 192 steps (30.0%)
+- `ATTACK_HEAD_LARGEST`: 192 steps (30.0%)
+- `ATTACK_CONTAINMENT_NEAREST`: 32 steps (5.0%)
+
+In high-wind scenarios where containment fails to cut off rapid head fire (such as `validation-21`), PPO deploys `ATTACK_HEAD_LARGEST`, saving 4.00 ha compared to containment (`6.75 ha` vs `10.75 ha`). In complex fuel environments with downstream corridors (such as `validation-05` and `validation-15`), PPO leverages the Spread Risk Heatmap to deploy targeted containment drops, outperforming both heuristics.
+
+
 ### Predeclared model improvement criteria (fixed before future evaluation)
 
 To prevent post-hoc metric selection or claims based on marginal discretization noise, any future learned controller must satisfy the following predeclared criteria on the validation set before opening the reserved split:

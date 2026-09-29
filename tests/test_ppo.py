@@ -48,10 +48,10 @@ class PPOTests(unittest.TestCase):
         self.assertEqual(result["selection_split"], "validation")
         self.assertEqual(result["reserved_split"], "not_evaluated")
         self.assertEqual(len(result["candidates"]), 2)
-        self.assertTrue(all(len(c["validation_metrics"]) == 8 for c in result["candidates"]))
+        self.assertTrue(all(len(c["validation_metrics"]) == 32 for c in result["candidates"]))
         self.assertIn("selection_rule", result)
         self.assertEqual(len(result["scenario_provenance"]["development"]), 8)
-        self.assertEqual(len(result["scenario_provenance"]["validation"]), 8)
+        self.assertEqual(len(result["scenario_provenance"]["validation"]), 32)
         self.assertTrue(all(len(item["sha256"]) == 64 for item in result["scenario_provenance"]["validation"]))
 
     def test_baselines_pair_each_validation_scenario_and_not_reserved(self):
@@ -85,6 +85,40 @@ class PPOTests(unittest.TestCase):
             result = train_select(candidates=1)
         self.assertTrue(all("reserved" not in scenario_id for scenario_id in evaluated))
         self.assertEqual(result["reserved_split"], "not_evaluated")
+
+    def test_smoke_with_recurrent_and_domain_randomization(self):
+        result = train_smoke(
+            updates=1,
+            episodes_per_update=1,
+            seed=5,
+            recurrent=True,
+            domain_randomization=True,
+        )
+        self.assertEqual(result["split"], "domain_randomized")
+        self.assertTrue(result["config"]["recurrent"])
+        self.assertTrue(result["config"]["domain_randomization"])
+        self.assertEqual(len(result["losses"]), 1)
+        self.assertEqual(result["metrics"][0]["rejected_orders"], 0)
+        self.assertGreater(result["metrics"][0]["action_count"], 0)
+
+    def test_recurrent_selection_and_checkpoint_format(self):
+        with tempfile.TemporaryDirectory() as directory:
+            checkpoint = Path(directory) / "recurrent.pt"
+            result = train_select(
+                candidates=1,
+                updates=1,
+                episodes_per_update=1,
+                seed=7,
+                recurrent=True,
+                domain_randomization=True,
+                checkpoint=checkpoint,
+            )
+            self.assertTrue(checkpoint.exists())
+            saved = torch.load(checkpoint, weights_only=False)
+            self.assertTrue(saved["model_config"]["recurrent"])
+            self.assertEqual(result["trained_split"], "domain_randomized")
+            self.assertTrue(result["config"]["recurrent"])
+            self.assertTrue(result["config"]["domain_randomization"])
 
 
 if __name__ == "__main__":

@@ -16,7 +16,7 @@ from typing import Any
 
 from .discrimination_family import build_scenarios, canonical_hash
 from .integrated import run_integrated
-from .model import SpatialActorCritic
+from .model import SpatialActorCritic, TACTICAL_ACTION_NAMES
 from .training_env import IntegratedTrainingEnv
 
 try:
@@ -37,13 +37,24 @@ def _file_sha256(path: Path) -> str:
 
 def _rollout_ppo_with_replay(model: Any, scenario: dict, device: Any = None) -> dict:
     """Run one deterministic PPO episode and return its complete replay dictionary."""
-    env = IntegratedTrainingEnv(scenario)
+    action_mode = getattr(model, "action_mode", "tactical" if getattr(model, "action_dim", None) in (8, len(TACTICAL_ACTION_NAMES)) else "spatial")
+    env = IntegratedTrainingEnv(scenario, action_mode=action_mode)
     observation = env.reset(seed=scenario["seed"])
     mapper = env.action_mapper()
     tensorizer = env.observation_tensorizer()
     done = False
+    state = None
+    is_recurrent = getattr(model, "recurrent", False)
     while not done:
-        action_idx = model.select_action(observation, tensorizer, mapper, deterministic=True, device=device)
+        if is_recurrent:
+            action_idx, next_state = model.select_action(
+                observation, tensorizer, mapper, deterministic=True, state=state, device=device
+            )
+            state = next_state
+        else:
+            action_idx = model.select_action(
+                observation, tensorizer, mapper, deterministic=True, device=device
+            )
         observation, _reward, done, _info = env.step_discrete(action_idx)
     return env.replay
 
@@ -96,11 +107,16 @@ def run_reserved_evaluation(
     checkpoint_sha = _file_sha256(checkpoint_path)
     checkpoint_data = torch.load(checkpoint_path, map_location=device or "cpu")
     model_config = checkpoint_data.get("model_config", {"grid_rows": 11, "grid_cols": 11})
+    action_mode = model_config.get("action_mode", "tactical" if model_config.get("action_dim") in (8, len(TACTICAL_ACTION_NAMES)) else "spatial")
+    action_dim = model_config.get("action_dim", len(TACTICAL_ACTION_NAMES) if action_mode == "tactical" else (2 + model_config["grid_rows"] * model_config["grid_cols"]))
 
     model = SpatialActorCritic(
         grid_rows=model_config["grid_rows"],
         grid_cols=model_config["grid_cols"],
+        recurrent=model_config.get("recurrent", False),
+        action_dim=action_dim,
     )
+    setattr(model, "action_mode", action_mode)
     model.load_state_dict(checkpoint_data["model_state_dict"])
     if device is not None:
         model.to(device)

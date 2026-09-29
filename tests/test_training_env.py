@@ -87,6 +87,25 @@ class IntegratedTrainingEnvTests(unittest.TestCase):
             for nested in value:
                 self.assert_no_latent_area(nested)
 
+    def test_empty_idle_aircraft_mask_requires_refill(self):
+        env = IntegratedTrainingEnv(self.scenario)
+        obs = env.reset()
+        obs["aircraft"]["phase"] = "idle"
+        obs["aircraft"]["water_l"] = 0.0
+        mask = env._mask(obs)
+        self.assertEqual(mask, [{"type": "RETURN_TO_REFILL"}])
+
+    def test_drop_bonus_per_cell(self):
+        env_standard = IntegratedTrainingEnv(self.scenario, drop_bonus_per_cell=0.0)
+        env_bonus = IntegratedTrainingEnv(self.scenario, drop_bonus_per_cell=1.0)
+        env_standard.reset(seed=42)
+        env_bonus.reset(seed=42)
+        drop = next(action for action in env_standard.action_mask if action["type"] == "DROP")
+        _, r_std, _, _ = env_standard.step(drop)
+        _, r_bon, _, _ = env_bonus.step(drop)
+        # Drop successfully creates 1 barrier cell in the synthetic example
+        self.assertAlmostEqual(r_bon, r_std + 1.0)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -8,7 +8,7 @@ import unittest
 
 from nightjar.aircraft import CAPACITY_L
 from nightjar.integrated import run_integrated
-from nightjar.model import ActionMapper, HAS_TORCH, ObservationTensorizer, SpatialActorCritic
+from nightjar.model import ActionMapper, HAS_TORCH, ObservationTensorizer, SpatialActorCritic, TacticalActionMapper, TACTICAL_ACTION_NAMES
 from nightjar.policies import candidate_cells
 from nightjar.training_env import IntegratedTrainingEnv, valid_actions
 
@@ -33,7 +33,7 @@ class ModelTests(unittest.TestCase):
 
     def test_tensorizer_shapes_and_ranges(self):
         raster, vector = self.tensorizer.extract_features(self.obs)
-        self.assertEqual(len(raster), 9)
+        self.assertEqual(len(raster), 10)
         self.assertEqual(len(raster[0]), self.rows)
         self.assertEqual(len(raster[0][0]), self.cols)
         self.assertEqual(len(vector), ObservationTensorizer.NUM_VECTOR_FEATURES)
@@ -248,6 +248,173 @@ class ModelTests(unittest.TestCase):
         done = False
         while not done:
             action_idx = model.select_action(obs, self.tensorizer, self.mapper, deterministic=True)
+            obs, reward, done, info = env.step_discrete(action_idx)
+            step_count += 1
+
+        self.assertTrue(done)
+        self.assertGreater(step_count, 0)
+        replay = env.replay
+        self.assertIn("affected_area_ha", replay)
+        self.assertEqual(replay["aircraft_metrics"]["rejected_orders"], 0)
+
+    @unittest.skipUnless(HAS_TORCH, "PyTorch required for SpatialActorCritic tests")
+    def test_recurrent_spatial_actor_critic(self):
+        import torch
+        model = SpatialActorCritic(
+            grid_rows=self.rows,
+            grid_cols=self.cols,
+            recurrent=True,
+            lstm_hidden_dim=64,
+        )
+        self.assertTrue(model.recurrent)
+
+        # Initial state
+        state = model.initial_state(batch_size=1)
+        self.assertIsNotNone(state)
+        h, c = state
+        self.assertEqual(h.shape, (1, 64))
+        self.assertEqual(c.shape, (1, 64))
+        self.assertTrue(torch.all(h == 0.0))
+        self.assertTrue(torch.all(c == 0.0))
+
+        raster_t, vector_t = self.tensorizer.to_torch(self.obs)
+        mask_t = self.mapper.to_mask_torch(self.obs)
+
+        # Forward pass
+        logits, value, next_state = model(raster_t, vector_t, state=state)
+        self.assertEqual(logits.shape, (1, self.mapper.num_actions))
+        self.assertEqual(value.shape, (1,))
+        h_next, c_next = next_state
+        self.assertEqual(h_next.shape, (1, 64))
+        self.assertFalse(torch.all(h_next == 0.0))
+
+        # Action sampling with masking
+        action, log_prob, entropy, val_est, state_sample = model.get_action(
+            raster_t, vector_t, mask_t, deterministic=False, state=state
+        )
+        action_idx = int(action.item())
+        self.assertTrue(mask_t[0, action_idx].item())
+        self.assertEqual(state_sample[0].shape, (1, 64))
+
+        # Deterministic action with masking
+        det_action, _, _, _, state_det = model.get_action(
+            raster_t, vector_t, mask_t, deterministic=True, state=state
+        )
+        det_action_idx = int(det_action.item())
+        self.assertTrue(mask_t[0, det_action_idx].item())
+
+        # Sequence BPTT gradient test over 3 timesteps
+        raster_seq = torch.cat([raster_t, raster_t, raster_t], dim=0)
+        vector_seq = torch.cat([vector_t, vector_t, vector_t], dim=0)
+        mask_seq = torch.cat([mask_t, mask_t, mask_t], dim=0)
+        actions_seq = torch.tensor([0, 0, 0], dtype=torch.long)
+
+        log_probs, entropies, values = model.evaluate_actions(
+            raster_seq, vector_seq, mask_seq, actions_seq
+        )
+        self.assertEqual(log_probs.shape, (3,))
+        self.assertEqual(entropies.shape, (3,))
+        self.assertEqual(values.shape, (3,))
+
+        loss = -log_probs.sum() + values.sum()
+        loss.backward()
+        for name, param in model.named_parameters():
+            self.assertIsNotNone(param.grad, f"Parameter {name} has no gradient")
+
+    @unittest.skipUnless(HAS_TORCH, "PyTorch required for SpatialActorCritic tests")
+    def test_end_to_end_episode_with_recurrent_policy(self):
+        import torch
+        torch.manual_seed(42)
+        model = SpatialActorCritic(
+            grid_rows=self.rows,
+            grid_cols=self.cols,
+            recurrent=True,
+            lstm_hidden_dim=64,
+        )
+        env = IntegratedTrainingEnv(self.scenario)
+        obs = env.reset()
+
+        step_count = 0
+        done = False
+        state = None
+        while not done:
+            action_idx, state = model.select_action(
+                obs, self.tensorizer, self.mapper, deterministic=True, state=state
+            )
+            obs, reward, done, info = env.step_discrete(action_idx)
+            step_count += 1
+
+        self.assertTrue(done)
+        self.assertGreater(step_count, 0)
+        replay = env.replay
+        self.assertIn("affected_area_ha", replay)
+        self.assertEqual(replay["aircraft_metrics"]["rejected_orders"], 0)
+
+    def test_tactical_action_mapper_and_action_mode(self):
+        tactical_mapper = TacticalActionMapper(self.cell_size_m)
+        self.assertEqual(tactical_mapper.num_actions, 9)
+        self.assertEqual(tactical_mapper.action_names, TACTICAL_ACTION_NAMES)
+
+        # ActionMapper with action_mode="tactical"
+        mapper = ActionMapper(self.rows, self.cols, self.cell_size_m, action_mode="tactical")
+        self.assertEqual(mapper.num_actions, 9)
+        self.assertEqual(mapper.action_mode, "tactical")
+
+        # compute_mask when idle with water
+        mask = mapper.compute_mask(self.obs)
+        self.assertEqual(len(mask), 9)
+        self.assertTrue(mask[0])  # HOLD
+        self.assertTrue(mask[2])  # ATTACK_HEAD_NEAREST (candidates exist in example)
+        self.assertTrue(mask[4])  # ATTACK_CONTAINMENT_NEAREST
+
+        # Resolution of tactical orders
+        hold_order = mapper.to_order(0, observation=self.obs)
+        self.assertEqual(hold_order, {"type": "HOLD"})
+
+        refill_order = mapper.to_order(1, observation=self.obs)
+        self.assertEqual(refill_order, {"type": "RETURN_TO_REFILL"})
+
+        for act_idx in range(2, 9):
+            drop_order = mapper.to_order(act_idx, observation=self.obs)
+            self.assertEqual(drop_order["type"], "DROP")
+            self.assertIn("target_m", drop_order)
+            self.assertEqual(len(drop_order["target_m"]), 2)
+
+        # Busy aircraft mask
+        busy_obs = deepcopy(self.obs)
+        busy_obs["aircraft"]["phase"] = "transit_to_drop"
+        busy_mask = mapper.compute_mask(busy_obs)
+        self.assertEqual(busy_mask, [True] + [False] * 8)
+
+        # Empty water mask
+        empty_obs = deepcopy(self.obs)
+        empty_obs["aircraft"]["water_l"] = 0
+        empty_mask = mapper.compute_mask(empty_obs)
+        self.assertEqual(empty_mask, [False, True] + [False] * 7)
+
+    @unittest.skipUnless(HAS_TORCH, "PyTorch required for SpatialActorCritic tests")
+    def test_end_to_end_episode_with_tactical_recurrent_policy(self):
+        import torch
+        torch.manual_seed(42)
+        model = SpatialActorCritic(
+            grid_rows=self.rows,
+            grid_cols=self.cols,
+            recurrent=True,
+            lstm_hidden_dim=64,
+            action_dim=len(TACTICAL_ACTION_NAMES),
+        )
+        setattr(model, "action_mode", "tactical")
+        env = IntegratedTrainingEnv(self.scenario, action_mode="tactical")
+        obs = env.reset()
+        mapper = env.action_mapper()
+
+        step_count = 0
+        done = False
+        state = None
+        while not done:
+            action_idx, state = model.select_action(
+                obs, self.tensorizer, mapper, deterministic=True, state=state
+            )
             obs, reward, done, info = env.step_discrete(action_idx)
             step_count += 1
 
