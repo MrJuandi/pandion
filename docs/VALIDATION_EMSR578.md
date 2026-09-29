@@ -31,3 +31,58 @@ The [CEMS On-Demand Mapping terms](https://mapping.emergency.copernicus.eu/terms
 - Using the first interval to tune the model and the second from the same incident to report an independent geographic test would leak incident-specific information. At least one separate incident must be reserved for evaluation.
 
 Before any model-versus-observation score is reported, build a provenance-preserving pipeline for those inputs, quantify polygon and timing uncertainty, specify the effect of response actions or select sufficiently unmitigated periods, and reserve other incidents. Until then, these three measurements verify only that independent observation artifacts can be acquired and audited.
+
+## Geographic pilot pipeline and fuel crosswalk (Stage 0 Increment)
+
+Under Decision **D-32**, `nightjar.pilot_emsr578` implements the first real geographic input and evaluation pipeline over the EMSR578 AOI01 vector package:
+
+1. **Geodesy and Projection:**
+   Copernicus source coordinates are in WGS84 geographic degrees (`EPSG:4326`). The pipeline converts them to **ETRS89 / UTM Zone 31N** (`EPSG:25831`, central meridian $3^\circ\text{ E}$, scale factor $0.9996$, false easting $500,000\text{ m}$) using exact sub-millimeter transverse Mercator series. The bounding box spans $X \in [326,636.4, 342,209.4]\text{ m}$ and $Y \in [4,636,071.6, 4,651,196.9]\text{ m}$ ($15.57\text{ km} \times 15.13\text{ km}$).
+   At $100\text{ m}$ grid resolution, this yields a $152 \times 156$ raster grid ($23,712\text{ ha}$ total extent).
+
+2. **CORINE Land Cover to Scott & Burgan 40 Crosswalk:**
+   The `naturalLandUseA` layer contains 89 polygons classified across 13 CORINE Land Cover (CLC) categories. Rather than guessing biomass from land use, each class is mapped with explicit botanical rationale, confidence rating, and documented alternatives:
+
+| CLC Code | CLC Land Cover | Scott & Burgan Model | Code | Confidence | Botanical Rationale | Documented Alternatives |
+|:---:|:---|:---:|:---:|:---:|:---|:---|
+| `211` | Non-irrigated arable land | **GR1** | `101` | Medium | Winter cereals in Lleida/Noguera are ripe or harvested stubble in mid-June; dry stubble carries fast low-intensity surface fire. | `GR2` (102, dense post-harvest load) or `NB` (0, clean ploughed fallow) |
+| `212` | Permanently irrigated land | **NB** | `0` | High | Irrigated crops maintain high moisture (>150%) and act as effective passive barriers during summer campaigns. | `GR1` (101, dry ditch margins) |
+| `221` | Vineyards | **NB** | `0` | High | Traditional wide-spaced Mediterranean vineyards with bare tilled soil act as passive fuel breaks. | `GR1` (101, unweeded cured inter-row grass) |
+| `222` | Fruit trees and berry plantations | **NB** | `0` | High | Commercial fruit orchards in the Segre river basin are irrigated and weed-controlled. | `TL1` (181, abandoned orchards with dry leaf litter) |
+| `242` | Complex cultivation patterns | **GR1** | `101` | Medium | Fragmented smallholdings with dry field edges and cereal parcels. | `NB` (0, intensively tilled plots) or `GS1` (121, hedgerow shrubs) |
+| `243` | Agriculture with natural vegetation | **GS2** | `122` | Medium | Marginal agroforestry interface: abandoned stone terraces with encroaching garrigue and cured grasses. | `GS1` (121, low load) or `SH2` (142, predominant shrub encroachment) |
+| `311` | Broad-leaved forest | **TL6** | `186` | Medium | Mediterranean sclerophyllous oak forests (*Quercus ilex*) produce compact, slow-burning leaf litter with moderate depth. | `TL2` (182, open low-load stands) or `TU5` (165, dense shrub understory) |
+| `312` | Coniferous forest | **TU5** | `165` | High | Aleppo pine (*Pinus halepensis*) stands in interior Catalonia are highly fire-prone with dense shrub understories acting as ladder fuels. | `TL8` (188, long-needle pine litter under closed canopy) or `TU1` (161, open timber-grass) |
+| `313` | Mixed forest | **TU2** | `162` | Medium | Transition forest between pine and deciduous oak with mixed needle/leaf litter and moderate shrub understory. | `TL3` (183, mixed litter) or `TU5` (165, dense understory) |
+| `321` | Natural grassland | **GR2** | `102` | High | Natural montane and hill herbaceous pastures, completely cured in mid-June Mediterranean heatwaves. | `GR1` (101, grazed/sparse) or `GR4` (104, tall ungrazed grass) |
+| `323` | Sclerophyllous vegetation | **SH5** | `145` | High | Primary fuel driving rapid rate of spread in Artesa de Segre: dense Kermes oak (*Quercus coccifera*), rosemary, and gorse 1–1.5 m tall. | `SH2` (142, open garrigue) or `SH7` (147, very high load tall maquis) |
+| `324` | Transitional woodland shrub | **SH2** | `142` | Medium | Regenerating scrub with scattered saplings following previous disturbances or pasture abandonment. | `SH5` (145, dense mature scrub) or `TU1` (161, woodland with grassy understory) |
+| `998` | Other | **NB** | `0` | High | Unvegetated surfaces, rock outcrops, quarries, or unclassified non-fuel terrain. | None |
+
+3. **Water Scooping Infrastructure:**
+   The `hydrographyA` layer provides 24 water bodies (including the Pantà de Rialb reservoir `BH130` and Segre river sections `BH080`). All are enforced as nonburnable (`code 0`) and extracted with their UTM 31N centroids as candidate scooping waypoints for aerial firefighting resources (CL-415).
+
+4. **Perimeter Discretization and Ground-Truth Overlap:**
+   - **DEL Initial Perimeter ($t_0$, 2022-06-17 10:06 UTC):** Rasterized at $100\text{ m}$ resolution to $1,500\text{ cells} = 1,500.0\text{ ha}$ (reported satellite polygon area: $1,501.73\text{ ha}$, discretization error: $-1.73\text{ ha}$ or $-0.12\%$).
+   - **MONIT01 Perimeter ($t_1$, 2022-06-18 10:47 UTC):** Rasterized to $2,108.0\text{ ha}$.
+   - **Spatial Overlap Metrics:** Comparing the two satellite observations yields:
+     - Intersection: $1,499.0\text{ ha}$ (1,499 cells)
+     - Commission ($t_0$ not in $t_1$): only $1.0\text{ ha}$ (1 cell mapping noise)
+     - Net expansion ($t_1$ not in $t_0$): $609.0\text{ ha}$ (609 cells), exactly aligning with Copernicus reported change of $+609.48\text{ ha}$.
+     - Observed Jaccard/IoU: $0.7108$, Dice coefficient: $0.8309$.
+
+## Reproducing the pilot pipeline
+
+From the repository root:
+
+```sh
+# 1. Export the complete fuel crosswalk
+python3 -m nightjar.pilot_emsr578 crosswalk --format markdown
+
+# 2. Build the full georeferenced scenario manifest in EPSG:25831
+python3 -m nightjar.pilot_emsr578 manifest --output runs/emsr578-pilot-scenario.json
+
+# 3. Compute spatial overlap metrics between satellite observations
+python3 -m nightjar.pilot_emsr578 compare-perimeters --scenario runs/emsr578-pilot-scenario.json --comparison-zip data/raw/emsr578/monit01.zip
+```
+
