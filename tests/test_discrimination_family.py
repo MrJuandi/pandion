@@ -8,6 +8,8 @@ from nightjar.discrimination_family import (
     DEVELOPMENT_INDICES,
     VALIDATION_INDICES,
     RESERVED_INDICES,
+    RESERVED_V2_INDICES,
+    build_reserved_v2_scenarios,
     build_scenarios,
     canonical_hash,
     generate_domain_randomized_scenario,
@@ -107,6 +109,33 @@ class DiscriminationFamilyTests(unittest.TestCase):
             for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1)):
                 if 0 <= r + dr < 11 and 0 <= c + dc < 11:
                     self.assertNotEqual(fuel[r + dr][c + dc], "NONE")
+
+    def test_build_reserved_v2_scenarios(self):
+        res_v2 = build_reserved_v2_scenarios()
+        again = build_reserved_v2_scenarios()
+        self.assertEqual(len(res_v2), 32)
+        self.assertEqual(
+            [canonical_hash(s) for s in res_v2],
+            [canonical_hash(s) for s in again],
+        )
+        seeds_v2 = {s["seed"] for s in res_v2}
+        self.assertEqual(len(seeds_v2), 32)
+        self.assertTrue(all(s["scenario_id"].startswith("discrimination-reserved-v2-") for s in res_v2))
+        self.assertTrue(all(s["generation"]["generator_version"] == "discrimination-family-0.2" for s in res_v2))
+
+        # Check disjoint seeds with dev, val, res_v1
+        dev, val, res_v1 = build_scenarios()
+        existing_seeds = {s["seed"] for s in dev + val + res_v1}
+        self.assertFalse(existing_seeds & seeds_v2)
+
+        for scenario in res_v2:
+            self.assertEqual(scenario["fire"]["horizon_s"], 1200)
+            self.assertEqual(scenario["aircraft"]["horizon_s"], 1200)
+            self.assertEqual(scenario["water_effect"]["radius_m"], 35)
+            ignitions = scenario["fire"]["ignitions"]
+            self.assertEqual(len(ignitions), 2)
+            dist = abs(ignitions[0][0] - ignitions[1][0]) + abs(ignitions[0][1] - ignitions[1][1])
+            self.assertGreaterEqual(dist, 4)
 
 
 if __name__ == "__main__":
