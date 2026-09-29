@@ -27,11 +27,13 @@ REPORT_SCHEMA_VERSION = "nightjar-discrimination-report-0.1"
 DEVELOPMENT_INDICES = tuple(range(8))
 VALIDATION_INDICES = tuple(range(32))
 RESERVED_INDICES = tuple(range(8))
+RESERVED_V2_INDICES = tuple(range(32))
 
 SPLIT_BASE_SEEDS = {
     "development": 500000,
     "validation": 600000,
     "reserved": 700000,
+    "reserved_v2": 800000,
 }
 
 WIND_CHOICES = [[2, 0], [-2, 0], [0, 2], [0, -2], [3, 1], [-3, -1], [2, -2], [-2, 2]]
@@ -89,7 +91,8 @@ def _one(base: dict, index: int, split: str) -> dict:
             if (row, col) not in protected and rng.random() < prob:
                 fuel[row][col] = "NONE"
 
-    sid = f"discrimination-{split}-{index:02d}"
+    split_slug = split.replace("_", "-")
+    sid = f"discrimination-{split_slug}-{index:02d}"
     scenario["scenario_id"] = sid
     scenario["fire"]["scenario_id"] = sid
     scenario["aircraft"]["scenario_id"] = sid
@@ -126,7 +129,7 @@ def _one(base: dict, index: int, split: str) -> dict:
         for t in range(0, 1201, 60)
     ]
     scenario["generation"] = {
-        "generator_version": "discrimination-family-0.1",
+        "generator_version": "discrimination-family-0.2" if "v2" in split else "discrimination-family-0.1",
         "generator_seed": seed,
         "blocked_cell_probability": prob,
         "blocked_cell_count": sum(value == "NONE" for row in fuel for value in row),
@@ -260,6 +263,30 @@ def build_scenarios(base: dict | None = None) -> tuple[list[dict], list[dict], l
         raise ValueError("scenario hashes must be unique")
 
     return dev, val, res
+
+
+def build_reserved_v2_scenarios(base: dict | None = None) -> list[dict]:
+    """Return 32 fresh, untouched reserved scenarios (v2) from disjoint seed stream (800000..800031)."""
+    if base is None:
+        base = json.loads(SOURCE_PATH.read_text())
+    original = deepcopy(base)
+
+    res_v2 = [_one(base, i, "reserved_v2") for i in RESERVED_V2_INDICES]
+
+    if base != original:
+        raise ValueError("scenario generation mutated source input")
+
+    if len({s["scenario_id"] for s in res_v2}) != len(res_v2):
+        raise ValueError("scenario IDs must be unique across reserved_v2")
+    if len({canonical_hash(s) for s in res_v2}) != len(res_v2):
+        raise ValueError("scenario hashes must be unique")
+
+    dev, val, res_v1 = build_scenarios(base)
+    existing_seeds = {s["seed"] for s in dev + val + res_v1}
+    if existing_seeds & {s["seed"] for s in res_v2}:
+        raise ValueError("reserved_v2 seeds must be disjoint from dev, val, and reserved_v1")
+
+    return res_v2
 
 
 def _write(path: Path, value: object) -> None:

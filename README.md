@@ -80,6 +80,7 @@ python3 -m nightjar.integrated_benchmark examples/synthetic_integrated.json --ou
 python3 -m nightjar.scenario_family --output-dir runs/scenario-family
 python3 -m nightjar.challenge_family --output-dir runs/challenge-family
 python3 -m nightjar.discrimination_family --output-dir runs/discrimination-family
+python3 -m nightjar.evaluate_reserved --split-version v2
 python3 -m nightjar.viewer runs/integrated-heuristic.json --output runs/viewer.html
 python3 -m unittest discover -s tests -v
 ```

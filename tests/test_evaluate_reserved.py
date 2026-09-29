@@ -58,6 +58,23 @@ class EvaluateReservedTests(unittest.TestCase):
         self.assertAlmostEqual(result["mean_reduction_ha"], 0.375)
         self.assertAlmostEqual(result["mean_ppo_minus_baseline_ha"], -0.375)
         self.assertTrue(result["all_zero_rejected_orders"])
+        self.assertIn("reduction_95_ci", result)
+        self.assertIn("difference_95_ci", result)
+        self.assertEqual(len(result["reduction_95_ci"]), 2)
+        self.assertLessEqual(result["reduction_95_ci"][0], result["reduction_95_ci"][1])
+
+    def test_bootstrap_ci(self):
+        from nightjar.evaluate_reserved import _bootstrap_ci
+        # Deterministic with seed
+        ci1 = _bootstrap_ci([1.0, 2.0, 3.0, 4.0, 5.0], n_resamples=1000, seed=42)
+        ci2 = _bootstrap_ci([1.0, 2.0, 3.0, 4.0, 5.0], n_resamples=1000, seed=42)
+        self.assertEqual(ci1, ci2)
+        self.assertLessEqual(ci1["low"], 3.0)
+        self.assertGreaterEqual(ci1["high"], 3.0)
+        # Empty list
+        empty_ci = _bootstrap_ci([])
+        self.assertEqual(empty_ci["low"], 0.0)
+        self.assertEqual(empty_ci["high"], 0.0)
 
     @unittest.skipUnless(HAS_TORCH, "PyTorch is required")
     def test_missing_checkpoint_raises_file_not_found(self):
@@ -70,7 +87,7 @@ class EvaluateReservedTests(unittest.TestCase):
                 run_reserved_evaluation(Path("non_existent_checkpoint.pt"))
 
     @unittest.skipUnless(HAS_TORCH, "PyTorch is required")
-    def test_reserved_evaluation_evaluates_only_reserved_split(self):
+    def test_reserved_evaluation_evaluates_v1_and_v2(self):
         evaluated_scenarios = []
 
         def mock_rollout(model, scenario, device=None):
@@ -105,12 +122,21 @@ class EvaluateReservedTests(unittest.TestCase):
                 mock_model = MagicMock()
                 mock_sac.return_value = mock_model
 
-                report = run_reserved_evaluation(ckpt_path)
+                # Test v1
+                report_v1 = run_reserved_evaluation(ckpt_path, split_version="v1")
+                self.assertEqual(len(evaluated_scenarios), 8)
+                self.assertTrue(all(sid.startswith("discrimination-reserved-") for sid in evaluated_scenarios))
+                self.assertEqual(report_v1["split"], "reserved")
+                self.assertIn("predeclared_criteria", report_v1)
 
-            self.assertEqual(len(evaluated_scenarios), 8)
-            self.assertTrue(all(sid.startswith("discrimination-reserved-") for sid in evaluated_scenarios))
-            self.assertEqual(report["split"], "reserved")
-            self.assertIn("predeclared_criteria", report)
+                # Test v2
+                evaluated_scenarios.clear()
+                report_v2 = run_reserved_evaluation(ckpt_path, split_version="v2")
+                self.assertEqual(len(evaluated_scenarios), 32)
+                self.assertTrue(all(sid.startswith("discrimination-reserved-v2-") for sid in evaluated_scenarios))
+                self.assertEqual(report_v2["split"], "reserved_v2")
+                self.assertEqual(report_v2["schema_version"], "nightjar-reserved-evaluation-0.2")
+                self.assertIn("reduction_95_ci", report_v2["paired_comparisons"]["heuristic"])
 
 
 if __name__ == "__main__":

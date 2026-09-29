@@ -1,8 +1,10 @@
 """One-time evaluation of selected PPO checkpoint on reserved discrimination scenarios.
 
-Evaluates discrimination-reserved-00 through 07 strictly once against observation-matched
+Evaluates reserved discrimination scenarios strictly once against observation-matched
 baselines (no_intervention, greedy heuristic, containment heuristic, and valid random choice)
 under the predeclared improvement criteria from docs/EVALUATION.md.
+Supports both the original 8-scenario opened split (v1) for comparative diagnostic and
+the fresh 32-scenario held-out split (v2) for Stage 1 Gate closure.
 """
 from __future__ import annotations
 
@@ -11,10 +13,11 @@ from datetime import datetime, timezone
 from hashlib import sha256
 import json
 from pathlib import Path
+import random
 from statistics import mean
 from typing import Any
 
-from .discrimination_family import build_scenarios, canonical_hash
+from .discrimination_family import build_reserved_v2_scenarios, build_scenarios, canonical_hash
 from .integrated import run_integrated
 from .model import SpatialActorCritic, TACTICAL_ACTION_NAMES
 from .training_env import IntegratedTrainingEnv
@@ -25,10 +28,13 @@ try:
 except ImportError:
     HAS_TORCH = False
 
-SCHEMA_VERSION = "nightjar-reserved-evaluation-0.1"
-DEFAULT_CHECKPOINT = Path("runs/ppo-matched-5seeds-16x8.pt")
-DEFAULT_OUTPUT = Path("runs/reserved-evaluation/report.json")
-DEFAULT_REPLAYS_DIR = Path("runs/reserved-evaluation/replays")
+SCHEMA_VERSION_V1 = "nightjar-reserved-evaluation-0.1"
+SCHEMA_VERSION_V2 = "nightjar-reserved-evaluation-0.2"
+DEFAULT_CHECKPOINT = Path("runs/ppo-tactical-v2.pt")
+DEFAULT_OUTPUT_V1 = Path("runs/reserved-evaluation/report.json")
+DEFAULT_REPLAYS_DIR_V1 = Path("runs/reserved-evaluation/replays")
+DEFAULT_OUTPUT_V2 = Path("runs/reserved-v2-evaluation/report.json")
+DEFAULT_REPLAYS_DIR_V2 = Path("runs/reserved-v2-evaluation/replays")
 
 
 def _file_sha256(path: Path) -> str:
@@ -69,6 +75,32 @@ def _extract_metrics(replay: dict) -> dict:
     }
 
 
+def _bootstrap_ci(
+    values: list[float],
+    n_resamples: int = 10000,
+    alpha: float = 0.05,
+    seed: int = 42,
+) -> dict[str, float]:
+    """Calculate non-parametric bootstrap confidence interval for the sample mean."""
+    if not values:
+        return {"low": 0.0, "high": 0.0, "alpha": alpha, "n_resamples": n_resamples}
+    rng = random.Random(seed)
+    n = len(values)
+    boot_means = []
+    for _ in range(n_resamples):
+        sample = [values[rng.randrange(n)] for _ in range(n)]
+        boot_means.append(sum(sample) / n)
+    boot_means.sort()
+    low_idx = max(0, min(int((alpha / 2.0) * n_resamples), n_resamples - 1))
+    high_idx = max(0, min(int((1.0 - alpha / 2.0) * n_resamples), n_resamples - 1))
+    return {
+        "low": float(boot_means[low_idx]),
+        "high": float(boot_means[high_idx]),
+        "alpha": alpha,
+        "n_resamples": n_resamples,
+    }
+
+
 def _paired_comparison(ppo_list: list[dict], baseline_list: list[dict]) -> dict:
     differences = [p["affected_area_ha"] - b["affected_area_ha"] for p, b in zip(ppo_list, baseline_list)]
     reductions = [-d for d in differences]
@@ -78,10 +110,14 @@ def _paired_comparison(ppo_list: list[dict], baseline_list: list[dict]) -> dict:
     count = len(differences)
     all_zero_rejected = all(p["rejected_orders"] == 0 and b["rejected_orders"] == 0
                             for p, b in zip(ppo_list, baseline_list))
+    ci_reduction = _bootstrap_ci(reductions)
+    ci_difference = _bootstrap_ci(differences)
     return {
         "paired_count": count,
         "mean_ppo_minus_baseline_ha": float(mean(differences)),
         "mean_reduction_ha": float(mean(reductions)),
+        "reduction_95_ci": [ci_reduction["low"], ci_reduction["high"]],
+        "difference_95_ci": [ci_difference["low"], ci_difference["high"]],
         "wins": wins,
         "losses": losses,
         "ties": ties,
@@ -97,8 +133,9 @@ def run_reserved_evaluation(
     output_path: Path | None = None,
     replays_dir: Path | None = None,
     device: Any = None,
+    split_version: str = "v2",
 ) -> dict:
-    """Evaluate checkpoint and baselines on all 8 reserved scenarios."""
+    """Evaluate checkpoint and baselines on reserved scenarios (v1: 8 scenarios, v2: 32 scenarios)."""
     if not HAS_TORCH:
         raise ImportError("PyTorch is required for evaluating PPO checkpoints")
     if not checkpoint_path.exists():
@@ -122,9 +159,27 @@ def run_reserved_evaluation(
         model.to(device)
     model.eval()
 
-    _dev, _val, reserved = build_scenarios()
-    if len(reserved) != 8:
-        raise ValueError(f"expected 8 reserved scenarios, found {len(reserved)}")
+    if split_version == "v2":
+        reserved = build_reserved_v2_scenarios()
+        if len(reserved) != 32:
+            raise ValueError(f"expected 32 reserved v2 scenarios, found {len(reserved)}")
+        schema_version = SCHEMA_VERSION_V2
+        split_name = "reserved_v2"
+        default_out = DEFAULT_OUTPUT_V2
+        default_rep = DEFAULT_REPLAYS_DIR_V2
+    elif split_version == "v1":
+        _dev, _val, reserved = build_scenarios()
+        if len(reserved) != 8:
+            raise ValueError(f"expected 8 reserved v1 scenarios, found {len(reserved)}")
+        schema_version = SCHEMA_VERSION_V1
+        split_name = "reserved"
+        default_out = DEFAULT_OUTPUT_V1
+        default_rep = DEFAULT_REPLAYS_DIR_V1
+    else:
+        raise ValueError(f"unknown split_version: {split_version}")
+
+    final_output_path = output_path if output_path is not None else default_out
+    final_replays_dir = replays_dir if replays_dir is not None else default_rep
 
     timestamp = datetime.now(timezone.utc).isoformat()
     scenario_provenance = [
@@ -149,9 +204,9 @@ def run_reserved_evaluation(
         ppo_metrics_list.append(ppo_metrics)
         scenario_record["ppo"] = ppo_metrics
 
-        if replays_dir is not None:
+        if final_replays_dir is not None:
             ppo_rel = Path("replays") / "ppo" / f"{sid}.json"
-            full_path = replays_dir.parent / ppo_rel if replays_dir.name == "replays" else replays_dir / "ppo" / f"{sid}.json"
+            full_path = final_replays_dir.parent / ppo_rel if final_replays_dir.name == "replays" else final_replays_dir / "ppo" / f"{sid}.json"
             full_path.parent.mkdir(parents=True, exist_ok=True)
             full_path.write_text(json.dumps(ppo_replay, indent=2, sort_keys=True) + "\n")
             scenario_record["ppo_replay"] = str(ppo_rel)
@@ -162,9 +217,9 @@ def run_reserved_evaluation(
         no_intervention_metrics_list.append(no_int_metrics)
         scenario_record["no_intervention"] = no_int_metrics
 
-        if replays_dir is not None:
+        if final_replays_dir is not None:
             no_int_rel = Path("replays") / "no_intervention" / f"{sid}.json"
-            full_path = replays_dir.parent / no_int_rel if replays_dir.name == "replays" else replays_dir / "no_intervention" / f"{sid}.json"
+            full_path = final_replays_dir.parent / no_int_rel if final_replays_dir.name == "replays" else final_replays_dir / "no_intervention" / f"{sid}.json"
             full_path.parent.mkdir(parents=True, exist_ok=True)
             full_path.write_text(json.dumps(no_int_replay, indent=2, sort_keys=True) + "\n")
             scenario_record["no_intervention_replay"] = str(no_int_rel)
@@ -175,9 +230,9 @@ def run_reserved_evaluation(
         heuristic_metrics_list.append(heur_metrics)
         scenario_record["heuristic"] = heur_metrics
 
-        if replays_dir is not None:
+        if final_replays_dir is not None:
             heur_rel = Path("replays") / "heuristic" / f"{sid}.json"
-            full_path = replays_dir.parent / heur_rel if replays_dir.name == "replays" else replays_dir / "heuristic" / f"{sid}.json"
+            full_path = final_replays_dir.parent / heur_rel if final_replays_dir.name == "replays" else final_replays_dir / "heuristic" / f"{sid}.json"
             full_path.parent.mkdir(parents=True, exist_ok=True)
             full_path.write_text(json.dumps(heur_replay, indent=2, sort_keys=True) + "\n")
             scenario_record["heuristic_replay"] = str(heur_rel)
@@ -188,9 +243,9 @@ def run_reserved_evaluation(
         containment_metrics_list.append(cont_metrics)
         scenario_record["containment_heuristic"] = cont_metrics
 
-        if replays_dir is not None:
+        if final_replays_dir is not None:
             cont_rel = Path("replays") / "containment_heuristic" / f"{sid}.json"
-            full_path = replays_dir.parent / cont_rel if replays_dir.name == "replays" else replays_dir / "containment_heuristic" / f"{sid}.json"
+            full_path = final_replays_dir.parent / cont_rel if final_replays_dir.name == "replays" else final_replays_dir / "containment_heuristic" / f"{sid}.json"
             full_path.parent.mkdir(parents=True, exist_ok=True)
             full_path.write_text(json.dumps(cont_replay, indent=2, sort_keys=True) + "\n")
             scenario_record["containment_heuristic_replay"] = str(cont_rel)
@@ -201,9 +256,9 @@ def run_reserved_evaluation(
             rand_replay = run_integrated(scenario, "random_valid", policy_seed=r_seed)
             rand_metrics = _extract_metrics(rand_replay)
             random_runs.append(rand_metrics)
-            if replays_dir is not None:
+            if final_replays_dir is not None:
                 rand_rel = Path("replays") / "random_valid" / f"seed-{r_seed:02d}" / f"{sid}.json"
-                full_path = replays_dir.parent / rand_rel if replays_dir.name == "replays" else replays_dir / "random_valid" / f"seed-{r_seed:02d}" / f"{sid}.json"
+                full_path = final_replays_dir.parent / rand_rel if final_replays_dir.name == "replays" else final_replays_dir / "random_valid" / f"seed-{r_seed:02d}" / f"{sid}.json"
                 full_path.parent.mkdir(parents=True, exist_ok=True)
                 full_path.write_text(json.dumps(rand_replay, indent=2, sort_keys=True) + "\n")
 
@@ -238,9 +293,10 @@ def run_reserved_evaluation(
     predeclared_criteria["all_criteria_met"] = all_passed
 
     report = {
-        "schema_version": SCHEMA_VERSION,
+        "schema_version": schema_version,
         "provenance": "synthetic",
-        "split": "reserved",
+        "split": split_name,
+        "split_version": split_version,
         "synthetic_no_physical_claim": True,
         "timestamp_utc": timestamp,
         "checkpoint": {
@@ -261,9 +317,10 @@ def run_reserved_evaluation(
         "per_scenario_results": per_scenario_results,
     }
 
-    if output_path is not None:
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+    if final_output_path is not None:
+        final_output_path.parent.mkdir(parents=True, exist_ok=True)
+        final_output_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+        report["output_report"] = str(final_output_path)
 
     return report
 
@@ -271,20 +328,30 @@ def run_reserved_evaluation(
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--checkpoint", type=Path, default=DEFAULT_CHECKPOINT)
-    parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
-    parser.add_argument("--replays-dir", type=Path, default=DEFAULT_REPLAYS_DIR)
+    parser.add_argument("--output", type=Path, default=None)
+    parser.add_argument("--replays-dir", type=Path, default=None)
+    parser.add_argument("--split-version", choices=["v1", "v2"], default="v2")
     args = parser.parse_args()
 
-    report = run_reserved_evaluation(args.checkpoint, args.output, args.replays_dir)
+    report = run_reserved_evaluation(
+        args.checkpoint,
+        output_path=args.output,
+        replays_dir=args.replays_dir,
+        split_version=args.split_version,
+    )
     rendered = json.dumps({
         "schema_version": report["schema_version"],
         "checkpoint": report["checkpoint"]["path"],
         "checkpoint_sha256": report["checkpoint"]["sha256"],
+        "split": report["split"],
+        "split_version": report["split_version"],
         "predeclared_criteria": report["predeclared_criteria"],
         "mean_reduction_vs_heuristic_ha": report["paired_comparisons"]["heuristic"]["mean_reduction_ha"],
+        "heuristic_reduction_95_ci": report["paired_comparisons"]["heuristic"]["reduction_95_ci"],
         "mean_reduction_vs_containment_ha": report["paired_comparisons"]["containment_heuristic"]["mean_reduction_ha"],
+        "containment_reduction_95_ci": report["paired_comparisons"]["containment_heuristic"]["reduction_95_ci"],
         "heuristic_win_rate": report["paired_comparisons"]["heuristic"]["win_rate"],
-        "output_report": str(args.output),
+        "output_report": report.get("output_report"),
     }, indent=2, sort_keys=True)
     print(rendered)
 
