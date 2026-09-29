@@ -82,6 +82,8 @@ python3 -m nightjar.challenge_family --output-dir runs/challenge-family
 python3 -m nightjar.discrimination_family --output-dir runs/discrimination-family
 python3 -m nightjar.cems_catalog list
 python3 -m nightjar.geographic_family --output-dir runs/geographic-family
+python3 -m nightjar.geographic_integrated runs/geographic-family/development/geographic-dev-emsr578-00.json --policy heuristic --output runs/geographic-integrated-dev00.json
+python3 -m nightjar.geographic_benchmark runs/geographic-family/development/geographic-dev-emsr578-00.json --output runs/geographic-benchmark-dev00.json
 python3 -m nightjar.evaluate_reserved --split-version v2
 python3 -m nightjar.viewer runs/integrated-heuristic.json --output runs/viewer.html
 python3 -m unittest discover -s tests -v
@@ -110,6 +112,8 @@ The challenge-family command keeps the FM1 fire and 35 m water rule but extends 
 A prior exploratory linear-controller trial did not show a convincing gain over the heuristic or seeded random baseline. Its implementation has been removed; the four challenge outcomes it opened remain documented in [EVALUATION.md](docs/EVALUATION.md).
 
 The discrimination-family command generates 24 synthetic scenarios under `nightjar-discrimination-family-0.1` partitioned into disjoint development, validation, and unopened reserved splits (eight scenarios each). It features multi-foci ignitions in separate quadrants, edge water refill locations, and observation delays of 60–120 s. All eight evaluated development cases exceed 4.0 ha unmitigated; that threshold has not been verified for the unopened splits. The command evaluates only the development split (104 full replays) across four policies: `no_intervention` (10.44 ha mean), greedy `heuristic` (8.94 ha mean), `containment_heuristic` (9.34 ha mean), and `random_valid` (9.23 ha mean). Validation and reserved outcomes remain unopened for future model selection and testing; see [EVALUATION.md](docs/EVALUATION.md).
+
+The geographic family command (`nightjar.geographic_family`) builds real-world tactical suites (`nightjar-geographic-family-0.1`) across Spanish wildfire activations (EMSR578, EMSR590, EMSR592, EMSR600) with Scott & Burgan 40 fuels and georeferenced waterbodies. The `nightjar.geographic_integrated` module simulates CL-415 aerial firefighting missions (cruise $80\text{ m/s}$, drop $55\text{ m/s}$, scooping $180\text{ s}$) over these landscapes with physical Rothermel propagation and zero-leakage observation schedules. Multi-policy comparisons are executed via `nightjar.geographic_benchmark`:
 
 
 The same fixed scenario now has a small headless interface for exploratory controller code:
