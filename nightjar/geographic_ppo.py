@@ -281,6 +281,7 @@ def train_geographic_ppo(
 
         loss = ppo_update_geographic(model, optimizer, batch_records)
         losses.append(loss)
+        print(f"  [Update {update_idx + 1:2d}/{updates}] PPO Loss: {loss:9.4f} (episodes: {len(batch_records)})")
 
     return model, losses
 
@@ -291,6 +292,7 @@ def main() -> None:
     parser.add_argument("--train", action="store_true", help="Train PPO on development scenarios")
     parser.add_argument("--select", action="store_true", help="Train candidates and select on validation")
     parser.add_argument("--eval", action="store_true", help="Evaluate checkpoint against baselines")
+    parser.add_argument("--split", choices=("development", "validation", "reserved"), default="development")
     parser.add_argument("--scenarios-dir", type=Path, default=Path("runs/geographic-family"))
     parser.add_argument("--updates", type=int, default=1)
     parser.add_argument("--episodes-per-update", type=int, default=1)
@@ -333,6 +335,35 @@ def main() -> None:
             print(rendered)
         return
 
+    if args.train:
+        print(f"Training Geographic PPO (updates={args.updates}, episodes_per_update={args.episodes_per_update}, recurrent={recurrent})...")
+        model, losses = train_geographic_ppo(
+            dev_scenarios,
+            updates=args.updates,
+            episodes_per_update=args.episodes_per_update,
+            lr=args.lr,
+            recurrent=recurrent,
+            device=device,
+        )
+        if args.checkpoint:
+            args.checkpoint.parent.mkdir(parents=True, exist_ok=True)
+            torch.save(model.state_dict(), args.checkpoint)
+            print(f"Saved trained checkpoint -> {args.checkpoint}")
+
+        _, eval_m = rollout_geographic(model, dev_scenarios[0], device=device, deterministic=True)
+        report = {
+            "schema_version": "nightjar-geographic-ppo-train-0.1",
+            "recurrent": recurrent,
+            "updates": args.updates,
+            "final_loss": losses[-1] if losses else 0.0,
+            "evaluation": eval_m,
+        }
+        if args.output:
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            args.output.write_text(json.dumps(report, indent=2))
+            print(f"Wrote training report -> {args.output}")
+        return
+
     if args.select:
         val_scenarios = load_geographic_split("validation", args.scenarios_dir)
         if args.eval_scenarios is not None:
@@ -346,6 +377,7 @@ def main() -> None:
             c_seed = 42 + c_idx
             random.seed(c_seed)
             torch.manual_seed(c_seed)
+            print(f"\n--- Candidate {c_idx + 1}/{args.candidates} (seed={c_seed}) ---")
 
             cand_model, c_losses = train_geographic_ppo(
                 dev_scenarios,
@@ -369,6 +401,8 @@ def main() -> None:
                 "losses": c_losses,
             })
 
+            print(f"Candidate {c_idx + 1} validation mean burned: {mean_burned:.2f} ha (total drops: {total_drops})")
+
             if mean_burned < best_mean_burned:
                 best_mean_burned = mean_burned
                 best_candidate = cand_model
@@ -376,7 +410,7 @@ def main() -> None:
         if args.checkpoint and best_candidate is not None:
             args.checkpoint.parent.mkdir(parents=True, exist_ok=True)
             torch.save(best_candidate.state_dict(), args.checkpoint)
-            print(f"Saved best candidate checkpoint -> {args.checkpoint}")
+            print(f"\nSaved best candidate checkpoint -> {args.checkpoint}")
 
         report = {
             "schema_version": SELECTION_SCHEMA_VERSION,
@@ -390,6 +424,61 @@ def main() -> None:
             args.output.write_text(json.dumps(report, indent=2))
             print(f"Wrote selection report -> {args.output}")
         return
+
+    if args.eval:
+        if not args.checkpoint or not args.checkpoint.exists():
+            raise FileNotFoundError(f"Checkpoint file required for --eval: {args.checkpoint}")
+        target_scenarios = load_geographic_split(args.split, args.scenarios_dir)
+        if args.eval_scenarios is not None:
+            target_scenarios = target_scenarios[:args.eval_scenarios]
+
+        sample_grid = target_scenarios[0]["grid"]
+        rows, cols = int(sample_grid["rows"]), int(sample_grid["cols"])
+        model = SpatialActorCritic(
+            grid_rows=rows,
+            grid_cols=cols,
+            action_dim=len(TACTICAL_ACTION_NAMES),
+            recurrent=recurrent,
+        ).to(device)
+        model.load_state_dict(torch.load(args.checkpoint, map_location=device))
+        model.eval()
+
+        print(f"Evaluating {args.checkpoint} against baselines on split '{args.split}' ({len(target_scenarios)} scenarios)...")
+        eval_reports = []
+        for sc in target_scenarios:
+            bm = run_geographic_benchmark(sc, random_seeds=(42, 43))
+            _, rl_metrics = rollout_geographic(model, sc, device=device, deterministic=True)
+            no_int_ha = bm["policies"]["no_intervention"]["final_burned_ha"]
+            heur_ha = bm["policies"]["heuristic"]["final_burned_ha"]
+            cont_ha = bm["policies"]["containment_heuristic"]["final_burned_ha"]
+            rand_ha = bm["policies"]["random_valid_mean"]["final_burned_ha"]
+            rl_ha = rl_metrics["final_burned_ha"]
+            area_saved = round(no_int_ha - rl_ha, 2)
+            eval_reports.append({
+                "scenario_id": sc["scenario_id"],
+                "no_intervention_ha": no_int_ha,
+                "heuristic_ha": heur_ha,
+                "containment_ha": cont_ha,
+                "random_valid_ha": rand_ha,
+                "ppo_rl_ha": rl_ha,
+                "area_saved_ha": area_saved,
+                "drops_count": rl_metrics["drops_count"],
+                "flight_km": rl_metrics["flight_distance_km"],
+                "rejected_orders": rl_metrics["rejected_orders"],
+            })
+
+        print("\n========================= Geographic Evaluation Summary =========================")
+        print(f"{'Scenario':<28} {'No Interv':<12} {'Heuristic':<12} {'Contain':<12} {'PPO (RL)':<12} {'Saved (ha)':<10}")
+        print("-" * 88)
+        for r in eval_reports:
+            print(f"{r['scenario_id']:<28} {r['no_intervention_ha']:<12.1f} {r['heuristic_ha']:<12.1f} {r['containment_ha']:<12.1f} {r['ppo_rl_ha']:<12.1f} {r['area_saved_ha']:<10.1f}")
+
+        if args.output:
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            args.output.write_text(json.dumps({"schema_version": EVAL_SCHEMA_VERSION, "reports": eval_reports}, indent=2))
+            print(f"Wrote evaluation report -> {args.output}")
+        return
+
 
 
 if __name__ == "__main__":
