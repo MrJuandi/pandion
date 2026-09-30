@@ -31,6 +31,16 @@ This is a starting reading list, not a systematic review. Claims and implementat
 - [ECMWF ERA5 hourly reanalysis](https://www.ecmwf.int/en/forecasts/datasets/era5-hourly-data-single-levels-1940-present).
 
 Dataset inclusion requires temporal alignment, provenance, and licensing checks described in [DATA_AND_VALIDATION.md](DATA_AND_VALIDATION.md).
+
+## EMSR578 environmental inventory
+
+- [IGN/CNIG terrain WCS catalog](https://datos.gob.es/es/catalogo/e0dat0002-wcs-de-modelos-digitales-del-terreno-de-espana1) and [25 m coverage description](https://servicios.idee.es/wcs-inspire/mdt?service=WCS&request=DescribeCoverage&version=1.0.0&coverage=Elevacion25830_25): numeric elevations and advertised CRS/format/interpolation; source acquisition epoch remains unverified. The [IGN 2017 report](https://www.ign.es/web/resources/actividades/memoria/MemoriaIGN2017.pdf) describes PNOA-LiDAR-derived orthometric heights.
+- [Meteocat open station data](https://www.meteo.cat/wpweb/serveis/dades-obertes/) and [XEMA timestamp semantics](https://apidocs.meteocat.gencat.cat/documentacio/dades-de-la-xema/): UTC and labels at the start of the following interval; station variables/units and validity. Accessed 2026-09-30.
+- [NASA FIRMS archive](https://firms.modaps.eosdis.nasa.gov/download/) and [NASA detection/area limitations](https://forum.earthdata.nasa.gov/viewtopic.php?t=5200): candidate additional fire-activity observations, not acquired in the current audit; thermal detections do not define exact burned-area perimeters.
+- [Interior/Bombers incident information](https://interior.gencat.cat/ca/incendis-forestals/coneixem/): source lead for Artesa/Baldomar chronology; no quantified intervention map was acquired.
+- [US Forest Service, How to conduct drop tests of aerial retardant delivery systems (2004)](https://www.fs.usda.gov/t-d/pubs/pdfpubs/pdf04572813/pdf04572813dpi300.pdf): procedures for deposition measurements including water. Deposition measurements alone do not validate fire suppression or drying time. No water-effect coefficient is adopted in this change.
+
+Exact local export hashes, sampling conventions and diagnostic limits are in [PILOT_ENVIRONMENT.md](PILOT_ENVIRONMENT.md).
 ## External grass-fire diagnostic
 
 - [Cruz et al. (2024), The 1986 Annaburroo experimental grassland fires: data](https://connectsci.au/wf/article/33/5/WF23100/22126/The-1986-Annaburroo-experimental-grassland-fires): plot variables, experimental context, and definition of the width-adjusted steady-state spread rate.

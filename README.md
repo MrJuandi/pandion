@@ -4,6 +4,8 @@ Research project for learning and evaluating decisions in wildfire response. The
 
 **Status:** early Stage 0. The repository contains deterministic aircraft and fire components plus a small synthetic integrated episode. Its full-load drop blocks not-yet-burning grid cells under a provisional, unsourced water rule. Synthetic scenario families, a headless decision interface, and an exploratory PPO smoke path are available for evaluation design. This is not a physically validated or operational decision tool.
 
+The [EMSR578 environmental pilot](docs/PILOT_ENVIRONMENT.md) now ingests scenario-bound numeric terrain and audits historical Baldomar station weather. Its exploratory spread comparisons report actual satellite elapsed times, newly burned area and an initial-only baseline. Station weather is not yet connected to time-dependent fire propagation; the physical-validation gate remains open. Acquisition, audit and simulation commands are documented in that pilot record.
+
 ## Research question
 
 Can a learned policy choose where and when to deploy firefighting resources more effectively than transparent baselines when all controllers receive the same delayed and uncertain information?

@@ -140,4 +140,6 @@ The decision layer should not encode assumptions such as “there are exactly tw
 
 ## 6. Interface boundary
 
+The separate EMSR578 research pilot can read `nightjar-pilot-terrain-0.1` through `pilot_simulation run --terrain`: the artifact binds numeric elevations to the scenario hash, southwest origin, cell size, CRS and northward row order. Missing terrain is rejected rather than converted to nonburnable fuel or filled silently. `nightjar-pilot-weather-audit-0.1` retains historical half-hour station observations, their forward intervals and quality/gaps; it is an audit artifact, not engine forcing or controller input. The geographic training family is unchanged. See [PILOT_ENVIRONMENT.md](PILOT_ENVIRONMENT.md) for source and coverage limits.
+
 Simulation, controller, benchmark, and replay must run headlessly. A browser interface can read versioned replay artifacts and show observed versus true state clearly for analysis. The interface must never be the source of scientific metrics. Desktop packaging is a later product decision.

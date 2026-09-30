@@ -2,6 +2,8 @@
 
 **Status:** design checklist. Candidate sources below have different scales and licenses; inclusion requires a source-specific review.
 
+The [2026-09-30 EMSR578 environmental inventory](PILOT_ENVIRONMENT.md) adds a separate source-bound numeric terrain artifact and a historical Baldomar weather audit. IGN/CNIG 25 m terrain is requested at the pilot's 100 m grid in EPSG:25831; its acquisition epoch and unadvertised source footprint remain unknown. Meteocat supplies complete valid half-hour coverage for five station variables over the observation window, with forward-interval timestamp semantics. This is station evidence, not landscape-wide midflame wind or fuel moisture, and is not yet engine forcing. The four-incident training family keeps its flat/synthetic environmental assumptions. Daily cumulative maps support growth diagnostics at actual elapsed times, not inferred hourly trajectories or independent validation; source hashes, commands and limits are recorded in the inventory.
+
 ## 1. Dataset contract
 
 Each input layer and derived product must record: provider, product/version, acquisition or validity time, download time, spatial and temporal resolution, CRS, geographic coverage, units, processing steps, missing-data mask, uncertainty representation, license/redistribution terms, checksum, and whether it is observed, inferred, or synthetic. Scenario manifests must preserve these fields and the exact train/validation/test assignment.

@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 import json
+from hashlib import sha256
 from pathlib import Path
 from tempfile import TemporaryDirectory
+import sys
 import unittest
+from unittest.mock import patch
 from zipfile import ZipFile
 
 import numpy as np
 
 from nightjar import pilot_simulation
+from nightjar.pilot_terrain import build_terrain
 
 
 class PilotSimulationUnitTests(unittest.TestCase):
@@ -82,6 +86,60 @@ class PilotSimulationUnitTests(unittest.TestCase):
             pilot_simulation.simulate_pilot_spread(self.scenario, wind_to_m_s=[1.0])
         with self.assertRaises(ValueError):
             pilot_simulation.simulate_pilot_spread(self.scenario, elevation_m=[[10.0]])
+        with self.assertRaisesRegex(ValueError, "finite elevations"):
+            pilot_simulation.simulate_pilot_spread(self.scenario, elevation_m=[[float("nan")] * 5 for _ in range(5)])
+
+    def test_northward_uphill_spread_and_report_provenance(self):
+        result = pilot_simulation.simulate_pilot_spread(
+            self.scenario, horizon_s=3600, wind_to_m_s=(0, 0),
+            elevation_m=[[20.0 * r] * 5 for r in range(5)],
+        )
+        self.assertLess(result["arrival_time_s"][3][2], result["arrival_time_s"][1][2])
+        self.assertEqual(result["units"]["area"], "ha")
+        self.assertIsNone(result["seed"])
+        self.assertEqual(len(result["scenario_sha256"]), 64)
+
+    def test_cli_uses_bound_terrain_and_rejects_missing_cells(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            scen = root / "scenario.json"
+            scen.write_text(json.dumps(self.scenario))
+            source = root / "terrain.asc"
+            source.write_text("ncols 5\nnrows 5\nxllcorner 0\nyllcorner 0\ncellsize 100\n" + "\n".join(" ".join([str(20*r)]*5) for r in reversed(range(5))) + "\n")
+            terrain_path = root / "terrain.json"
+            terrain = build_terrain(self.scenario, source, crs="EPSG:25831")
+            terrain_path.write_text(json.dumps(terrain))
+            output = root / "simulation.json"
+            args = ["pilot_simulation", "run", "--scenario", str(scen), "--terrain", str(terrain_path), "--output", str(output)]
+            with patch.object(sys, "argv", args):
+                pilot_simulation.main()
+            result = json.loads(output.read_text())
+            self.assertEqual(result["terrain"]["artifact_sha256"], sha256(terrain_path.read_bytes()).hexdigest())
+            terrain["elevation_m"][0][0] = None
+            terrain["valid_mask"][0][0] = False
+            terrain_path.write_text(json.dumps(terrain))
+            with patch.object(sys, "argv", args), self.assertRaisesRegex(ValueError, "missing elevations"):
+                pilot_simulation.main()
+
+    def test_evaluation_separates_growth_and_flags_time_mismatch(self):
+        initial = np.array(self.scenario["initial_burn_mask"], dtype=bool)
+        observed = initial.copy()
+        observed[3][2] = True
+        simulation = {"grid": self.scenario["grid"], "simulated_burn_mask": initial.tolist(), "parameters": {"horizon_s": 3600}}
+        self.scenario["observation_timestamps"] = {"t0_initial_utc": "2022-06-17T10:06:00Z"}
+        with TemporaryDirectory() as directory:
+            source = Path(directory) / "mock.zip"
+            source.write_bytes(b"synthetic comparison bytes")
+            digest = sha256(source.read_bytes()).hexdigest()
+            with patch.object(pilot_simulation, "extract_observed_mask", return_value=observed), patch.object(
+                pilot_simulation, "PRODUCTS", (("mock", "MOCK", "2022-06-18T10:47:00Z", digest),)
+            ):
+                result = pilot_simulation.evaluate_simulation_vs_satellite(simulation, source, self.scenario)
+            self.assertEqual(result["timing"]["elapsed_observation_s"], 88860)
+            self.assertEqual(result["timing"]["status"], "mismatched_elapsed_time")
+            self.assertEqual(result["iou"], 0.5)
+            self.assertEqual(result["initial_only_baseline"]["iou"], 0.5)
+            self.assertEqual(result["growth_only"]["iou"], 0)
 
 
 class PilotSimulationIntegrationTests(unittest.TestCase):
