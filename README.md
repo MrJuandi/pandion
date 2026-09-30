@@ -87,6 +87,8 @@ python3 -m nightjar.geographic_family --synthetic --output-dir runs/geographic-f
 python3 -m nightjar.geographic_integrated runs/geographic-family-real-v2/development/geographic-dev-emsr578-00.json --policy heuristic --output runs/geographic-family-real-v2/smoke-development-00.json
 python3 -m nightjar.geographic_benchmark runs/geographic-family-real-v2/development/geographic-dev-emsr578-00.json --output runs/geographic-family-real-v2/benchmark-development-00.json
 python3 -m nightjar.geographic_ppo --smoke --scenarios-dir runs/geographic-family-real-v2
+# Offline PPO checks require the synthetic family generated above and explicit mode:
+python3 -m nightjar.geographic_ppo --smoke --synthetic --scenarios-dir runs/geographic-family-synthetic
 python3 -m nightjar.evaluate_reserved --split-version v2
 python3 -m nightjar.viewer runs/integrated-heuristic.json --output runs/viewer.html
 python3 -m unittest discover -s tests -v
@@ -116,7 +118,7 @@ A prior exploratory linear-controller trial did not show a convincing gain over 
 
 The discrimination-family command generates 24 synthetic scenarios under `nightjar-discrimination-family-0.1` partitioned into disjoint development, validation, and unopened reserved splits (eight scenarios each). It features multi-foci ignitions in separate quadrants, edge water refill locations, and observation delays of 60–120 s. All eight evaluated development cases exceed 4.0 ha unmitigated; that threshold has not been verified for the unopened splits. The command evaluates only the development split (104 full replays) across four policies: `no_intervention` (10.44 ha mean), greedy `heuristic` (8.94 ha mean), `containment_heuristic` (9.34 ha mean), and `random_valid` (9.23 ha mean). Validation and reserved outcomes remain unopened for future model selection and testing; see [EVALUATION.md](docs/EVALUATION.md).
 
-The geographic family command requires the four verified local CEMS products `emsr578_del.zip`, `emsr590_del.zip`, `emsr592_del.zip`, and `emsr600_del.zip` under `data/raw/cems/` (or `--raw-dir`). It never downloads during generation. Fetching existing catalog products is explicit, for example `.venv/bin/python -m nightjar.cems_catalog fetch --activation EMSR578`; repeat for EMSR590, EMSR592, and EMSR600 before generating. Fetch verifies each registered SHA-256. Run `.venv/bin/python -m nightjar.geographic_family --raw-dir data/raw/cems --output-dir runs/geographic-family-real-v2` only after all four are present; output must be new/empty. Development uses EMSR578, validation EMSR590, and reserved scenarios round-robin EMSR592/EMSR600. Use `--synthetic` only for offline fixtures; the manifest and each scenario identify `synthetic_fixture`. Flat topography (no DEM) and modeled environmental settings remain assumptions; this is not physical validation. See [DATA_AND_VALIDATION.md](docs/DATA_AND_VALIDATION.md) for source provenance and limitations.
+The geographic family command requires the four verified local CEMS products `emsr578_del.zip`, `emsr590_del.zip`, `emsr592_del.zip`, and `emsr600_del.zip` under `data/raw/cems/` (or `--raw-dir`). It never downloads during generation. Fetching existing catalog products is explicit, for example `.venv/bin/python -m nightjar.cems_catalog fetch --activation EMSR578`; repeat for EMSR590, EMSR592, and EMSR600 before generating. Fetch verifies each registered SHA-256. Run `.venv/bin/python -m nightjar.geographic_family --raw-dir data/raw/cems --output-dir runs/geographic-family-real-v2` only after all four are present; output must be new/empty. Development uses EMSR578, validation EMSR590, and reserved scenarios round-robin EMSR592/EMSR600. Use `--synthetic` only for offline fixtures; the manifest and each scenario identify `synthetic_fixture`. Rows increase north, columns east, and source rasters sample cell centers from a southwest-boundary origin; discrete DROP targets remain cell-anchor proxies, not measured physical drop centers. Flat topography (no DEM) and modeled environmental settings remain assumptions; this is not physical validation. See [DATA_AND_VALIDATION.md](docs/DATA_AND_VALIDATION.md) for the source-coverage limitation and geographic data gate.
 
 
 The same fixed scenario now has a small headless interface for exploratory controller code:
@@ -173,6 +175,8 @@ observation, reward, done, info = env.step_discrete(action_idx)
 ```
 
 For real-world geographic decision research with Copernicus CEMS scenarios:
+
+Geographic PPO requires complete manifest membership with no duplicate scenario IDs across files. Real source metadata must match a single registered catalog product, including its stage, checksum, code, filename, and acquisition time. Smoke reports identify the development training pool of at most two scenarios.
 
 ```sh
 python3 -m nightjar.geographic_ppo --smoke

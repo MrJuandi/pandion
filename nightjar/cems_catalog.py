@@ -432,6 +432,16 @@ def build_cems_scenario(
             "acquired_at_utc": prod_info["acquired_at_utc"],
             "units": {"coordinates": "m", "cell_size": "m", "burned_area": "ha"},
             "resolution_m": cell_size_m,
+            "coordinate_contract": {
+                "grid_origin": "southwest cell boundary in projected CRS meters",
+                "array_axes": "row increases north; column increases east",
+                "source_sampling": "cell centers at origin + (index + 0.5) * resolution",
+                "fuel_coverage": "code 0 combines water, nonburnable, unmapped, and unavailable coverage; no independent source-coverage mask",
+            },
+        },
+        "position_semantics": {
+            "source_raster_samples": "cell centers",
+            "discrete_drop_targets": "local cell-anchor proxies (column * resolution, row * resolution), not measured physical drop centers",
         },
         "crs": {
             "authority": "EPSG",
@@ -445,6 +455,7 @@ def build_cems_scenario(
             "cell_size_m": cell_size_m,
             "origin_utm_easting_m": round(min_x, 3),
             "origin_utm_northing_m": round(min_y, 3),
+            "origin_semantics": "southwest cell boundary",
             "extent_ha": round(rows * cols * cell_area_ha, 2),
         },
         "initial_perimeter": {

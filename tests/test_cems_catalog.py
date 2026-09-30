@@ -86,6 +86,61 @@ class TestCemsCatalog(unittest.TestCase):
             # Check fuel code 146 (SH6 from 322) was rasterized
             fuel_grid = scenario["fuel_grid"]
             self.assertTrue(any(146 in row for row in fuel_grid))
+            self.assertEqual(scenario["position_semantics"]["source_raster_samples"], "cell centers")
+            self.assertEqual(scenario["grid"]["origin_semantics"], "southwest cell boundary")
+            self.assertIn("unavailable coverage", scenario["provenance"]["coordinate_contract"]["fuel_coverage"])
+
+    def test_asymmetric_projected_layers_use_north_rows_east_columns(self):
+        from hashlib import sha256
+        from nightjar.geodesy import utm_to_wgs84
+
+        zone, size = 30, 100.0
+        x0, y0 = 500000.25, 4400000.25
+
+        def lonlat(x, y):
+            return list(utm_to_wgs84(x, y, zone=zone))
+
+        def polygon(col0, row0, col1, row1):
+            return [[lonlat(x0 + col0 * size, y0 + row0 * size),
+                     lonlat(x0 + col1 * size, y0 + row0 * size),
+                     lonlat(x0 + col1 * size, y0 + row1 * size),
+                     lonlat(x0 + col0 * size, y0 + row1 * size),
+                     lonlat(x0 + col0 * size, y0 + row0 * size)]]
+
+        def feature(coords, properties=None):
+            return {"type": "Feature", "geometry": {"type": "Polygon", "coordinates": coords},
+                    "properties": properties or {}}
+
+        aoi = feature(polygon(0, 0, 4, 2))
+        land = feature(polygon(2, 0, 3, 1), {"info": "231-Pastures"})
+        water = feature(polygon(0, 1, 1, 2), {"name": "water"})
+        burn = feature(polygon(3, 1, 4, 2))
+        payloads = {
+            "areaOfInterestA": {"type": "FeatureCollection", "features": [aoi]},
+            "naturalLandUseA": {"type": "FeatureCollection", "features": [land]},
+            "hydrographyA": {"type": "FeatureCollection", "features": [water]},
+            "observedEventA": {"type": "FeatureCollection", "features": [burn]},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "asymmetric.zip"
+            with ZipFile(path, "w") as archive:
+                for layer, data in payloads.items():
+                    archive.writestr(f"{layer}.json", json.dumps(data))
+            digest = sha256(path.read_bytes()).hexdigest()
+            with patch.dict(ACTIVATIONS["EMSR590"]["products"]["del"], {"sha256": digest}):
+                scenario = build_cems_scenario("EMSR590", path, cell_size_m=size)
+
+        self.assertEqual((scenario["grid"]["rows"], scenario["grid"]["cols"]), (3, 4))
+        self.assertEqual(scenario["fuel_grid"], [[0, 0, 102, 0], [0, 0, 0, 0], [0, 0, 0, 0]])
+        self.assertEqual(scenario["water_mask"], [[False, False, False, False],
+                                                     [True, False, False, False],
+                                                     [False, False, False, False]])
+        self.assertEqual(scenario["fuel_grid"][1][0], 0)
+        self.assertEqual(scenario["burn_mask"], [[False, False, False, False],
+                                                   [False, False, False, True],
+                                                   [False, False, False, False]])
+        self.assertAlmostEqual(scenario["grid"]["origin_utm_easting_m"], x0, places=2)
+        self.assertAlmostEqual(scenario["grid"]["origin_utm_northing_m"], y0, places=2)
 
     def test_build_cems_scenario_with_real_emsr578_if_available(self):
         real_zip = Path("data/raw/emsr578/del.zip")

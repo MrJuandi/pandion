@@ -61,6 +61,23 @@ class TestGeographicIntegrated(unittest.TestCase):
         self.assertEqual(run1["aircraft_metrics"]["drops_count"], run2["aircraft_metrics"]["drops_count"])
         self.assertEqual(run1["aircraft_metrics"]["total_water_dropped_l"], run2["aircraft_metrics"]["total_water_dropped_l"])
 
+    def test_drop_replay_utm_uses_selected_local_cell_anchor(self):
+        from nightjar.geodesy import utm_to_wgs84, wgs84_to_utm
+
+        row, col = 4, 5
+        size = self.scenario["grid"]["cell_size_m"]
+        east0 = self.scenario["grid"]["origin_utm_easting_m"]
+        north0 = self.scenario["grid"]["origin_utm_northing_m"]
+        target = [col * size, row * size]
+        self.scenario["aircraft"]["initial_position_utm"] = [east0 + target[0], north0 + target[1]]
+        result = run_geographic_integrated(self.scenario, policy="no_intervention", _actions=[{"type": "DROP", "target_m": target}], _stop_after_steps=1)
+        drop = result["drops"][0]
+        self.assertEqual(drop["target_local_m"], target)
+        self.assertEqual(drop["target_utm_m"], [east0 + target[0], north0 + target[1]])
+        lon, lat = utm_to_wgs84(*drop["target_utm_m"], zone=self.scenario["crs"]["utm_zone"])
+        self.assertAlmostEqual(wgs84_to_utm(lon, lat, zone=self.scenario["crs"]["utm_zone"])[0], east0 + col * size, places=3)
+        self.assertAlmostEqual(wgs84_to_utm(lon, lat, zone=self.scenario["crs"]["utm_zone"])[1], north0 + row * size, places=3)
+
     def test_manual_action_scripting(self):
         actions = [{"type": "HOLD"}, {"type": "HOLD"}]
         res = run_geographic_integrated(self.scenario, policy="heuristic", _actions=actions, _stop_after_steps=2)
