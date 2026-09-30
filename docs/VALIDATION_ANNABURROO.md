@@ -4,7 +4,9 @@
 
 ## Source and reproduction
 
-The [CSIRO Annaburroo collection](https://data.csiro.au/collection/csiro:58746), collection version 1, file ID `64873323`, contains the [1986 experimental grassland fire data described by Cruz et al. (2024)](https://connectsci.au/wf/article/33/5/WF23100/22126/The-1986-Annaburroo-experimental-grassland-fires). The collection's downloadable archive is 593,231,549 bytes and marked CC BY 4.0. `nightjar.annaburroo` retrieves only the two CSV members by HTTP byte range; it requires `curl`. Raw tables and generated reports remain in ignored `data/raw/` and `runs/`.
+The [CSIRO Annaburroo collection](https://data.csiro.au/collection/csiro:58746), collection version 1, file ID `64873323`, contains the [1986 experimental grassland fire data described by Gould et al. (2024)](https://connectsci.au/wf/article/33/5/WF23100/22126/The-1986-Annaburroo-experimental-grassland-fires). The collection's downloadable archive is 593,231,549 bytes and marked CC BY 4.0. `nightjar.annaburroo` retrieves only the two CSV members by HTTP byte range; it requires `curl`. Raw tables and generated reports remain in ignored `data/raw/` and `runs/`.
+
+The [B111 source assessment](ANNABURROO_B111_ASSESSMENT.md), dated 2026-09-30, additionally inspects timed photographs, progression/fuel maps, wind samples, and original publications. It identifies a development candidate, not an implemented spatial comparison or a confirmed intervention-free observation window. The original 1993 publication explicitly records suppression within the experimental area; the experiment's description as free-burning must not be interpreted as absence of all human intervention.
 
 ```sh
 python3 -m nightjar.annaburroo --output runs/annaburroo-source.json
