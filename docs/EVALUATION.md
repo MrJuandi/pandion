@@ -367,3 +367,48 @@ Include plots of per-scenario outcomes, extreme failures, and resource trajector
 ## 5. Release gates
 
 Simulator-conditional comparisons must state the fixed scenario and assumptions and pass leakage and equal-information checks. No claim about physical superiority until the environment passes physics checks and the evaluation script can regenerate summary tables from raw episode records. No claim of real-world operational suitability follows solely from simulator results.
+
+## Surface propagation experiment (2026-09-30)
+
+The [analytical experiment](PROPAGATION_VERIFICATION.md) uses four fixed physical targets and 10, 5, 2 and 1 m cells. Dijkstra maximum arrival error is 7.9669% at every resolution. Level-set maxima are 14.1908%, 7.8928%, 3.3142% and 1.7836%; only its 2→1 m pair passes both analytical <5% and refinement-change <5% gates (maximum change 1.5306%). Coarse failures remain in the report. These cases verify calm numerical behavior, not physical validity or wind-driven propagation.
+
+The [RxCADRE protocol](VALIDATION_RXCADRE.md) requires one development and at least two separate evaluation burns selected by input coverage before error inspection. The scorer reports equal-sample-weight rate nMAE/bias per burn, arrival/position residuals and uncertainty-interval distances. Proposed per-burn rate thresholds are nMAE <30% and absolute normalized bias <20%, not published standards. No pooled score hides a failed burn. Acquisition, reconstruction, split/configuration freeze and physical uncertainty analysis remain pending; no empirical pass is recorded.
+
+## Timed CSIRO head-rate diagnostic (2026-09-30)
+
+[The executed report](VALIDATION_CSIRO_HEAD.md) scores two C064 intervals and one F19 interval before its documented wind shift. It compares later positions with a constant-rate trajectory anchored only at the first observed head. Primary max-x rates are 1.176493/1.324921 m/s; FM1 predicts 0.597731/2.083990 m/s, yielding rate nMAE 49.19%/57.29% and position MAE28.72/22.77 m. Both burns fail the proposed per-burn gates. Measured-dead fuel does not fix the mismatch. Anderson 3 in F19 passes narrowly on digitized heads (19.988% bias) and fails on original cumulative travel (22.288%); Anderson 1 fails C064. These distinct definitions remain separate rather than being pooled or selected by favorable errors.
+
+The finite-width grass relation gives 5.98%/4.15% nMAE but is excluded from acceptance because it originates in this campaign and uses retrospective observed width. No independent physical or perimeter pass is recorded. Every residual, post-shift interval and source/input variant remains in the generated report; inputs, observations and code have recorded hashes. Tests of synthetic fixtures establish scoring invariants only; the separate optional-source test and CLI were also executed with the six actual pinned source CSVs.
+
+Validation commands executed: `python -m nightjar.csiro_head_validation --fetch-sources --output runs/csiro-head-diagnostic.json` and its offline rerun; `python -m unittest tests.test_csiro_head_validation tests.test_rothermel -v` (18 passed); `python -m unittest discover -s tests -q` (190 tests, 187 passed, three optional external-data skips). Runtime Python 3.12.4 / Pyretechnics 2026.8.10. A separate legacy-code comparison found exact component/directional equality in 75 FM1 moisture/wind/slope configurations. No model-validity pass follows from passing code tests.
+
+## Independent-campaign FireFlux upper-bound diagnostic (2026-09-30)
+
+[The executed FireFlux I record](VALIDATION_FIREFLUX.md) preserves a pre-error configuration freeze and acknowledges observation access during selection. For one published tower interval, the unchanged Mell/Cheney law at ambient U2=3 m/s and estimated M=9% has an infinite-width upper bound of **0.668501 m/s**, compared with the published **1.61 m/s**. Minimum possible nMAE is **58.48%**, and all finite-width normalized biases are ≤−58.48%; both existing per-burn gates reject this conditional representation. A compatible upper bound could never establish acceptance. The secondary 4 m/s variant still has minimum error 45.93%; the 385 m ignition-length surrogate and mixed-fuel 18.5% substitutions remain explicitly ineligible. No alternative is chosen to improve the primary score.
+
+Nearest-decimal rounding gives minimum errors 58.35–58.61%; ±1 s endpoint effects are recorded as sampling-only arithmetic sensitivity, not confidence bounds. Source-reported 300 m / 1.61 is an implied transit, not independently observed arrival. The apparent 219/460 s temperature peaks and inconsistent original 190/195 s endpoints remain unreconciled. The photo trajectory stays anchored at its first observed head, with maximum x(190)=−19.60 m; its final-ignition overlap excludes it from free-spread acceptance. No pooled score, perimeter score or formal uncertainty interval hides those limits. Wind height is known but the ambient/open/front-wind conventions and dead-moisture uncertainty are not resolved.
+
+Acquisition and both offline reruns were executed with Python 3.12.4 / NumPy 1.26.4:
+
+```sh
+python -m nightjar.fireflux_validation --fetch-sources --output runs/fireflux-upper-bound.json
+python -m nightjar.fireflux_validation --output runs/fireflux-upper-bound-offline.json
+python -m nightjar.fireflux_source_audit --fetch-sources --output runs/fireflux-source-audit.json
+python -m nightjar.fireflux_source_audit --output runs/fireflux-source-audit-offline.json
+python -m unittest tests.test_fireflux_validation tests.test_fireflux_source_audit -v
+python -m unittest discover -s tests -q
+```
+
+The new 15 focused tests pass. The full suite runs **205 tests: 202 pass, three skip for absent external files**. An additional acquisition into empty source directories verified actual downloads, not merely cached fetch paths. Protocol-bound and ordinary commands completed; acquire/offline scientific reports match after removing creation timestamps. The CSIRO review reproduced all previous rates, observations and scores exactly; 18 focused tests passed and 75 FM1 configurations retained exact legacy component/directional parity. These code checks support reproducibility and invariants, not physical acceptance. The published filtered export has 219 observation points, is independently audited, and is never relabeled as raw instruments or simulation outcomes. `physical_validation_pass` remains null in both reports.
+
+## Cheney 1998 restricted rate comparison (2026-09-30)
+
+The [executed comparison](VALIDATION_CHENEY_1998.md) freezes explicit 10 m open wind, original curing, source variants, windows and the previous 30% nMAE/20% absolute-bias gates before new errors. Outcomes were already observed: no blind split is claimed. C064/F19 candidate rates are 1.231152/1.381167 m/s, digitized-head nMAE 4.65%/4.25%, biases+4.65%/+4.25%, versus original FM1 errors 49.19%/57.29%. All three source series pass for each burn; the retained C064 95% curing variant also passes. This is a restricted improvement over FM1, not dominance over every earlier law: F19 Cheney/Mell remains slightly better (4.15%). The report reproduces all earlier CSIRO scores exactly. FireFlux is not evaluable in the main comparison; all 24 sensitivities fail under their assumed inputs, while all prior Mell results remain. The independent campaign and full-front/physical gates remain open. Software verification is reported in the experiment record.
+
+## Extended numerical comparison (2026-09-30)
+
+The [pre-error protocol](PROPAGATION_EXTENDED_PROTOCOL.md) and [executed table](PROPAGATION_VERIFICATION.md#extended-frozen-experiment-2026-09-30) separate analytical arrival error from constitutive/local-rate error. Five point cases and two layer orders run through both unchanged engines at 4, 2 and 1 m. Every target must have analytical relative error <5% at both paired resolutions and adjacent-grid change <5%; three domain probes require change <1%. No pooled average or post-result input adjustment replaces these gates.
+
+All 156 primary records reached their targets, with zero execution errors. Level-set homogeneous 2→1 m pairs pass in all five cases; maximum 1 m point error is 2.0213%, versus Dijkstra's 16.0785% maximum. Both level-set layered pairs fail at 2→1 m (6.6402% at 2 m, 3.6059% at 1 m), although their refinement change passes. Maximum domain-probe change is 0.1450%. Overall numerical acceptance is false. The offline repeat report is identical except for its UTC creation time. Nine focused mathematical/input/freeze/failure-retention tests pass; the complete command `python -m unittest discover -s tests -q` runs 233 tests: 230 pass, three optional external-data tests skip. Tests that rewrite two pre-existing ignored synthetic evaluation reports were followed by exact restoration from the pre-run byte backup; previous outputs and physical evidence are preserved.
+
+The [independent grass-data audit](GRASS_INDEPENDENT_EVIDENCE.md) produces no new empirical score or independent physical pass. Author-reported 2018 aggregate errors are external evidence only. No campaign subset is selected by rate error, no generic U2/midflame→U10 conversion is adopted, and the original Cheney freeze and reconstruction remain unchanged.

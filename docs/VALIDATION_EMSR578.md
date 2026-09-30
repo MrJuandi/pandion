@@ -86,22 +86,22 @@ python3 -m nightjar.pilot_emsr578 manifest --output runs/emsr578-pilot-scenario.
 python3 -m nightjar.pilot_emsr578 compare-perimeters --scenario runs/emsr578-pilot-scenario.json --comparison-zip data/raw/emsr578/monit01.zip
 ```
 
-## Physical fire spread simulation and satellite validation (Decision D-33)
+## Exploratory fire propagation diagnostic (Decision D-33)
 
 Under Decision **D-33**, `nightjar.pilot_simulation` couples the Rothermel surface-fire formulation via Pyretechnics and Scott & Burgan 40 models to the geographic pilot scenario, simulating shortest-arrival propagation from the initial perimeter ($t_0$) across the 23,712 ha landscape.
 
 ### Environmental Configuration
-- **Fuel moisture fractions:** Derived from 97th percentile extreme drought conditions during the interior Catalonia heatwave of 15–18 June 2022:
+- **Fuel moisture fractions:** Assumed dry fractions; no source-derived percentile or incident moisture measurement establishes these values:
   - Dead 1h, 10h, dead herbaceous: $0.04 - 0.05$ ($4\% - 5\%$).
   - Dead 100h: $0.07$ ($7\%$).
   - Live herbaceous (cured summer pasture): $0.30$ ($30\%$).
   - Live woody (drought-stressed sclerophyllous shrub/needle): $0.60$ ($60\%$).
-- **Midflame wind vector:** Synoptic SSE/SSW flow pushing towards NNE: $[u_x, u_y] = [0.8, 1.8]\text{ m/s}$ (approx $1.97\text{ m/s}$ or $7.1\text{ km/h}$ midflame).
+- **Midflame wind vector:** Assumed constant vector pushing towards NNE; not a matched weather observation: $[u_x, u_y] = [0.8, 1.8]\text{ m/s}$ (approx $1.97\text{ m/s}$ or $7.1\text{ km/h}$ midflame).
 
 ### Propagation Progression and Empirical Satellite Comparison
 Simulating shortest-arrival propagation across horizons from $t=0$ to the full satellite elapsed interval ($T = 88,860\text{ s} \approx 24.68\text{ h}$) against `monit01.zip` yields:
 
-| Horizon (s) | Effective Duration | Simulated (ha) | Observed (ha) | IoU (Jaccard) | Dice Coeff. | Commission Rate | Omission Rate |
+| Horizon (s) | Simulation duration | Simulated (ha) | Observed (ha) | IoU (Jaccard) | Dice Coeff. | Commission Rate | Omission Rate |
 |:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
 | `0` | Initial $t_0$ | 1,500.0 | 2,108.0 | 0.7108 | 0.8309 | 0.0007 | 0.2889 |
 | `1,800` | 0.5 h | 1,791.0 | 2,108.0 | 0.6923 | 0.8182 | 0.1094 | 0.2434 |
@@ -112,15 +112,16 @@ Simulating shortest-arrival propagation across horizons from $t=0$ to the full s
 | `28,800` | 8.0 h | 6,839.0 | 2,108.0 | 0.3014 | 0.4632 | 0.6970 | 0.0171 |
 | `88,860` | 24.7 h (full) | 15,924.0 | 2,108.0 | 0.1324 | 0.2338 | 0.8676 | 0.0000 |
 
-### Key Findings & Physical Limits
-1. **Active Spread Alignment:** At an active burning duration of $T = 3,600\text{ s}$ (1.0 h equivalent), the unmitigated Rothermel propagation reaches **2,071.0 ha** (within $-1.8\%$ of the 2,108.0 ha observed at $t_1$), with an **IoU of 0.6630** and **Dice of 0.7973**. The omission rate drops from $28.9\%$ to $21.0\%$, correctly capturing the main north/northeast expansion axis into sclerophyllous shrubland (SH5).
-2. **The Suppression and Diurnal Factor:** Running unmitigated spread for the entire 24.7 hours with constant peak midday wind and drought moisture overpredicts final area ($15,924\text{ ha}$, $86.8\%$ commission). In reality, extensive containment by ground crews (Bombers de la Generalitat) and aerial scooping (CL-415), combined with nighttime relative humidity recovery, successfully checked the flanks and halted major spread outside the observed 2,108 ha polygon.
-3. **Execution Speed:** Propagating across 23,712 cells takes under **80 ms** on standard CPU, demonstrating extreme computational efficiency for decision-making and Monte Carlo validation.
+### Findings and physical limits
+
+The one-hour result is an exploratory horizon selected from a progression scan. Its 2,071 ha area is close to the observed 2,108 ha, but the observation is 88,860 s after the initial perimeter. No measured one-hour active-burning equivalence exists. Its cumulative IoU 0.6630 is worse than the no-spread reference 0.7108; close area alone does not show a correct front. The full-interval overprediction is a model/input discrepancy. These scores do not establish whether suppression, diurnal humidity, fuel mapping, forcing or discretization caused it. Runtime claims also require a specified machine and reproducible measurement.
+
+The [2026-09-30 analytical experiment](PROPAGATION_VERIFICATION.md) additionally shows a persistent directional error in the eight-neighbor propagator. The [RxCADRE experiment](VALIDATION_RXCADRE.md) is intended to isolate surface spread on matched experimental observations; acquisition and empirical reconstruction remain pending.
 
 ### Reproducing the physical simulation and evaluation
 
 ```sh
-# Run 1-hour active spread simulation
+# Run the historical one-hour exploratory diagnostic
 python3 -m nightjar.pilot_simulation run \
   --scenario runs/emsr578-pilot-scenario.json \
   --horizon-s 3600 \

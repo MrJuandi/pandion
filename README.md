@@ -55,6 +55,11 @@ These are research gates, not claims that any stage is complete. The detailed pl
 - [DATA_AND_VALIDATION.md](docs/DATA_AND_VALIDATION.md) — candidate data, provenance, calibration, and validation requirements.
 - [VALIDATION_EMSR578.md](docs/VALIDATION_EMSR578.md) — audited independent burned-area snapshots and the reasons they cannot yet validate FM1 spread.
 - [VALIDATION_ANNABURROO.md](docs/VALIDATION_ANNABURROO.md) — no-fit comparison of FM1 head rate with experimental grass fires.
+- [PROPAGATION_VERIFICATION.md](docs/PROPAGATION_VERIFICATION.md) — executed analytical arrival and resolution checks.
+- [VALIDATION_RXCADRE.md](docs/VALIDATION_RXCADRE.md) — empirical eligibility, source-access blocker and per-burn scoring contract.
+- [VALIDATION_CSIRO_HEAD.md](docs/VALIDATION_CSIRO_HEAD.md) — executed C064/F19 head-advance comparison, source sensitivity and grass-specific reference limits.
+- [VALIDATION_CHENEY_1998.md](docs/VALIDATION_CHENEY_1998.md) — executed full grass-law reconstruction, frozen retrospective comparison and source/input limits.
+- [VALIDATION_FIREFLUX.md](docs/VALIDATION_FIREFLUX.md) — independent-campaign grass-law upper-bound failure, source discrepancies and acquired filtered observations.
 - [TRAINING_READINESS.md](docs/TRAINING_READINESS.md) — evidence gate for physical claims and the separate scope of exploratory synthetic training.
 - [EVALUATION.md](docs/EVALUATION.md) — baselines, splits, metrics, statistics, and failure analysis.
 - [ROADMAP.md](docs/ROADMAP.md) — milestones and acceptance criteria.
@@ -64,6 +69,18 @@ These are research gates, not claims that any stage is complete. The detailed pl
 - [MAINTENANCE.md](docs/MAINTENANCE.md) — documentation ownership and change review rules.
 
 ## Development and use
+
+The isolated numerical comparison requires `requirements-standard.txt` and runs with `python -m nightjar.propagation_verification --output runs/propagation-verification.json`. Dijkstra fails the proposed 5% analytical point-arrival tolerance at every tested resolution. The level-set 2→1 m pair passes the calm, flat numerical checks; independent physical validation remains pending. Failed checks remain in the report even when the command completes successfully.
+
+The executed grass-head comparison also requires `requirements-standard.txt`. Run `python -m nightjar.csiro_head_validation --fetch-sources --output runs/csiro-head-diagnostic.json` to acquire six pinned raw CSVs with verified hashes and compare unfitted rates with real timed heads. Omit `--fetch-sources` for an offline rerun. FM1 fails both burns; the grass-specific reference has small in-campaign errors and is excluded from independent acceptance. See [the empirical report](docs/VALIDATION_CSIRO_HEAD.md).
+
+The independent-campaign FireFlux diagnostic runs with `python -m nightjar.fireflux_validation --fetch-sources --output runs/fireflux-upper-bound.json`. Its infinite-width grass-law upper rate is 0.6685 m/s versus the published 1.61 m/s, a minimum error of 58.48% under fixed ambient wind and estimated moisture. This conditional failure does not resolve source timing or fire-front forcing. `python -m nightjar.fireflux_source_audit --fetch-sources --output runs/fireflux-source-audit.json` separately audits actually acquired filtered main-tower observations, excluding simulation arrays. Omit `--fetch-sources` for offline reruns. [The report](docs/VALIDATION_FIREFLUX.md) records the freeze, uncertainty and remaining physical gates.
+
+The isolated Cheney–Gould–Catchpole (1998) reconstruction uses explicit open 10 m wind and original curing. Run `python -m nightjar.cheney1998_validation freeze --fetch-literature --protocol runs/cheney1998-protocol-final.json`, then `python -m nightjar.cheney1998_validation run --protocol runs/cheney1998-protocol-final.json --output runs/cheney1998-comparison-final.json`. It improves on FM1 for C064/F19 under the frozen retrospective protocol; FireFlux is not evaluable in the main comparison. Existing artifacts are never overwritten; reruns require a new output name. [The results and source-access limits](docs/VALIDATION_CHENEY_1998.md) keep physical acceptance open.
+
+The [extended numerical benchmark](docs/PROPAGATION_VERIFICATION.md#extended-frozen-experiment-2026-09-30) freezes with `python -m nightjar.propagation_extended_verification freeze --protocol runs/propagation-extended-protocol.json`, then runs with `python -m nightjar.propagation_extended_verification run --protocol runs/propagation-extended-protocol.json --output runs/propagation-extended-verification.json`. Level set passes the 2→1 m analytical/refinement gates for five homogeneous calm/wind/slope cases, but fails that pair for both layered-fuel cases. The complete suite fails; production propagation remains unchanged. Choose new artifact names if they already exist. The [independent grass-evidence audit](docs/GRASS_INDEPENDENT_EVIDENCE.md) records original-paper access and per-burn input blockers; no new independent physical pass is available.
+
+**Physical-validation research is on hold as of 2026-09-30.** Experiments, failures and raw artifacts are retained; Stage 0 physical acceptance remains open. The [hold and resumption record](docs/VALIDATION_HOLD.md) records the preserved draft research scope and concurrent PRs and identifies provisional interface/resource research that can continue.
 
 The synthetic aircraft episode uses Python 3 and the standard library; no installation step is needed from the repository root:
 

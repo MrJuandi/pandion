@@ -1,10 +1,21 @@
 import copy
 import json
+import math
 import unittest
 from pathlib import Path
 
 from nightjar.fire_rothermel import run_fire_rothermel
-from nightjar.rothermel import FM1_MOISTURE_EXTINCTION, fm1_components, fm1_directional_rate
+from nightjar.rothermel import (
+    FM1_DEPTH_FT,
+    FM1_LOAD_LB_FT2,
+    FM1_MOISTURE_EXTINCTION,
+    FM1_SAV_FT_INV,
+    FT_PER_M,
+    HEAT_BTU_LB,
+    dead_fuel_components,
+    fm1_components,
+    fm1_directional_rate,
+)
 from nightjar.sensitivity import compare_resolution
 
 
@@ -22,6 +33,80 @@ class RothermelFM1Tests(unittest.TestCase):
         rate_ft_min = fm1_directional_rate(0.06, (wind_m_s, 0), (0, 0), (1, 0)) * 196.8503937007874
         self.assertGreater(rate_ft_min, 60)
         self.assertLess(rate_ft_min, 75)
+
+    def test_generic_si_fm1_matches_legacy_imperial_components(self):
+        legacy = fm1_components(0.06, 2.0, 0.1)
+        generic = dead_fuel_components(
+            0.06,
+            2.0,
+            0.1,
+            load_kg_m2=FM1_LOAD_LB_FT2 * 0.45359237 / 0.3048**2,
+            depth_m=FM1_DEPTH_FT * 0.3048,
+            sav_m_inv=FM1_SAV_FT_INV / 0.3048,
+            moisture_extinction_fraction=FM1_MOISTURE_EXTINCTION,
+            heat_kj_kg=HEAT_BTU_LB * 1055.05585262 / 0.45359237 / 1000,
+        )
+        self.assertEqual(generic.keys(), legacy.keys())
+        for field in legacy:
+            self.assertAlmostEqual(generic[field], legacy[field], delta=max(1e-12, abs(legacy[field]) * 1e-6))
+
+    def test_generic_fuel_parameter_validation(self):
+        baseline = {
+            "load_kg_m2": 0.3,
+            "depth_m": 0.2,
+            "sav_m_inv": 10000.0,
+            "moisture_extinction_fraction": 0.2,
+            "heat_kj_kg": 18608.0,
+        }
+        for parameter in ("load_kg_m2", "depth_m", "sav_m_inv", "heat_kj_kg"):
+            for value in (0.0, -1.0, float("nan"), float("inf")):
+                with self.subTest(parameter=parameter, value=value):
+                    kwargs = dict(baseline)
+                    kwargs[parameter] = value
+                    with self.assertRaises(ValueError):
+                        dead_fuel_components(0.06, **kwargs)
+        for value in (0.0, -0.1, 1.01, float("nan"), float("inf")):
+            with self.subTest(moisture_extinction_fraction=value):
+                kwargs = dict(baseline, moisture_extinction_fraction=value)
+                with self.assertRaises(ValueError):
+                    dead_fuel_components(0.06, **kwargs)
+        for moisture, wind, slope in ((float("nan"), 0, 0), (0.1, float("nan"), 0), (0.1, 0, float("nan")), (0.1, -1, 0), (0.1, 0, -1)):
+            with self.subTest(moisture=moisture, wind=wind, slope=slope):
+                with self.assertRaises(ValueError):
+                    dead_fuel_components(moisture, wind, slope, **baseline)
+
+    def test_generic_extinction_and_wind_response(self):
+        fuel = {
+            "load_kg_m2": 0.3,
+            "depth_m": 0.2,
+            "sav_m_inv": 10000.0,
+            "moisture_extinction_fraction": 0.2,
+        }
+        self.assertAlmostEqual(dead_fuel_components(0.2, **fuel)["r0_m_s"], 0.0, places=15)
+        self.assertGreater(dead_fuel_components(0.1, **fuel)["r0_m_s"], 0.0)
+        calm = dead_fuel_components(0.06, **fuel)
+        wind = dead_fuel_components(0.06, 12.0, **fuel)
+        self.assertEqual(calm["phi_w"], 0.0)
+        self.assertGreater(wind["phi_w"], 0.0)
+        self.assertEqual(calm["r0_m_s"], wind["r0_m_s"])
+
+    def test_measured_grass_c064_and_f19_inputs_produce_finite_components(self):
+        cases = {
+            "C064": {"load_kg_m2": 0.283, "depth_m": 0.21, "sav_m_inv": 9770.0, "moisture": 0.063, "wind_m_s": 2.8},
+            "F19": {"load_kg_m2": 0.313, "depth_m": 0.51, "sav_m_inv": 12240.0, "moisture": 0.058, "wind_m_s": 4.4},
+        }
+        for burn, case in cases.items():
+            with self.subTest(burn=burn):
+                components = dead_fuel_components(
+                    case["moisture"],
+                    case["wind_m_s"],
+                    load_kg_m2=case["load_kg_m2"],
+                    depth_m=case["depth_m"],
+                    sav_m_inv=case["sav_m_inv"],
+                    moisture_extinction_fraction=0.22,
+                    heat_kj_kg=18608.0,
+                )
+                self.assertTrue(all(math.isfinite(value) for value in components.values()))
 
     def test_zero_wind_and_moisture_extinction(self):
         r0 = fm1_components(0.06)["r0_m_s"]
