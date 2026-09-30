@@ -332,8 +332,11 @@ def train_geographic_ppo(
         recurrent=recurrent,
     ).to(device)
 
-    if resume_checkpoint and Path(resume_checkpoint).exists():
-        model.load_state_dict(torch.load(resume_checkpoint, map_location=device))
+    if resume_checkpoint is not None:
+        checkpoint_path = Path(resume_checkpoint)
+        if not checkpoint_path.is_file():
+            raise FileNotFoundError(f"Resume checkpoint file not found: {checkpoint_path}")
+        model.load_state_dict(torch.load(checkpoint_path, weights_only=True, map_location=device))
         print(f"Resumed model weights from {resume_checkpoint}")
 
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
@@ -366,6 +369,7 @@ def main() -> None:
     parser.add_argument("--episodes-per-update", type=int, default=1)
     parser.add_argument("--candidates", type=int, default=2)
     parser.add_argument("--lr", type=float, default=3e-4)
+    parser.add_argument("--seed", type=int, default=42, help="Seed Python and PyTorch before training")
     parser.add_argument("--feedforward", action="store_true", help="Use feedforward instead of LSTM")
     parser.add_argument("--eval-scenarios", type=int, default=None, help="Limit number of validation scenarios to evaluate")
     parser.add_argument("--checkpoint", type=Path)
@@ -376,6 +380,8 @@ def main() -> None:
     _require_torch()
     device = torch.device("cpu")
     recurrent = not args.feedforward
+    random.seed(args.seed)
+    torch.manual_seed(args.seed)
 
     dev_scenarios = load_geographic_split("development", args.scenarios_dir, synthetic=args.synthetic)
 
@@ -390,10 +396,15 @@ def main() -> None:
             device=device,
             resume_checkpoint=args.resume,
         )
+        if args.checkpoint:
+            args.checkpoint.parent.mkdir(parents=True, exist_ok=True)
+            torch.save(model.state_dict(), args.checkpoint)
+            print(f"Saved trained checkpoint -> {args.checkpoint}")
         _, metrics = rollout_geographic(model, dev_scenarios[0], device=device, deterministic=True)
         report = {
             "schema_version": SMOKE_SCHEMA_VERSION,
             "dataset": _dataset_report(args.scenarios_dir, {"development": smoke_scenarios}),
+            "seed": args.seed,
             "recurrent": recurrent,
             "loss": losses[0],
             "evaluation_metrics": metrics,
@@ -427,6 +438,7 @@ def main() -> None:
         report = {
             "schema_version": "nightjar-geographic-ppo-train-0.1",
             "dataset": _dataset_report(args.scenarios_dir, {"development": dev_scenarios}),
+            "seed": args.seed,
             "recurrent": recurrent,
             "updates": args.updates,
             "final_loss": losses[-1] if losses else 0.0,
@@ -448,7 +460,7 @@ def main() -> None:
         candidate_reports = []
 
         for c_idx in range(args.candidates):
-            c_seed = 42 + c_idx
+            c_seed = args.seed + c_idx
             random.seed(c_seed)
             torch.manual_seed(c_seed)
             print(f"\n--- Candidate {c_idx + 1}/{args.candidates} (seed={c_seed}) ---")
@@ -490,6 +502,7 @@ def main() -> None:
         report = {
             "schema_version": SELECTION_SCHEMA_VERSION,
             "dataset": _dataset_report(args.scenarios_dir, {"development": dev_scenarios, "validation": val_scenarios}),
+            "seed": args.seed,
             "recurrent": recurrent,
             "candidates_count": args.candidates,
             "best_mean_burned_ha": round(best_mean_burned, 2),
