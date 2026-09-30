@@ -43,7 +43,8 @@ Dataset inclusion requires temporal alignment, provenance, and licensing checks 
 Exact local export hashes, sampling conventions and diagnostic limits are in [PILOT_ENVIRONMENT.md](PILOT_ENVIRONMENT.md).
 ## External grass-fire diagnostic
 
-- [Cruz et al. (2024), The 1986 Annaburroo experimental grassland fires: data](https://connectsci.au/wf/article/33/5/WF23100/22126/The-1986-Annaburroo-experimental-grassland-fires): plot variables, experimental context, and definition of the width-adjusted steady-state spread rate.
+- [Gould et al. (2024), The 1986 Annaburroo experimental grassland fires: data](https://connectsci.au/wf/article/33/5/WF23100/22126/The-1986-Annaburroo-experimental-grassland-fires): plot variables, experimental context, and definition of the width-adjusted steady-state spread rate.
+- [Cheney, Gould and Catchpole (1993), The Influence of Fuel, Weather and Fire Shape Variables on Fire-Spread in Grasslands](https://doi.org/10.1071/WF9930031): ignition and perimeter reconstruction methods (pp. 34–35), wind exclusions for obstructed sensors (p. 35), and documented suppression within the experimental area (p. 43). The source PDF inspected is included in CSIRO collection version 1; see the [B111 assessment](ANNABURROO_B111_ASSESSMENT.md) for its digest and remaining uncertainties.
 - [CSIRO Data Access Portal, Annaburroo collection csiro:58746](https://data.csiro.au/collection/csiro:58746): collection version 1 and downloadable data. See [the source audit and diagnostic](VALIDATION_ANNABURROO.md).
 
 - [PyTorch installation guide](https://pytorch.org/get-started/locally/): installation and import checks for macOS and CPU Linux. The geographic PPO verification used PyTorch 2.14.0, Python 3.12.8, and Pyretechnics 2026.8.10 on CPU (2026-09-30); the tested version does not imply compatibility across every `torch>=2.0.0` release. CI resolves the CPU requirement from `https://download.pytorch.org/whl/cpu`.
