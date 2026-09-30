@@ -366,4 +366,6 @@ Include plots of per-scenario outcomes, extreme failures, and resource trajector
 
 ## 5. Release gates
 
+For the EMSR578 exploratory pilot, three daily cumulative maps provide two growth intervals, not continuously observed arrival times or three independent incidents. Compare at the actual 88,860 s and 174,960 s from the initial image, disclose initialization/interventions/weather assumptions, and report `growth_only` alongside cumulative overlap and `initial_only_baseline`. The evaluator identifies comparison acquisition time by reviewed ZIP digest and labels unknown or mismatched timing; matching time alone does not establish physical validity. An area fit obtained by choosing a shorter horizon cannot pass a physical gate. The [pilot record](PILOT_ENVIRONMENT.md) describes the new diagnostics and open protocol questions; no new physical acceptance threshold or held-out result is claimed.
+
 Simulator-conditional comparisons must state the fixed scenario and assumptions and pass leakage and equal-information checks. No claim about physical superiority until the environment passes physics checks and the evaluation script can regenerate summary tables from raw episode records. No claim of real-world operational suitability follows solely from simulator results.

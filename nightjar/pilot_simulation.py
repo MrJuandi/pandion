@@ -1,4 +1,4 @@
-"""Physical surface-fire spread simulation and satellite validation for EMSR578 AOI01.
+"""Exploratory surface-fire propagation and satellite spatial diagnostics for EMSR578 AOI01.
 
 This module simulates Rothermel surface fire spread over the georeferenced EMSR578 AOI01
 scenario using Pyretechnics and Scott & Burgan 40 fuel models, propagating via shortest-arrival
@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 from copy import deepcopy
+from datetime import datetime, timezone
 from hashlib import sha256
 from heapq import heappop, heappush
 from importlib.metadata import version
@@ -22,11 +23,13 @@ import numpy as np
 from pyretechnics import fuel_models, surface_fire
 
 from .pilot_emsr578 import evaluate_spatial_overlap, extract_observed_mask
+from .pilot_terrain import load_terrain, scenario_sha256
+from .emsr578 import PRODUCTS
 
 # 8-neighbor grid connectivity: (drow, dcol) where row increases northward, col eastward
 NEIGHBORS = ((-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (-1, 1), (1, -1), (1, 1))
 
-# Documented Lleida June 2022 heatwave 97th percentile fuel moisture fractions
+# Exploratory constants, not measured moisture or an established drought percentile.
 DEFAULT_MOISTURE = {
     "dead_1h": 0.04,
     "dead_10h": 0.05,
@@ -36,7 +39,7 @@ DEFAULT_MOISTURE = {
     "live_woody": 0.60,
 }
 
-# Synoptic midflame wind pushing towards NNE (approx 2.0 m/s midflame)
+# Exploratory fixed midflame wind, not reconstructed incident meteorology.
 DEFAULT_WIND_TO_M_S = (0.8, 1.8)
 
 # Total elapsed seconds between DEL (2022-06-17 10:06 UTC) and MONIT01 (2022-06-18 10:47 UTC)
@@ -87,6 +90,8 @@ def simulate_pilot_spread(
         elevation = [[float(v) for v in row] for row in elevation_m]
         if len(elevation) != rows or any(len(r) != cols for r in elevation):
             raise ValueError(f"elevation_m must have shape ({rows}, {cols})")
+        if any(not isfinite(v) for row in elevation for v in row):
+            raise ValueError("elevation_m must contain only finite elevations")
 
     t_start = time.perf_counter()
 
@@ -176,6 +181,11 @@ def simulate_pilot_spread(
 
     return {
         "schema_version": SIMULATION_SCHEMA_VERSION,
+        "created_at_utc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "seed": None,
+        "scenario_sha256": scenario_sha256(scenario),
+        "units": {"time": "s", "length": "m", "area": "ha", "wind": "m/s", "moisture": "fraction"},
+        "observation_timestamps": scenario.get("observation_timestamps"),
         "scenario_id": scenario.get("scenario_id", "unknown"),
         "scenario_crs": scenario.get("spatial_reference", {}).get("crs", "EPSG:25831"),
         "grid": {
@@ -197,6 +207,8 @@ def simulate_pilot_spread(
             "wind_speed_m_s": round(hypot(*wind), 2),
             "wind_direction_upwind_deg": round(upwind, 1),
             "fuel_moisture_fraction": moisture,
+            "environment_status": "exploratory constant wind and moisture; not incident reconstruction",
+            "terrain_status": "supplied elevation grid" if elevation_m is not None else "synthetic flat 350 m",
         },
         "initial_fire_cells": int(sum(sum(row) for row in init_mask)),
         "initial_fire_ha": round(int(sum(sum(row) for row in init_mask)) * cell_area_ha, 2),
@@ -222,6 +234,8 @@ def evaluate_simulation_vs_satellite(
     cell_area_ha = simulation["grid"]["cell_area_ha"]
 
     if scenario is not None:
+        if simulation.get("scenario_sha256") is not None and simulation["scenario_sha256"] != scenario_sha256(scenario):
+            raise ValueError("simulation scenario_sha256 does not match comparison scenario")
         bounds = scenario["spatial_reference"]["bounds_utm31n"]
     else:
         # Default bounds of EMSR578 AOI01
@@ -229,6 +243,43 @@ def evaluate_simulation_vs_satellite(
 
     obs_mask = extract_observed_mask(comparison_zip, bounds, rows, cols, cell_size)
     metrics = evaluate_spatial_overlap(sim_mask, obs_mask, cell_area_ha)
+    metrics.update({
+        "schema_version": "nightjar-pilot-comparison-0.1",
+        "created_at_utc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "seed": None,
+        "scenario_crs": simulation.get("scenario_crs", scenario.get("spatial_reference", {}).get("crs") if scenario else None),
+        "scenario_sha256": simulation.get("scenario_sha256"),
+    })
+
+    # Cumulative overlap can be dominated by area already burned at t0.
+    if scenario is not None:
+        initial = np.array(scenario["initial_burn_mask"], dtype=bool)
+        if initial.shape != sim_mask.shape:
+            raise ValueError("initial burn mask shape does not match simulation")
+        metrics["growth_only"] = evaluate_spatial_overlap(sim_mask & ~initial, obs_mask & ~initial, cell_area_ha)
+        metrics["initial_only_baseline"] = evaluate_spatial_overlap(initial, obs_mask, cell_area_ha)
+
+    digest = sha256(comparison_zip.read_bytes()).hexdigest()
+    acquired_at = next((stamp for _, _, stamp, expected in PRODUCTS if digest == expected), None)
+    start_at = scenario.get("observation_timestamps", {}).get("t0_initial_utc") if scenario else None
+    elapsed = None
+    if acquired_at and start_at:
+        end = datetime.fromisoformat(acquired_at.replace("Z", "+00:00"))
+        start = datetime.fromisoformat(start_at.replace("Z", "+00:00"))
+        if start.tzinfo is None:
+            raise ValueError("initial observation timestamp must include a UTC offset")
+        elapsed = (end - start).total_seconds()
+    horizon = simulation.get("parameters", {}).get("horizon_s")
+    metrics["comparison_source_sha256"] = digest
+    metrics["timing"] = {
+        "comparison_image_acquired_at_utc": acquired_at,
+        "elapsed_observation_s": elapsed,
+        "simulation_horizon_s": horizon,
+        "status": "unknown" if elapsed is None or horizon is None else (
+            "matching_elapsed_time" if abs(elapsed - horizon) < 1e-6 else "mismatched_elapsed_time"
+        ),
+    }
+    metrics["evidence_status"] = "exploratory spatial diagnostic; physical validation gate remains open"
 
     metrics["simulation_parameters"] = simulation.get("parameters", {})
     metrics["simulation_engine"] = simulation.get("engine", {})
@@ -246,6 +297,7 @@ def main() -> None:
     parser_run.add_argument("--horizon-s", type=float, default=DEFAULT_HORIZON_S)
     parser_run.add_argument("--wind-east", type=float, default=DEFAULT_WIND_TO_M_S[0])
     parser_run.add_argument("--wind-north", type=float, default=DEFAULT_WIND_TO_M_S[1])
+    parser_run.add_argument("--terrain", type=Path, help="Scenario-bound terrain artifact; all elevations must be valid")
     parser_run.add_argument("--output", type=Path)
 
     # Subcommand: evaluate
@@ -259,11 +311,20 @@ def main() -> None:
 
     if args.command == "run":
         scen = json.loads(args.scenario.read_text())
+        terrain = load_terrain(args.terrain, scen) if args.terrain else None
+        if terrain and not all(all(row) for row in terrain["valid_mask"]):
+            raise ValueError("terrain has missing elevations; no gap filling is implemented")
         sim_res = simulate_pilot_spread(
             scenario=scen,
             horizon_s=args.horizon_s,
             wind_to_m_s=(args.wind_east, args.wind_north),
+            elevation_m=terrain["elevation_m"] if terrain else None,
         )
+        if terrain:
+            sim_res["terrain"] = {
+                "artifact_sha256": sha256(args.terrain.read_bytes()).hexdigest(),
+                "source": terrain["source"], "coverage": terrain["coverage"],
+            }
         content = json.dumps(sim_res, indent=2) + "\n"
         if args.output:
             args.output.parent.mkdir(parents=True, exist_ok=True)
