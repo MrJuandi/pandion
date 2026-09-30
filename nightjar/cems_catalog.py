@@ -314,9 +314,15 @@ def build_cems_scenario(
         raise ValueError(f"Unknown activation: {activation_id}")
     utm_zone = act_info["utm_zone"]
     epsg = act_info["epsg"]
+    prod_info = act_info["products"].get(stage)
+    if prod_info is None:
+        raise ValueError(f"Unknown stage '{stage}' for activation {activation_id}")
 
     if not zip_path.exists():
         raise FileNotFoundError(f"Vector package not found: {zip_path}")
+    actual_sha = sha256(zip_path.read_bytes()).hexdigest()
+    if actual_sha != prod_info["sha256"]:
+        raise ValueError(f"{activation_id} {stage}: source ZIP SHA-256 {actual_sha} differs from registered hash {prod_info['sha256']}")
 
     with ZipFile(zip_path) as archive:
         names = archive.namelist()
@@ -406,7 +412,6 @@ def build_cems_scenario(
     utm_waypoints = _extract_water_waypoints(hydro_data.get("features", []), utm_zone=utm_zone)
 
 
-    prod_info = act_info["products"].get(stage, {})
     return {
         "schema_version": SCHEMA_VERSION,
         "scenario_id": f"cems-{activation_id.lower()}-{stage}-0.1",
@@ -418,8 +423,15 @@ def build_cems_scenario(
             "source": f"Copernicus Emergency Management Service On-Demand Mapping, {activation_id} ({act_info['name']})",
             "source_page": act_info["source_page"],
             "license": "Copernicus terms of use (open access, attribution required)",
-            "source_zip_sha256": prod_info.get("sha256"),
-            "image_acquired_at_utc": prod_info.get("acquired_at_utc"),
+            "source_zip_sha256": actual_sha,
+            "source_stage": stage,
+            "source_product_code": prod_info["product_code"],
+            "source_product_filename": prod_info["vector_filename"],
+            "source_url": cems_product_url(activation_id, stage),
+            "image_acquired_at_utc": prod_info["acquired_at_utc"],
+            "acquired_at_utc": prod_info["acquired_at_utc"],
+            "units": {"coordinates": "m", "cell_size": "m", "burned_area": "ha"},
+            "resolution_m": cell_size_m,
         },
         "crs": {
             "authority": "EPSG",
