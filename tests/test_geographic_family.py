@@ -114,6 +114,58 @@ class TestGeographicFamily(unittest.TestCase):
         self.assertEqual(generated["provenance"]["parent_scenario_hash"], expected_hashes["EMSR578"])
         self.assertNotIn("source_kind", bases["EMSR578"])
 
+    def test_partially_supplied_synthetic_bases_are_valid_and_unchanged(self):
+        base = build_synthetic_cems_fixture("EMSR590", utm_zone=30)
+        before = canonical_hash(base)
+        family = build_geographic_family(
+            {"EMSR590": base}, num_dev=1, num_val=1, num_res=2, synthetic=True
+        )
+        self.assertEqual(family["scenarios"]["development"][0]["activation_id"], "EMSR578")
+        self.assertEqual(family["scenarios"]["validation"][0]["activation_id"], "EMSR590")
+        self.assertEqual(canonical_hash(base), before)
+
+    def test_supplied_base_keys_and_activation_ids_are_validated_in_both_modes(self):
+        mismatched = build_synthetic_cems_fixture("EMSR590", utm_zone=30)
+        for synthetic in (False, True):
+            with self.subTest(synthetic=synthetic):
+                with self.assertRaisesRegex(ValueError, "does not match activation_id"):
+                    build_geographic_family({"EMSR578": mismatched}, synthetic=synthetic)
+                with self.assertRaisesRegex(ValueError, "Unexpected CEMS scenario base key"):
+                    build_geographic_family(
+                        {"EMSR999": build_synthetic_cems_fixture("EMSR999")},
+                        synthetic=synthetic,
+                    )
+
+    def test_synthetic_bases_reject_real_source_zip_provenance(self):
+        base = build_synthetic_cems_fixture("EMSR578", utm_zone=31)
+        base["provenance"]["source_zip_sha256"] = "a" * 64
+        with self.assertRaisesRegex(ValueError, "must not have source_zip_sha256"):
+            build_geographic_family({"EMSR578": base}, synthetic=True)
+
+    def test_real_bases_reject_conflicting_explicit_source_kind(self):
+        from nightjar.cems_catalog import ACTIVATIONS
+        bases = {
+            activation_id: build_synthetic_cems_fixture(
+                activation_id, 31 if activation_id == "EMSR578" else 30
+            )
+            for activation_id in ("EMSR578", "EMSR590", "EMSR592", "EMSR600")
+        }
+        for activation_id, base in bases.items():
+            product = ACTIVATIONS[activation_id]["products"]["del"]
+            base["scenario_id"] = f"cems-{activation_id.lower()}-del-0.1"
+            base["source_kind"] = "copernicus_cems"
+            base["provenance"] = {
+                "source_stage": "del", "source_zip_sha256": product["sha256"],
+                "source_product_code": product["product_code"],
+                "source_product_filename": product["vector_filename"],
+                "image_acquired_at_utc": product["acquired_at_utc"],
+            }
+        self.assertEqual(build_geographic_family(bases, num_dev=1, num_val=1, num_res=2)
+                         ["manifest"]["source_kind"], "copernicus_cems")
+        bases["EMSR578"]["source_kind"] = "other_source"
+        with self.assertRaisesRegex(ValueError, "conflicting source_kind"):
+            build_geographic_family(bases)
+
     def test_real_source_provenance_survives_scenario_generation(self):
         base = dict(self.fixture_31)
         base["source_kind"] = "copernicus_cems"
