@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from nightjar.geographic_family import (
     build_synthetic_cems_fixture,
@@ -24,6 +25,97 @@ if HAS_TORCH:
 
 
 class TestGeographicLoader(unittest.TestCase):
+    def _write_development_family(self, root, num_dev=1):
+        from nightjar.geographic_family import build_geographic_family
+        family = build_geographic_family(num_dev=num_dev, num_val=1, num_res=2, synthetic=True)
+        (root / "manifest.json").write_text(json.dumps(family["manifest"]))
+        (root / "development").mkdir()
+        for scenario in family["scenarios"]["development"]:
+            (root / "development" / f"{scenario['scenario_id']}.json").write_text(json.dumps(scenario))
+        return family
+
+    def test_duplicate_scenario_files_do_not_reweight_training(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            family = self._write_development_family(root)
+            scenario = family["scenarios"]["development"][0]
+            (root / "development" / "copy.json").write_text(json.dumps(scenario))
+            with self.assertRaisesRegex(ValueError, "Duplicate scenario ID in split directory"):
+                load_geographic_split("development", root, synthetic=True)
+
+    def test_complete_membership_is_required(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            family = self._write_development_family(root, num_dev=2)
+            scenario = family["scenarios"]["development"][1]
+            path = root / "development" / f"{scenario['scenario_id']}.json"
+            path.unlink()
+            with self.assertRaisesRegex(ValueError, "membership does not match manifest"):
+                load_geographic_split("development", root, synthetic=True)
+            scenario["scenario_id"] = "unlisted-scenario"
+            path.write_text(json.dumps(scenario))
+            with self.assertRaisesRegex(ValueError, "absent from manifest"):
+                load_geographic_split("development", root, synthetic=True)
+
+    def test_source_product_metadata_must_match_registered_stage(self):
+        from copy import deepcopy
+        from nightjar.cems_catalog import ACTIVATIONS
+        from nightjar.geographic_family import canonical_hash
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            family = self._write_development_family(root)
+            manifest = family["manifest"]
+            scenario = family["scenarios"]["development"][0]
+            path = root / "development" / f"{scenario['scenario_id']}.json"
+            product = ACTIVATIONS["EMSR578"]["products"]["del"]
+            manifest["source_kind"] = scenario["source_kind"] = "copernicus_cems"
+            scenario["provenance"].update({
+                "source_kind": "copernicus_cems",
+                "source_stage": "del", "source_zip_sha256": product["sha256"],
+                "source_product_code": product["product_code"],
+                "source_product_filename": product["vector_filename"],
+                "image_acquired_at_utc": product["acquired_at_utc"],
+            })
+            entry = manifest["scenarios"]["development"][0]
+            entry.update(source_kind="copernicus_cems", source_zip_sha256=product["sha256"])
+
+            def persist(value):
+                value["scenario_hash"] = canonical_hash({k: v for k, v in value.items() if k != "scenario_hash"})
+                entry["hash"] = value["scenario_hash"]
+                path.write_text(json.dumps(value))
+                (root / "manifest.json").write_text(json.dumps(manifest))
+
+            persist(scenario)
+            self.assertEqual(len(load_geographic_split("development", root)), 1)
+            for field, value in (("source_stage", "monit01"), ("source_stage", None),
+                                 ("source_product_code", "MONIT01"),
+                                 ("source_product_filename", "wrong.zip"),
+                                 ("image_acquired_at_utc", "2022-06-18T10:47:00Z")):
+                with self.subTest(field=field, value=value):
+                    damaged = deepcopy(scenario)
+                    damaged["provenance"][field] = value
+                    persist(damaged)
+                    with self.assertRaisesRegex(ValueError, "unregistered source provenance"):
+                        load_geographic_split("development", root)
+
+    def test_smoke_report_identifies_only_its_training_pool(self):
+        from nightjar.geographic_ppo import main
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            family = self._write_development_family(root, num_dev=3)
+            output = root / "smoke.json"
+            with patch("sys.argv", ["geographic_ppo", "--smoke", "--synthetic",
+                                    "--scenarios-dir", str(root), "--output", str(output)]), \
+                 patch("nightjar.geographic_ppo._require_torch"), \
+                 patch("nightjar.geographic_ppo.torch"), \
+                 patch("nightjar.geographic_ppo.train_geographic_ppo", return_value=(object(), [0.0])) as train, \
+                 patch("nightjar.geographic_ppo.rollout_geographic", return_value=([], {})):
+                main()
+            expected = [s["scenario_id"] for s in family["scenarios"]["development"][:2]]
+            self.assertEqual([s["scenario_id"] for s in train.call_args.args[0]], expected)
+            reported = json.loads(output.read_text())["dataset"]["splits"]["development"]
+            self.assertEqual([s["scenario_id"] for s in reported], expected)
+
     def test_dataset_errors_are_visible(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

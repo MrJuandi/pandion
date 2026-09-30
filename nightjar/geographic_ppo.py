@@ -79,6 +79,7 @@ def load_geographic_split(
     designated = {"development": {"EMSR578"}, "validation": {"EMSR590"},
                   "reserved": {"EMSR592", "EMSR600"}}[split]
     scenarios = []
+    seen_ids = set()
     for path in paths:
         try:
             scenario = json.loads(path.read_text())
@@ -90,6 +91,9 @@ def load_geographic_split(
         entry = expected.get(sid)
         if entry is None:
             raise ValueError(f"Scenario is absent from manifest: {path}")
+        if sid in seen_ids:
+            raise ValueError(f"Duplicate scenario ID in split directory: {sid!r} ({path})")
+        seen_ids.add(sid)
         activation_id = scenario.get("activation_id")
         if (not isinstance(activation_id, str) or scenario.get("split") != split
                 or activation_id != entry.get("activation_id")
@@ -103,13 +107,17 @@ def load_geographic_split(
         if not isinstance(provenance, dict):
             raise ValueError(f"Scenario has invalid provenance object: {path}")
         source_hash = provenance.get("source_zip_sha256")
-        valid_source_hash = (kind == "synthetic_fixture" and source_hash is None) or (
-            kind == "copernicus_cems" and source_hash in {
-                product["sha256"] for product in ACTIVATIONS[activation_id]["products"].values()
-            }
+        stage = provenance.get("source_stage")
+        product = ACTIVATIONS[activation_id]["products"].get(stage) if isinstance(stage, str) else None
+        valid_source = (kind == "synthetic_fixture" and source_hash is None) or (
+            kind == "copernicus_cems" and product is not None
+            and source_hash == product["sha256"]
+            and provenance.get("source_product_code") == product["product_code"]
+            and provenance.get("source_product_filename") == product["vector_filename"]
+            and provenance.get("image_acquired_at_utc") == product["acquired_at_utc"]
         )
         if (kind != manifest.get("source_kind") or kind != entry.get("source_kind")
-                or source_hash != entry.get("source_zip_sha256") or not valid_source_hash
+                or source_hash != entry.get("source_zip_sha256") or not valid_source
                 or kind not in (("synthetic_fixture",) if synthetic else ("copernicus_cems",))):
             raise ValueError(f"Unexpected or unregistered source provenance in {path}: {kind!r}")
         scenarios.append(scenario)
@@ -373,8 +381,9 @@ def main() -> None:
 
     if args.smoke or (not args.train and not args.select and not args.eval):
         print(f"Running Geographic PPO smoke test (recurrent={recurrent})...")
+        smoke_scenarios = dev_scenarios[:2]
         model, losses = train_geographic_ppo(
-            dev_scenarios[:2],
+            smoke_scenarios,
             updates=1,
             episodes_per_update=1,
             recurrent=recurrent,
@@ -384,7 +393,7 @@ def main() -> None:
         _, metrics = rollout_geographic(model, dev_scenarios[0], device=device, deterministic=True)
         report = {
             "schema_version": SMOKE_SCHEMA_VERSION,
-            "dataset": _dataset_report(args.scenarios_dir, {"development": dev_scenarios}),
+            "dataset": _dataset_report(args.scenarios_dir, {"development": smoke_scenarios}),
             "recurrent": recurrent,
             "loss": losses[0],
             "evaluation_metrics": metrics,

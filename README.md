@@ -176,6 +176,8 @@ observation, reward, done, info = env.step_discrete(action_idx)
 
 For real-world geographic decision research with Copernicus CEMS scenarios:
 
+Geographic PPO requires complete manifest membership with no duplicate scenario IDs across files. Real source metadata must match a single registered catalog product, including its stage, checksum, code, filename, and acquisition time. Smoke reports identify the development training pool of at most two scenarios.
+
 ```sh
 python3 -m nightjar.geographic_ppo --smoke
 python3 -m nightjar.geographic_ppo --select --updates 1 --episodes-per-update 1 --candidates 2 --checkpoint runs/geographic-ppo.pt --output runs/geographic-selection.json
