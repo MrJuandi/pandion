@@ -16,3 +16,22 @@ jobs:
         run: python -m pip install -r requirements-standard.txt
       - name: Run unit tests
         run: python -m unittest discover -s tests -v
+
+  unit-rl:
+    runs-on: ubuntu-latest
+    env:
+      OMP_NUM_THREADS: '1'
+      MKL_NUM_THREADS: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install standard fuel dependency
+        run: python -m pip install -r requirements-standard.txt
+      - name: Install CPU reinforcement learning dependency
+        run: python -m pip install -r requirements-rl.txt --index-url https://download.pytorch.org/whl/cpu
+      - name: Require PyTorch
+        run: python -c "import torch; print(torch.__version__)"
+      - name: Run unit tests with reinforcement learning enabled
+        run: python -m unittest discover -s tests -v

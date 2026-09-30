@@ -2,6 +2,10 @@
 
 **Status:** physical-evaluation protocol to freeze before model selection on geographic incidents. Synthetic controller experiments may precede it under the separate limits below.
 
+## Geographic PPO technical check (2026-09-30)
+
+The [verification record](GEOGRAPHIC_PPO_VERIFICATION.md) documents one-update recurrent PPO smoke checks on EMSR578 development data, training seed 42, finite loss/weights, zero rejected orders in deterministic development evaluation, and exact weights/deterministic-metrics preservation after loading. Two fresh runs in the same CPU runtime matched. This is an execution/serialization diagnostic: no baseline comparison, geographic model selection, held-out result, or policy-superiority claim is made. Physical calibration and the result-bearing geographic protocol remain open.
+
 ## Exploratory synthetic decision experiment
 
 Freeze the existing `integrated-synthetic-0.1` FM1 scenario and its 35 m permanent water barrier for the first controller-interface experiment. Compare controllers with no intervention, valid random choice, and the observation-matched heuristic using the same delivered observations and candidate actions. Save scenario and code versions, policy seeds, raw replays, final affected area, water use, flight time, rejected orders, and failure cases. The single map and repeated policy seeds cannot estimate generalization across incidents. Reward is a training signal; final affected area at the fixed horizon is the comparison outcome. Any apparent advantage is conditional on this synthetic simulator and its provisional suppression rule.

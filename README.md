@@ -104,7 +104,7 @@ python3 -m venv .venv
 
 The example mixes GR1 (101), SH1 (141), and nonburnable (0) cells. It is a synthetic, no-intervention spread example with hand-assigned fuels; geographic land-cover mapping is implemented separately in `nightjar.cems_catalog`. Its replay does not feed the aircraft episode. See [STANDARD_FUEL_PATH.md](docs/STANDARD_FUEL_PATH.md) for the full contract, evidence, and next steps.
 
-The same unit suite runs in GitHub Actions for pushes and pull requests. Tests that need a downloaded external source skip when the audited file is absent.
+The same unit suite runs in GitHub Actions for pushes and pull requests. The `unit` job checks the standard-fuel path; `unit-rl` also installs CPU PyTorch and requires its import before running the suite. Tests that need a downloaded external source skip when the audited file is absent.
 
 `runs/` is ignored by Git. Omit `--output` to print a result to standard output for commands that accept it. The aircraft example exercises movement, a full-water drop, return, and refill. The fire examples produce first-arrival times and grid-cell affected area without intervention. The resolution command compares the FM1 assumptions on one physical domain at several cell sizes. Scenario contracts and limitations are in [ARCHITECTURE.md](docs/ARCHITECTURE.md) and [PHYSICAL_MODEL_V0.md](docs/PHYSICAL_MODEL_V0.md). The local browser replay tool (`nightjar.viewer`) generates a self-contained offline HTML5 viewer to audit fire arrival, delivered observations, flight path, and drop decisions interactively or compare multiple policies side-by-side.
 
@@ -179,9 +179,12 @@ For real-world geographic decision research with Copernicus CEMS scenarios:
 Geographic PPO requires complete manifest membership with no duplicate scenario IDs across files. Real source metadata must match a single registered catalog product, including its stage, checksum, code, filename, and acquisition time. Smoke reports identify the development training pool of at most two scenarios.
 
 ```sh
-python3 -m nightjar.geographic_ppo --smoke
-python3 -m nightjar.geographic_ppo --select --updates 1 --episodes-per-update 1 --candidates 2 --checkpoint runs/geographic-ppo.pt --output runs/geographic-selection.json
+# Requires the verified real family generated above:
+.venv/bin/python -m pip install -r requirements-standard.txt -r requirements-rl.txt
+OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 .venv/bin/python -m nightjar.geographic_ppo --smoke --seed 42 --scenarios-dir runs/geographic-family-real-v2 --checkpoint runs/geographic-ppo-verification/smoke.pt --output runs/geographic-ppo-verification/smoke.json
 ```
+
+`--seed` defaults to 42 and is recorded in training reports. `--smoke --checkpoint` saves model weights; `--resume` requires an existing weights file and creates a fresh optimizer. It does not restore optimizer or random-generator state. The [geographic PPO verification](docs/GEOGRAPHIC_PPO_VERIFICATION.md) records the development-only smoke, checkpoint checks, and reproducibility limits.
 
 The observation example reads the FM1 replay and a synthetic schedule of capture and delivery times. It exposes only delivered, covered cells. It is an information-flow test, not a real satellite sensor model.
 

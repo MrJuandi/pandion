@@ -1,6 +1,8 @@
 """Unit tests for geographic PPO training and evaluation."""
 
 import json
+import math
+import random
 from pathlib import Path
 import tempfile
 import unittest
@@ -113,8 +115,41 @@ class TestGeographicLoader(unittest.TestCase):
                 main()
             expected = [s["scenario_id"] for s in family["scenarios"]["development"][:2]]
             self.assertEqual([s["scenario_id"] for s in train.call_args.args[0]], expected)
-            reported = json.loads(output.read_text())["dataset"]["splits"]["development"]
+            smoke_report = json.loads(output.read_text())
+            reported = smoke_report["dataset"]["splits"]["development"]
             self.assertEqual([s["scenario_id"] for s in reported], expected)
+            self.assertEqual(smoke_report["seed"], 42)
+
+    def test_selection_candidate_seeds_derive_from_cli_seed(self):
+        if not HAS_TORCH:
+            self.skipTest("PyTorch not installed")
+        from nightjar.geographic_ppo import main
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            family = self._write_development_family(root)
+            loaded = {
+                "development": family["scenarios"]["development"],
+                "validation": family["scenarios"]["validation"],
+            }
+            output = root / "selection.json"
+            observed_torch_seeds = []
+
+            def fake_train(*args, **kwargs):
+                observed_torch_seeds.append(torch.initial_seed())
+                return object(), [0.0]
+
+            with patch("sys.argv", [
+                "geographic_ppo", "--select", "--synthetic", "--scenarios-dir", str(root),
+                "--output", str(output), "--candidates", "2", "--seed", "123",
+            ]), patch("nightjar.geographic_ppo.load_geographic_split", side_effect=lambda split, *_args, **_kwargs: loaded[split]), \
+                 patch("nightjar.geographic_ppo.train_geographic_ppo", side_effect=fake_train), \
+                 patch("nightjar.geographic_ppo.evaluate_geographic_policy", return_value=[{"final_burned_ha": 1.0, "drops_count": 0}]):
+                main()
+
+            report = json.loads(output.read_text())
+            self.assertEqual(report["seed"], 123)
+            self.assertEqual([candidate["seed"] for candidate in report["candidates"]], [123, 124])
+            self.assertEqual(observed_torch_seeds, [123, 124])
 
     def test_dataset_errors_are_visible(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -182,6 +217,8 @@ class TestGeographicPPO(unittest.TestCase):
     def setUp(self):
         if not HAS_TORCH:
             self.skipTest("PyTorch not installed")
+        random.seed(42)
+        torch.manual_seed(42)
         fixture = build_synthetic_cems_fixture("EMSR578", utm_zone=31, rows=25, cols=25)
         self.scenario = generate_geographic_scenario(
             fixture,
@@ -242,6 +279,90 @@ class TestGeographicPPO(unittest.TestCase):
         )
         self.assertEqual(len(losses), 1)
         self.assertTrue(torch.isfinite(torch.tensor(losses[0])))
+
+    def test_missing_resume_checkpoint_fails_instead_of_starting_fresh(self):
+        with tempfile.TemporaryDirectory() as temp:
+            for invalid in (Path(temp) / "missing.pt", Path(temp)):
+                with self.subTest(checkpoint=invalid), self.assertRaisesRegex(
+                    FileNotFoundError, "Resume checkpoint file not found"
+                ):
+                    train_geographic_ppo([self.scenario], updates=0, resume_checkpoint=invalid)
+
+    def test_resume_restores_raw_state_dict_exactly_without_updates(self):
+        model = SpatialActorCritic(
+            grid_rows=15,
+            grid_cols=15,
+            action_dim=len(TACTICAL_ACTION_NAMES),
+            recurrent=True,
+        )
+        with tempfile.TemporaryDirectory() as temp:
+            checkpoint = Path(temp) / "weights.pt"
+            torch.save(model.state_dict(), checkpoint)
+            resumed, losses = train_geographic_ppo(
+                [self.scenario], updates=0, recurrent=True, resume_checkpoint=checkpoint
+            )
+            self.assertEqual(losses, [])
+            self.assertEqual(model.state_dict().keys(), resumed.state_dict().keys())
+            for name, expected in model.state_dict().items():
+                self.assertTrue(torch.equal(expected, resumed.state_dict()[name]), name)
+
+    def test_smoke_cli_trains_saves_and_reloads_reproducibly(self):
+        from nightjar.geographic_family import build_synthetic_cems_fixture
+        from nightjar.geographic_ppo import main
+
+        fixture = build_synthetic_cems_fixture("EMSR578", rows=25, cols=25)
+        scenarios = [
+            generate_geographic_scenario(
+                fixture,
+                index=index,
+                split="development",
+                window_rows=15,
+                window_cols=15,
+                horizon_s=300.0,
+            )
+            for index in range(2)
+        ]
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            outputs = []
+            for run_idx in range(2):
+                output = root / f"smoke-{run_idx}.json"
+                checkpoint = root / f"smoke-{run_idx}.pt"
+                with patch("sys.argv", [
+                    "geographic_ppo", "--smoke", "--synthetic",
+                    "--scenarios-dir", str(root), "--output", str(output),
+                    "--checkpoint", str(checkpoint), "--seed", "137",
+                ]), patch("nightjar.geographic_ppo.load_geographic_split", return_value=scenarios) as loader:
+                    main()
+                loader.assert_called_once_with("development", root, synthetic=True)
+                report = json.loads(output.read_text())
+                self.assertEqual(report["seed"], 137)
+                self.assertEqual(
+                    [row["scenario_id"] for row in report["dataset"]["splits"]["development"]],
+                    [scenario["scenario_id"] for scenario in scenarios],
+                )
+                self.assertTrue(math.isfinite(report["loss"]))
+                self.assertEqual(report["evaluation_metrics"]["rejected_orders"], 0)
+                self.assertTrue(checkpoint.is_file())
+                state = torch.load(checkpoint, weights_only=True, map_location="cpu")
+                self.assertTrue(state)
+                self.assertTrue(all(torch.isfinite(value).all() for value in state.values()))
+
+                reloaded = SpatialActorCritic(
+                    grid_rows=15,
+                    grid_cols=15,
+                    action_dim=len(TACTICAL_ACTION_NAMES),
+                    recurrent=True,
+                )
+                reloaded.load_state_dict(torch.load(checkpoint, weights_only=True, map_location="cpu"))
+                _, reloaded_metrics = rollout_geographic(reloaded, scenarios[0], deterministic=True)
+                self.assertEqual(reloaded_metrics, report["evaluation_metrics"])
+                outputs.append((report["loss"], report["evaluation_metrics"], state))
+
+            self.assertEqual(outputs[0][0], outputs[1][0])
+            self.assertEqual(outputs[0][1], outputs[1][1])
+            for name in outputs[0][2]:
+                self.assertTrue(torch.equal(outputs[0][2][name], outputs[1][2][name]), name)
 
 
 if __name__ == "__main__":

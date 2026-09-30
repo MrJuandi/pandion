@@ -35,3 +35,5 @@ Dataset inclusion requires temporal alignment, provenance, and licensing checks 
 
 - [Cruz et al. (2024), The 1986 Annaburroo experimental grassland fires: data](https://connectsci.au/wf/article/33/5/WF23100/22126/The-1986-Annaburroo-experimental-grassland-fires): plot variables, experimental context, and definition of the width-adjusted steady-state spread rate.
 - [CSIRO Data Access Portal, Annaburroo collection csiro:58746](https://data.csiro.au/collection/csiro:58746): collection version 1 and downloadable data. See [the source audit and diagnostic](VALIDATION_ANNABURROO.md).
+
+- [PyTorch installation guide](https://pytorch.org/get-started/locally/): installation and import checks for macOS and CPU Linux. The geographic PPO verification used PyTorch 2.14.0, Python 3.12.8, and Pyretechnics 2026.8.10 on CPU (2026-09-30); the tested version does not imply compatibility across every `torch>=2.0.0` release. CI resolves the CPU requirement from `https://download.pytorch.org/whl/cpu`.
