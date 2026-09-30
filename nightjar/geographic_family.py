@@ -330,9 +330,23 @@ def build_geographic_family(
 
     required = ("EMSR578", "EMSR590", "EMSR592", "EMSR600")
     bases = dict(cems_scenarios or {})
+    for key, value in bases.items():
+        if key not in required:
+            raise ValueError(f"Unexpected CEMS scenario base key: {key}")
+        if value.get("activation_id") != key:
+            raise ValueError(
+                f"CEMS scenario base key {key} does not match activation_id "
+                f"{value.get('activation_id')!r}"
+            )
+
     if synthetic:
-        if bases and any(value.get("source_kind") != "synthetic_fixture" for value in bases.values()):
-            raise ValueError("synthetic=True accepts only explicitly labeled synthetic fixture bases")
+        for key, value in bases.items():
+            if value.get("source_kind") != "synthetic_fixture":
+                raise ValueError("synthetic=True accepts only explicitly labeled synthetic fixture bases")
+            if value.get("provenance", {}).get("source_zip_sha256") is not None:
+                raise ValueError(
+                    f"Synthetic fixture base {key} must not have source_zip_sha256 provenance"
+                )
         for activation_id in required:
             if activation_id not in bases:
                 zone = 31 if activation_id == "EMSR578" else 30
@@ -342,6 +356,12 @@ def build_geographic_family(
         if missing:
             raise ValueError("Missing real CEMS scenario bases: " + ", ".join(missing) +
                              ". Provide all four verified products or use synthetic=True explicitly.")
+
+    if not synthetic:
+        for key, value in bases.items():
+            source_kind = value.get("source_kind")
+            if source_kind not in (None, "copernicus_cems"):
+                raise ValueError(f"Real CEMS scenario base {key} has conflicting source_kind {source_kind!r}")
 
     fixture_ids = [key for key, value in bases.items()
                    if value.get("source_kind") == "synthetic_fixture" or str(value.get("scenario_id", "")).startswith("fixture-")]
