@@ -23,7 +23,7 @@ const camera = (page, index = 0) => page.evaluate(i => {
   const fixture = `
 import sys
 from pathlib import Path
-from nightjar.viewer3d import write_viewer_html
+from nightjar.viewer import write_viewer_html
 base = dict(scenario_id='rectangular', policy='PPO de prueba', horizon_s=180,
     grid=dict(rows=2, cols=3, cell_size_m=100), origin_m=[300000,4600000], crs='EPSG:25831',
     arrival_time_s=[[0,None,120],[None,60,None]], fuel_grid=[[101,145,186],[0,101,145]],
