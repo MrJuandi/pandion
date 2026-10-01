@@ -21,10 +21,11 @@ from typing import Any, Sequence
 import numpy as np
 from pyretechnics import fuel_models, surface_fire
 
+from .environment import MOISTURE_KEYS, delivered_weather, edge_arrival, validate_forcing
 from .observation import build_reports, observe
 from .policies import candidate_cells, choose_order
 
-REPLAY_SCHEMA_VERSION = "nightjar-geographic-replay-0.1"
+REPLAY_SCHEMA_VERSION = "nightjar-geographic-replay-0.3"
 
 # 8-neighbor grid connectivity: (drow, dcol)
 NEIGHBORS = ((-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (-1, 1), (1, -1), (1, 1))
@@ -47,7 +48,7 @@ def run_geographic_integrated(
     """Run an event-driven decision episode on a geographic scenario.
 
     Parameters:
-    - scenario: dict matching 'nightjar-geographic-scenario-0.1' or 'nightjar-cems-scenario-0.1'.
+    - scenario: dict matching 'nightjar-geographic-scenario-0.1/0.2' or 'nightjar-cems-scenario-0.1'.
     - policy: 'no_intervention', 'random_valid', 'heuristic', or 'containment_heuristic'.
     - policy_seed: optional integer seed for randomized policies.
     - _actions: optional pre-scripted orders list for testing.
@@ -81,6 +82,11 @@ def run_geographic_integrated(
     else:
         elevation = elevation_input
 
+    if len(elevation) != rows or any(len(row) != cols for row in elevation):
+        raise ValueError("elevation must match geographic grid dimensions")
+    if any(isinstance(v, bool) or not isinstance(v, (int, float)) or not isfinite(v) for row in elevation for v in row):
+        raise ValueError("geographic elevation must contain finite metres; gaps are not substituted")
+
     gradients = []
     for r in range(rows):
         line = []
@@ -93,54 +99,61 @@ def run_geographic_integrated(
         gradients.append(line)
 
     wind = (float(wind_to[0]), float(wind_to[1]))
-    upwind = degrees(atan2(-wind[0], -wind[1])) % 360 if wind != (0.0, 0.0) else 0.0
-    wind_speed_m_min = hypot(*wind) * 60.0
-
-    # Pyretechnics base behavior calculation
-    moisture_values = (
-        float(moisture["dead_1h"]), float(moisture["dead_10h"]), float(moisture["dead_100h"]),
-        float(moisture["dead_herbaceous"]), float(moisture["live_herbaceous"]), float(moisture["live_woody"]),
-    )
+    forcing = validate_forcing(scenario.get("environment"), horizon_s)
+    physical_segments = forcing or [{"start_s": 0.0, "end_s": horizon_s,
+                                     "midflame_wind_to_m_s": list(wind), "moisture": moisture}]
     unique_codes = {int(code) for row in fuel_grid for code in row if code != 0}
-    base_cache: dict[int, Any] = {}
-    for code in unique_codes:
-        try:
+    behavior_cache: dict[int, list] = {}
+
+    def behaviors(index: int) -> list:
+        if index in behavior_cache:
+            return behavior_cache[index]
+        segment = physical_segments[index]
+        swind = tuple(float(v) for v in segment["midflame_wind_to_m_s"])
+        upwind = degrees(atan2(-swind[0], -swind[1])) % 360 if swind != (0.0, 0.0) else 0.0
+        wind_speed = hypot(*swind) * 60.0
+        moisture_values = tuple(float(segment["moisture"][k]) for k in MOISTURE_KEYS)
+        base_cache = {}
+        for code in unique_codes:
             model = fuel_models.moisturize(fuel_models.get_fuel_model(code), moisture_values)
             if model.get("burnable", True):
                 base_cache[code] = surface_fire.calc_surface_fire_behavior_no_wind_no_slope(model)
-        except Exception:
-            continue
+        cells = []
+        for r in range(rows):
+            row_behav = []
+            for c in range(cols):
+                code = int(fuel_grid[r][c])
+                if code == 0 or code not in base_cache:
+                    row_behav.append(None)
+                else:
+                    gx, gy = gradients[r][c]
+                    slope_tan = hypot(gx, gy)
+                    aspect = degrees(atan2(-gx, -gy)) % 360 if slope_tan > 0 else 0.0
+                    row_behav.append(surface_fire.calc_surface_fire_behavior_max(
+                        base_cache[code], wind_speed, upwind, slope_tan, aspect))
+            cells.append(row_behav)
+        behavior_cache[index] = cells
+        return cells
 
-    # Precompute cell directional fire behavior
-    cell_behavior = []
-    for r in range(rows):
-        row_behav = []
-        for c in range(cols):
-            code = int(fuel_grid[r][c])
-            if code == 0 or code not in base_cache:
-                row_behav.append(None)
-            else:
-                base = base_cache[code]
-                gx, gy = gradients[r][c]
-                slope_tan = hypot(gx, gy)
-                aspect = degrees(atan2(-gx, -gy)) % 360 if slope_tan > 0 else 0.0
-                row_behav.append(surface_fire.calc_surface_fire_behavior_max(base, wind_speed_m_min, upwind, slope_tan, aspect))
-        cell_behavior.append(row_behav)
+    cell_behavior = behaviors(0)
+    # Directed rates are cached per forcing interval and grid edge. The entire
+    # retrospective weather series is simulator state, never policy input.
+    rate_cache: dict[tuple, float] = {}
 
-    def spread_rate(r: int, c: int, dr: int, dc: int) -> float:
-        """Return Rothermel forward spread rate in m/s between adjacent cells."""
-        if cell_behavior[r][c] is None:
+    def spread_rate(r: int, c: int, dr: int, dc: int, index: int = 0) -> float:
+        key = (index, r, c, dr, dc)
+        if key in rate_cache:
+            return rate_cache[key]
+        behavior = behaviors(index)[r][c]
+        if behavior is None:
             return 0.0
         gx, gy = gradients[r][c]
         norm = hypot(dc, dr, gx * dc + gy * dr)
-        if norm == 0.0:
-            return 0.0
         direction = (dc / norm, dr / norm, (gx * dc + gy * dr) / norm)
-        try:
-            res = surface_fire.calc_surface_fire_behavior_in_direction(cell_behavior[r][c], direction)
-            return max(0.001, float(res["spread_rate"]) / 60.0)
-        except Exception:
-            return 0.001
+        res = surface_fire.calc_surface_fire_behavior_in_direction(behavior, direction)
+        rate = max(0.001, float(res["spread_rate"]) / 60.0)
+        rate_cache[key] = rate
+        return rate
 
     def is_burnable(r: int, c: int) -> bool:
         return 0 <= r < rows and 0 <= c < cols and int(fuel_grid[r][c]) > 0 and cell_behavior[r][c] is not None
@@ -204,14 +217,20 @@ def run_geographic_integrated(
                 if dr and dc and (barrier[r + dr][c] or barrier[r][c + dc] or not is_burnable(r + dr, c) or not is_burnable(r, c + dc)):
                     continue
 
-                r_source = spread_rate(r, c, dr, dc)
-                r_target = spread_rate(nr, nc, dr, dc)
-                if r_source <= 0.0 or r_target <= 0.0:
-                    continue
-
                 dist = hypot(dc * cell_size, dr * cell_size)
-                edge_dt = (dist / (2.0 * r_source)) + (dist / (2.0 * r_target))
-                candidate_time = cur_time + edge_dt
+                if forcing:
+                    def speed_at(index: int) -> float:
+                        source = spread_rate(r, c, dr, dc, index)
+                        target = spread_rate(nr, nc, dr, dc, index)
+                        return 2.0 / (1.0/source + 1.0/target) if source > 0 and target > 0 else 0.0
+                    candidate_time = edge_arrival(cur_time, dist, forcing, speed_at)
+                else:
+                    r_source = spread_rate(r, c, dr, dc)
+                    r_target = spread_rate(nr, nc, dr, dc)
+                    if r_source <= 0.0 or r_target <= 0.0:
+                        continue
+                    edge_dt = dist/(2.0*r_source) + dist/(2.0*r_target)
+                    candidate_time = cur_time + edge_dt
 
                 if candidate_time < best[nr][nc]:
                     best[nr][nc] = candidate_time
@@ -276,6 +295,7 @@ def run_geographic_integrated(
 
     rng = Random(scenario.get("seed", 42) if policy_seed is None else policy_seed)
     decisions_log: list[dict] = []
+    aircraft_track = [{"time_s": 0.0, "position_m": list(aircraft_pos)}]
     step_count = 0
 
     def sync_observations(to_time: float) -> None:
@@ -305,6 +325,8 @@ def run_geographic_integrated(
 
         # Build current observation for the policy (STRICT ZERO-LEAKAGE)
         fire_view = observe(delivered_reports, cur_sim_time, rows, cols)
+        weather_report = delivered_weather(forcing, cur_sim_time)
+        reported_wind = weather_report["midflame_wind_to_m_s"] if weather_report else ([0.0, 0.0] if forcing else list(wind))
         current_obs = {
             "time_s": cur_sim_time,
             "fire": fire_view,
@@ -318,9 +340,11 @@ def run_geographic_integrated(
             "fuel_model": [[str(val) for val in row] for row in fuel_grid],
             "water_sources": [[refill_x, refill_y]],
             "water_source_m": [refill_x, refill_y],
-            "midflame_wind_to_m_s": list(wind),
+            "midflame_wind_to_m_s": list(reported_wind),
+            "environment_weather": weather_report,
+            "weather_status": "delivered_station_interval" if weather_report else ("not_yet_delivered" if forcing else "modeled_constant"),
             "cell_size_m": cell_size,
-            "elevation_m": [[0.0] * cols for _ in range(rows)] if scenario.get("elevation_m") is None else scenario["elevation_m"],
+            "elevation_m": deepcopy(elevation_input) if elevation_input is not None else deepcopy(scenario.get("elevation_m", [[0.0] * cols for _ in range(rows)])),
             "known_treated_cells": known_treated_cells,
         }
 
@@ -356,7 +380,7 @@ def run_geographic_integrated(
 
             target_time = min(horizon_s, cur_sim_time + total_time)
             # Advance fire to arrival and refill completion
-            advance_fire(cur_sim_time + transit_time)
+            advance_fire(min(horizon_s, cur_sim_time + transit_time))
             advance_fire(target_time)
 
             total_flight_dist_m += dist * 2.0  # roundtrip transit consideration
@@ -399,6 +423,12 @@ def run_geographic_integrated(
                 "aircraft_water_l": aircraft_water,
             })
 
+        # Audit output only: the controller still receives current_obs alone.
+        decisions_log[-1]["decision_time_s"] = current_obs["time_s"]
+        decisions_log[-1]["observation"] = deepcopy(current_obs)
+        aircraft_track.append({"time_s": round(cur_sim_time, 2),
+                               "position_m": list(aircraft_pos)})
+
     if _stop_after_steps is None:
         # Final fire advancement to horizon only if running full episode
         advance_fire(horizon_s)
@@ -417,6 +447,19 @@ def run_geographic_integrated(
         "scenario_id": scenario.get("scenario_id", "geographic-scenario"),
         "policy": policy,
         "policy_seed": policy_seed,
+        "seed": scenario.get("seed"),
+        "scenario_hash": scenario.get("scenario_hash"),
+        "time_origin_utc": scenario.get("provenance", {}).get("image_acquired_at_utc"),
+        "environment": deepcopy(scenario.get("environment")),
+        "units": {"time": "s", "distance": "m", "water": "L", "area": "ha", "elevation": "m"},
+        "crs": deepcopy(scenario.get("crs", "LOCAL_METERS")),
+        "origin_utm": [origin_x, origin_y],
+        "provenance": deepcopy(scenario.get("provenance", {})),
+        "arrival_time_s": [[round(v, 6) if v is not None else None for v in line] for line in arrival],
+        "fuel_grid": deepcopy(fuel_grid),
+        "water_mask": deepcopy(fire_dict.get("water_mask", [[False] * cols for _ in range(rows)])),
+        "elevation_m": deepcopy(elevation),
+        "aircraft_track": aircraft_track,
         "horizon_s": horizon_s,
         "grid": {
             "rows": rows,

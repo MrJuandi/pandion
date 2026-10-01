@@ -85,6 +85,26 @@ class TestGeographicIntegrated(unittest.TestCase):
         self.assertEqual(res["decisions"][0]["order"]["type"], "HOLD")
         self.assertEqual(res["decisions"][1]["order"]["type"], "HOLD")
 
+    def test_replay_records_true_arrivals_and_delivered_observations_separately(self):
+        result = run_geographic_integrated(self.scenario, policy="heuristic")
+        self.assertEqual(result["grid"]["cell_size_m"], self.scenario["grid"]["cell_size_m"])
+        self.assertEqual(len(result["arrival_time_s"]), 30)
+        burned = sum(t is not None and t <= result["horizon_s"] for row in result["arrival_time_s"] for t in row)
+        self.assertEqual(burned, result["outcomes"]["burned_cells_count"])
+        self.assertEqual(result["seed"], self.scenario["seed"])
+        self.assertEqual(result["crs"], self.scenario["crs"])
+        self.assertEqual(result["water_mask"], self.scenario["fire"]["water_mask"])
+        self.assertEqual(result["units"]["elevation"], "m")
+        for decision in result["decisions"]:
+            obs = decision["observation"]
+            self.assertEqual(obs["time_s"], decision["decision_time_s"])
+            self.assertLessEqual(decision["decision_time_s"], decision["time_s"])
+            self.assertNotIn("arrival_time_s", obs)
+            for row in obs["fire"]["cells"]:
+                for cell in row:
+                    if cell is not None:
+                        self.assertLessEqual(cell["observed_at_s"], obs["time_s"])
+
 
 if __name__ == "__main__":
     unittest.main()

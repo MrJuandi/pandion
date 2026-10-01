@@ -1,6 +1,6 @@
 # EMSR578 environmental inventory and diagnostic protocol
 
-**Status, 2026-09-30:** numeric terrain ingestion and historical station-coverage audit implemented; incident reconstruction and physical validation remain open. This pilot is development evidence. The geographic PPO family still uses its existing flat terrain and synthetic environment.
+**Status, 2026-09-30:** numeric terrain ingestion and historical station-coverage audit implemented; incident reconstruction and physical validation remain open. This pilot is development evidence. The original base PPO family used flat/synthetic settings. Update 2026-10-01: [ENVIRONMENT_INTEGRATION.md](ENVIRONMENT_INTEGRATION.md) documents the new derived terrain/weather family; the original pilot runs below remain historical evidence.
 
 ## What three daily maps can establish
 
@@ -101,6 +101,6 @@ Runs below use the acquired terrain but retain the old constant wind/moisture an
 
 The large discrepancy is evidence that this constant-environment configuration does not reproduce these endpoints. It does not measure suppression effectiveness or distinguish causes. The new terrain input does not solve the missing temporal/environmental/intervention assumptions.
 
-Next: specify/test time-dependent propagation driven by sourced weather, justified station-to-landscape/midflame conversion and fuel-moisture estimates with uncertainty; seek more active-front/intervention evidence; compare heterogeneous resolutions; then fix an independent-incident protocol. For water, separately obtain aircraft-comparable deposition evidence and pure-water fire-response/drying evidence; published gel/retardant persistence must not be copied to plain water. Until those data exist, explicitly bracket simulator assumptions instead of claiming measured effectiveness.
+Update 2026-10-01: time-dependent propagation and causal interval delivery are now implemented in the derived family, with explicitly assumed station wind and estimated moisture. Next: justify/calibrate station-to-landscape/midflame conversion and fuel-moisture estimates with uncertainty; seek more active-front/intervention evidence; compare heterogeneous resolutions; then fix an independent-incident protocol. For water, separately obtain aircraft-comparable deposition evidence and pure-water fire-response/drying evidence; published gel/retardant persistence must not be copied to plain water. Until those data exist, explicitly bracket simulator assumptions instead of claiming measured effectiveness.
 
 Local verification used Python 3.12.8, NumPy 1.26.4, Pyretechnics 2026.8.10 and CPU PyTorch 2.14.0: `OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 .venv/bin/python -m unittest discover -s tests -v` passed **184 tests, no failures or skips** in 34.240 s. Deterministic fixtures test row orientation, NODATA versus valid zero heights, alignment/provenance failures, weather gaps/quality/duplicates/units, uphill direction, terrain CLI integration and growth/timing diagnostics. The numerical and scientific gates above remain open.

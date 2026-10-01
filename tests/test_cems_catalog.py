@@ -42,7 +42,7 @@ class TestCemsCatalog(unittest.TestCase):
         for act_id in ("EMSR578", "EMSR590", "EMSR592", "EMSR600"):
             self.assertIn(act_id, ACTIVATIONS)
             act = ACTIVATIONS[act_id]
-            self.assertIn(act["utm_zone"], (29, 30, 31))
+            self.assertIn(act["utm_zone"], (29, 30, 31, 32))
             self.assertTrue(act["epsg"].startswith("EPSG:"))
             self.assertIn(act["default_split"], ("development", "validation", "reserved"))
             self.assertIn("del", act["products"])
@@ -50,15 +50,51 @@ class TestCemsCatalog(unittest.TestCase):
             self.assertTrue(url.startswith("https://"))
             self.assertTrue(url.endswith(".zip"))
 
+    def test_registry_geography_and_crs_match_registered_activations(self):
+        self.assertEqual(
+            (ACTIVATIONS["EMSR590"]["name"], ACTIVATIONS["EMSR590"]["country"]),
+            ("Las Hurdes / Sierra de Francia", "Spain"),
+        )
+        self.assertEqual(
+            (ACTIVATIONS["EMSR592"]["name"], ACTIVATIONS["EMSR592"]["country"]),
+            ("Landiras / La Teste-de-Buch", "France"),
+        )
+        self.assertEqual(
+            (ACTIVATIONS["EMSR600"]["name"], ACTIVATIONS["EMSR600"]["country"],
+             ACTIVATIONS["EMSR600"]["utm_zone"], ACTIVATIONS["EMSR600"]["epsg"]),
+            ("Massarosa", "Italy", 32, "EPSG:25832"),
+        )
+
+    def test_correct_hash_does_not_bypass_geographic_bounds(self):
+        from hashlib import sha256
+
+        wrong_place = [[[-4.6, 36.6], [-4.5, 36.6], [-4.5, 36.7],
+                        [-4.6, 36.7], [-4.6, 36.6]]]
+        feature_collection = {"type": "FeatureCollection", "features": [{
+            "type": "Feature", "geometry": {"type": "Polygon", "coordinates": wrong_place},
+            "properties": {},
+        }]}
+        empty_collection = {"type": "FeatureCollection", "features": []}
+        with tempfile.TemporaryDirectory() as tmpdir:
+            zip_path = Path(tmpdir) / "mislabeled_emsr590.zip"
+            with ZipFile(zip_path, "w") as zf:
+                zf.writestr("areaOfInterestA.json", json.dumps(feature_collection))
+                zf.writestr("naturalLandUseA.json", json.dumps(empty_collection))
+                zf.writestr("observedEventA.json", json.dumps(empty_collection))
+            digest = sha256(zip_path.read_bytes()).hexdigest()
+            with patch.dict(ACTIVATIONS["EMSR590"]["products"]["del"], {"sha256": digest}):
+                with self.assertRaisesRegex(ValueError, "outside registered WGS84 bounds"):
+                    build_cems_scenario("EMSR590", zip_path)
+
     def test_build_cems_scenario_with_mock_zip_zone30(self):
         """Test building a scenario for Zone 30N (EMSR590) with synthetic GeoJSON."""
-        aoi_poly = [[[-5.8, 39.7], [-5.6, 39.7], [-5.6, 39.9], [-5.8, 39.9], [-5.8, 39.7]]]
-        burn_poly = [[[-5.75, 39.75], [-5.70, 39.75], [-5.70, 39.80], [-5.75, 39.80], [-5.75, 39.75]]]
-        landuse_poly = [[[-5.78, 39.72], [-5.65, 39.72], [-5.65, 39.85], [-5.78, 39.85], [-5.78, 39.72]]]
+        aoi_poly = [[[-6.3, 40.43], [-6.1, 40.43], [-6.1, 40.52], [-6.3, 40.52], [-6.3, 40.43]]]
+        burn_poly = [[[-6.25, 40.45], [-6.20, 40.45], [-6.20, 40.48], [-6.25, 40.48], [-6.25, 40.45]]]
+        landuse_poly = [[[-6.28, 40.44], [-6.15, 40.44], [-6.15, 40.50], [-6.28, 40.50], [-6.28, 40.44]]]
 
         mock_aoi = {"type": "FeatureCollection", "features": [{"type": "Feature", "geometry": {"type": "Polygon", "coordinates": aoi_poly}, "properties": {}}]}
         mock_landuse = {"type": "FeatureCollection", "features": [{"type": "Feature", "geometry": {"type": "Polygon", "coordinates": landuse_poly}, "properties": {"info": "322-Heathland"}}]}
-        mock_hydro = {"type": "FeatureCollection", "features": [{"type": "Feature", "geometry": {"type": "Point", "coordinates": [-5.72, 39.78]}, "properties": {"name": "Piscina Natural", "obj_type": "BH080-Lake"}}]}
+        mock_hydro = {"type": "FeatureCollection", "features": [{"type": "Feature", "geometry": {"type": "Point", "coordinates": [-6.22, 40.47]}, "properties": {"name": "Piscina Natural", "obj_type": "BH080-Lake"}}]}
         mock_obs = {"type": "FeatureCollection", "features": [{"type": "Feature", "geometry": {"type": "Polygon", "coordinates": burn_poly}, "properties": {"notation": "Burnt area", "area": 250.0}}]}
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -127,7 +163,9 @@ class TestCemsCatalog(unittest.TestCase):
                 for layer, data in payloads.items():
                     archive.writestr(f"{layer}.json", json.dumps(data))
             digest = sha256(path.read_bytes()).hexdigest()
-            with patch.dict(ACTIVATIONS["EMSR590"]["products"]["del"], {"sha256": digest}):
+            with patch.dict(ACTIVATIONS["EMSR590"]["products"]["del"], {"sha256": digest}), patch.dict(
+                ACTIVATIONS["EMSR590"], {"aoi_bounds_wgs84": (-4.0, 39.0, -2.0, 41.0)}
+            ):
                 scenario = build_cems_scenario("EMSR590", path, cell_size_m=size)
 
         self.assertEqual((scenario["grid"]["rows"], scenario["grid"]["cols"]), (3, 4))
@@ -161,4 +199,3 @@ class TestCemsCatalog(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
