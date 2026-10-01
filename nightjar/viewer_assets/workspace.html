@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="nightjar-viewer-version" content="__VERSION__" />
+    <title>__TITLE__</title>
+    <style>
+      __CSS__
+    </style>
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="#replay" aria-label="Nightjar research workspace">
+        <svg
+          class="bird-mark"
+          viewBox="0 0 40 32"
+          role="img"
+          aria-label="Nightjar bird mark"
+        >
+          <path
+            d="M2 4C10 7 14 11 17 12L18.2 9.2Q20 6.8 21.8 9.2L23 12C26 11 30 7 38 4C34 13 29 18 23 19L23 27L20 24L17 27L17 19C11 18 6 13 2 4Z"
+          />
+        </svg>
+        <span class="brand-name">Nightjar</span
+        ><span class="brand-divider"></span
+        ><span class="product-name">Research workstation</span>
+      </a>
+      <nav class="primary-tabs" aria-label="Workspace pages" role="tablist">
+        <button
+          class="tab-button active"
+          type="button"
+          role="tab"
+          aria-selected="true"
+          aria-controls="pageReplay"
+          id="tabReplayButton"
+          data-tab="replay"
+        >
+          Replay
+        </button>
+        <button
+          class="tab-button"
+          type="button"
+          role="tab"
+          aria-selected="false"
+          aria-controls="pageCompare"
+          id="tabCompareButton"
+          data-tab="compare"
+        >
+          Compare
+        </button>
+        <button
+          class="tab-button"
+          type="button"
+          role="tab"
+          aria-selected="false"
+          aria-controls="pageModels"
+          id="tabModelsButton"
+          data-tab="models"
+        >
+          Models
+        </button>
+        <button
+          class="tab-button"
+          type="button"
+          role="tab"
+          aria-selected="false"
+          aria-controls="pageRecords"
+          id="tabRecordsButton"
+          data-tab="records"
+        >
+          Records
+        </button>
+      </nav>
+      <div class="topbar-actions">
+        <span class="offline-label"
+          ><span class="status-dot"></span> Offline research</span
+        ><button id="importButton" class="button button-subtle" type="button">
+          Import JSON</button
+        ><input
+          id="fileInput"
+          type="file"
+          accept=".json,application/json"
+          multiple
+          hidden
+        />
+      </div>
+    </header>
+
+
+    <main id="workspace" class="workspace">
+      <section id="pageReplay" class="tab-page active" role="tabpanel" aria-labelledby="tabReplayButton" data-page="replay">
+        <div class="page-toolbar replay-toolbar">
+          <div class="run-picker">
+            <label class="control-field"><span class="field-label">Scenario</span><select id="scenarioSelect" aria-label="Scenario"></select></label>
+            <label class="control-field"><span class="field-label">Controller</span><select id="runList" class="run-list" aria-label="Replay runs"></select></label>
+            <span class="count"><span id="runCount">0</span> runs</span>
+            <p id="emptyRuns" class="empty-state" hidden>No replay loaded. Import a replay JSON file.</p>
+          </div>
+          <button id="exportPngButton" class="button button-subtle" type="button">Export map PNG</button>
+        </div>
+        <div class="replay-workspace">
+          <section class="replay-stage" aria-label="Map and playback">
+            <div class="map-heading replay-map-heading">
+              <div><p id="runKicker" class="eyebrow">Recorded episode</p><h1 id="mapTitle">Select a replay</h1><p id="mapSubtitle" class="map-subtitle">Recorded grid data</p></div>
+              <button id="compareButton" class="button button-primary" type="button" aria-label="Open comparison page">Compare runs <span aria-hidden="true">↗</span></button>
+            </div>
+            <div id="mapHostReplay" class="map-host"><div id="mapBlock" class="map-block">
+            <div id="mapFrame" class="map-frame">
+              <div class="map-annotation north-mark" aria-label="North is up">
+                <span>N</span
+                ><svg viewBox="0 0 16 34" aria-hidden="true">
+                  <path d="M8 1 14 15 8 12 2 15Z" />
+                  <path d="M8 12v20" />
+                </svg>
+              </div>
+              <div id="mapViews" class="map-views">
+                <div class="map-placeholder">
+                  Import or select a replay to inspect its grid.
+                </div>
+              </div>
+              <div id="scaleMark" class="map-annotation scale-mark"></div>
+            </div>
+            <div id="mapFooter" class="map-footer">
+              <div id="legend" class="legend"></div>
+              <span id="coordinateNote" class="coordinate-note"
+                >Cell indices are shown when grid metadata is available.</span
+              >
+            </div>
+          </div></div>
+            <section
+          id="timelinePanel"
+          class="timeline-panel"
+          aria-label="Recorded episode playback"
+        >
+          <div class="timeline-topline">
+            <div>
+              <p class="eyebrow">Episode time</p>
+              <div class="time-display">
+                <strong id="timeDisplay">00:00</strong
+                ><span id="timeContext">of unavailable</span>
+              </div>
+            </div>
+            <div class="playback-controls">
+              <button
+                id="previousDecision"
+                class="transport-button"
+                type="button"
+                aria-label="Previous decision"
+                title="Previous decision (←)"
+              >
+                <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 4v12m10-12-7 6 7 6"/></svg></button
+              ><button
+                id="playButton"
+                class="play-button"
+                type="button"
+                aria-label="Play"
+              >
+                Play</button
+              ><button
+                id="nextDecision"
+                class="transport-button"
+                type="button"
+                aria-label="Next decision"
+                title="Next decision (→)"
+              >
+                <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M15 4v12M5 4l7 6-7 6"/></svg></button
+              ><label class="speed-control"
+                >Speed
+                <select id="speedSelect" aria-label="Playback speed">
+                  <option value="0.5">0.5×</option>
+                  <option value="1" selected>1×</option>
+                  <option value="2">2×</option>
+                  <option value="4">4×</option>
+                </select></label
+              ><button
+                id="resetButton"
+                class="button button-subtle reset-button"
+                type="button"
+              >
+                Reset
+              </button>
+            </div>
+          </div>
+          <div class="range-wrap">
+            <input
+              id="timeRange"
+              type="range"
+              min="0"
+              max="0"
+              step="1"
+              value="0"
+              aria-label="Replay time"
+            />
+            <div id="timelineTicks" class="timeline-ticks"></div>
+          </div>
+        </section>
+          </section>
+          <aside class="research-inspector" aria-label="Episode telemetry and layers">
+            <div class="inspector-heading"><h2>Episode telemetry</h2><span class="sample-label">Recorded samples</span></div>
+            <p id="sampleContext" class="section-note"></p>
+            <div id="currentSummary" class="summary-grid"></div>
+            <section class="scenario-context"><h3>Landscape &amp; conditions</h3><dl id="scenarioContext" class="metadata-list"></dl></section>
+            <div id="replayLayerHost" class="inspector-layer-host"><details class="layer-disclosure" open>
+            <summary>Map layers</summary>
+            <div class="layer-options">
+              <label class="layer-row"
+                ><span
+                  ><i class="layer-swatch swatch-truth"></i>Reached area
+                  <small>truth</small></span
+                ><input type="checkbox" data-layer="truth" checked
+              /></label>
+              <label class="layer-row"
+                ><span
+                  ><i class="layer-swatch swatch-observation"></i>Delivered
+                  observations</span
+                ><input type="checkbox" data-layer="observations" checked
+              /></label>
+              <label class="layer-row"
+                ><span
+                  ><i class="layer-swatch swatch-candidate"></i>Candidate
+                  cells</span
+                ><input type="checkbox" data-layer="candidates" checked
+              /></label>
+              <label class="layer-row"
+                ><span
+                  ><i class="layer-swatch swatch-aircraft"></i>Recorded aircraft
+                  points</span
+                ><input type="checkbox" data-layer="aircraft" checked
+              /></label>
+              <label class="layer-row"
+                ><span><i class="layer-swatch swatch-grid"></i>Grid lines</span
+                ><input type="checkbox" data-layer="grid" checked
+              /></label>
+              <p id="truthStatus" class="layer-status"></p>
+            </div>
+          </details></div>
+            <details class="evidence-inspector" open><summary>Cell inspection</summary><p class="section-note">Select a cell on the map. Arrow keys move the selection.</p><div id="cellInspector" class="cell-inspector"><p class="muted">No cell selected.</p></div></details>
+          </aside>
+        </div>
+      </section>
+      <section
+        id="pageCompare"
+        class="tab-page"
+        role="tabpanel"
+        aria-labelledby="tabCompareButton"
+        data-page="compare"
+        hidden
+      >
+        <div class="page-title">
+          <p class="eyebrow">Paired episode review</p>
+          <h1>Compare runs</h1>
+          <p>
+            Review two recorded episodes at the same simulation time.
+          </p>
+        </div>
+        <div class="pair-selectors">
+          <label
+            >Candidate
+            <select id="candidateRun"></select></label
+          ><span class="pair-divider">against</span
+          ><label
+            >Reference
+            <select id="referenceRun"></select
+          ></label>
+        </div>
+        <p id="comparisonNote" class="comparison-note">
+          Select two runs to compare.
+        </p>
+<div class="comparison-workspace"><section class="comparison-stage"><div class="compare-export-row"><div id="compareLayerHost" class="compare-layer-host"></div><button id="exportComparePngButton" class="button button-subtle" type="button">Export comparison PNG</button></div><div id="mapHostCompare" class="map-host comparison-map-host"></div></section>        <aside class="comparison-grid">
+          <section class="comparison-chart-section">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">Retrospective truth</p>
+                <h2>Reached area over time</h2>
+              </div>
+              <span class="unit-label">ha · simulation time (s)</span>
+            </div>
+            <p class="section-note">
+              Step curves are derived from each replay’s recorded arrival raster
+              and cell resolution.
+            </p>
+            <svg
+              id="areaChart"
+              class="area-chart"
+              role="img"
+              aria-label="Reached area over simulation time"
+            ></svg>
+            <div id="chartLegend" class="chart-legend"></div>
+          </section>
+          <section class="comparison-table-section">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">End of replay</p>
+                <h2>Final outcomes</h2>
+              </div>
+            </div>
+            <div class="outcomes-scroll">
+              <table class="outcomes-table pair-outcomes">
+                <thead>
+                  <tr>
+                    <th scope="col">Measure</th>
+                    <th scope="col">Reference</th>
+                    <th scope="col">Candidate</th>
+                    <th scope="col" title="Candidate minus reference">Δ</th>
+                  </tr>
+                </thead>
+                <tbody id="outcomeRows"></tbody>
+              </table>
+            </div>
+          </section>
+        </aside>
+</div>
+</section>
+      <section
+        id="pageModels"
+        class="tab-page"
+        role="tabpanel"
+        aria-labelledby="tabModelsButton"
+        data-page="models"
+        tabindex="0"
+        hidden
+      >
+        <div class="page-title">
+          <p class="eyebrow">Model inspection</p>
+          <h1>Controller and fire model</h1>
+          <p>
+            Inspect the controller architecture, scenario inputs and simulation assumptions.
+          </p>
+        </div>
+        <div class="model-columns">
+          <section class="model-section">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">Controller</p>
+                <h2>PPO controller</h2>
+              </div>
+              <button
+                id="exportControllerButton"
+                class="button button-subtle model-export"
+                type="button"
+              >
+                Export JSON
+              </button>
+            </div>
+            <label class="field-label" for="controllerSelect"
+              >Checkpoint</label
+            ><select id="controllerSelect" class="wide-select"></select>
+            <p id="controllerLink" class="model-link-status"></p>
+            <div id="controllerModel" class="model-detail"></div>
+            <div id="architectureDiagram" class="architecture-diagram"></div>
+          </section>
+          <section class="model-section physical-model-section">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">Simulation model</p>
+                <h2>Fire dynamics</h2>
+              </div>
+              <button
+                id="exportPhysicalButton"
+                class="button button-subtle model-export"
+                type="button"
+              >
+                Export JSON
+              </button>
+            </div>
+            <label class="field-label" for="physicalSelect"
+              >Physical model</label
+            ><select id="physicalSelect" class="wide-select"></select>
+            <p id="physicalLink" class="model-link-status"></p>
+            <div id="physicalModel" class="model-detail"></div>
+          </section>
+        </div>
+      </section>
+
+      <section
+        id="pageRecords"
+        class="tab-page"
+        role="tabpanel"
+        aria-labelledby="tabRecordsButton"
+        data-page="records"
+        tabindex="0"
+        hidden
+      >
+        <div class="page-title">
+          <p class="eyebrow">Source records</p>
+          <h1>Replay metadata and decisions</h1>
+          <p>
+            Inspect final outcomes, provenance, units, schema, and the complete saved decision log for one run.
+          </p>
+        </div>
+        <div class="record-toolbar">
+          <label class="field-label" for="recordRunSelect">Replay record</label
+          ><select id="recordRunSelect" class="wide-select"></select
+          ><button
+            id="exportJsonButton"
+            class="button button-subtle"
+            type="button"
+          >
+            Export selected JSON
+          </button>
+        </div>
+        <section class="record-metadata">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Selected run</p>
+              <h2>Replay metadata</h2>
+            </div>
+          </div>
+          <dl id="runMetadata" class="metadata-list"></dl>
+          <div id="recordOutcomes" class="record-summary" aria-label="Final replay outcomes"></div>
+        </section>
+        <section class="record-decisions">
+          <div class="event-heading">
+            <h2>Recorded decisions</h2>
+            <span id="eventCount" class="muted">0 events</span>
+          </div>
+          <div class="events-scroll">
+            <table class="event-table record-event-table">
+              <thead>
+                <tr>
+                  <th scope="col">Time</th>
+                  <th scope="col">Decision and target</th>
+                  <th scope="col">Result</th>
+                  <th scope="col">Candidates</th>
+                  <th scope="col">Recorded effects</th>
+                </tr>
+              </thead>
+              <tbody id="eventRows"></tbody>
+            </table>
+            <p id="emptyEvents" class="empty-state">
+              No decisions recorded in this run.
+            </p>
+          </div>
+        </section>
+      </section>
+    </main>
+    <div id="notice" class="notice" role="status" aria-live="polite"></div>
+    <script>
+      const INITIAL_REPLAYS = __PAYLOAD__;
+      const INITIAL_MODELS = __MODELS__;
+      __JS__;
+    </script>
+  </body>
+</html>

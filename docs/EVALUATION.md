@@ -6,6 +6,12 @@
 
 The [verification record](GEOGRAPHIC_PPO_VERIFICATION.md) documents one-update recurrent PPO smoke checks on EMSR578 development data, training seed 42, finite loss/weights, zero rejected orders in deterministic development evaluation, and exact weights/deterministic-metrics preservation after loading. Two fresh runs in the same CPU runtime matched. This is an execution/serialization diagnostic: no baseline comparison, geographic model selection, held-out result, or policy-superiority claim is made. Physical calibration and the result-bearing geographic protocol remain open.
 
+## Descriptive workspace comparisons
+
+The offline viewer provides candidate/reference maps, step curves of retrospective reached area and episode-end metrics. A delta is candidate minus reference and requires matching nonmissing scenario hash, horizon, grid dimensions and resolution, distinct runs and finite recorded values. It is unavailable when those requirements fail. Area derives from recorded arrival times and cell size; missing truth cannot produce a curve. A single paired episode cannot estimate generalization or uncertainty, and the workspace computes no policy ranking or statistical test. These displays do not modify the predeclared evaluation criteria below.
+
+`nightjar.viewer --demo --checkpoint PATH` executes only discrimination development case 00 with deterministic action selection and the three baseline references. Its purpose is replay/model inspection, not candidate selection or held-out evaluation. `--scenario PATH` acts only on an explicitly supplied synthetic scenario; it does not select a split automatically. Existing replay imports never trigger training or simulation.
+
 ## Exploratory synthetic decision experiment
 
 Freeze the existing `integrated-synthetic-0.1` FM1 scenario and its 35 m permanent water barrier for the first controller-interface experiment. Compare controllers with no intervention, valid random choice, and the observation-matched heuristic using the same delivered observations and candidate actions. Save scenario and code versions, policy seeds, raw replays, final affected area, water use, flight time, rejected orders, and failure cases. The single map and repeated policy seeds cannot estimate generalization across incidents. Reward is a training signal; final affected area at the fixed horizon is the comparison outcome. Any apparent advantage is conditional on this synthetic simulator and its provisional suppression rule.

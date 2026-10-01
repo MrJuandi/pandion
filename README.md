@@ -92,7 +92,9 @@ python3 -m nightjar.geographic_ppo --smoke --scenarios-dir runs/geographic-famil
 # Offline PPO checks require the synthetic family generated above and explicit mode:
 python3 -m nightjar.geographic_ppo --smoke --synthetic --scenarios-dir runs/geographic-family-synthetic
 python3 -m nightjar.evaluate_reserved --split-version v2
-python3 -m nightjar.viewer runs/integrated-heuristic.json --output runs/viewer.html
+python3 -m nightjar.viewer --demo --output runs/viewer.html
+python3 -m nightjar.viewer runs/integrated-heuristic.json --output runs/heuristic-viewer.html
+python3 -m nightjar.viewer --scenario examples/synthetic_integrated.json --output runs/scenario-viewer.html
 python3 -m unittest discover -s tests -v
 ```
 
@@ -108,7 +110,16 @@ The example mixes GR1 (101), SH1 (141), and nonburnable (0) cells. It is a synth
 
 The same unit suite runs in GitHub Actions for pushes and pull requests. The `unit` job checks the standard-fuel path; `unit-rl` also installs CPU PyTorch and requires its import before running the suite. Tests that need a downloaded external source skip when the audited file is absent.
 
-`runs/` is ignored by Git. Omit `--output` to print a result to standard output for commands that accept it. The aircraft example exercises movement, a full-water drop, return, and refill. The fire examples produce first-arrival times and grid-cell affected area without intervention. The resolution command compares the FM1 assumptions on one physical domain at several cell sizes. Scenario contracts and limitations are in [ARCHITECTURE.md](docs/ARCHITECTURE.md) and [PHYSICAL_MODEL_V0.md](docs/PHYSICAL_MODEL_V0.md). The local browser replay tool (`nightjar.viewer`) generates a self-contained offline HTML5 viewer to audit fire arrival, delivered observations, flight path, and drop decisions interactively or compare multiple policies side-by-side.
+`runs/` is ignored by Git. Omit `--output` to print a result to standard output for commands that accept it. The aircraft example exercises movement, a full-water drop, return, and refill. The fire examples produce first-arrival times and grid-cell affected area without intervention. The resolution command compares the FM1 assumptions on one physical domain at several cell sizes. Scenario contracts and limitations are in [ARCHITECTURE.md](docs/ARCHITECTURE.md) and [PHYSICAL_MODEL_V0.md](docs/PHYSICAL_MODEL_V0.md). The local research workspace (`nightjar.viewer`) generates a self-contained offline HTML file. Open `runs/viewer.html` after the `--demo` command: it records three baselines on synthetic discrimination development case 00 without evaluating validation or reserved episodes. Separate Replay, Compare, Models and Records views provide playback, layer/cell inspection, candidate/reference maps, retrospective area curves, compatible final-metric deltas, model provenance, decision records, and JSON/PNG exports. Replay uses separate scenario/controller selectors, a large map with bottom playback, and adjacent telemetry/layers. Models show architecture and physical inputs first, with expandable provenance/configuration. Models and Records scroll vertically inside the desktop workspace, including keyboard navigation; narrow screens use document scrolling. Delivered observations remain distinct from retrospective truth; unavailable geographic arrival/provenance fields are explicitly labeled. See [INTERFACE_DESIGN.md](docs/INTERFACE_DESIGN.md) for sources and limits.
+
+To inspect an existing PPO checkpoint and add its actual deterministic development replay, use the RL dependency environment (see `requirements-rl.txt`):
+
+```sh
+python3 -m nightjar.viewer --demo --checkpoint runs/ppo-tactical-v2.pt --output runs/viewer.html
+```
+
+This requires an existing compatible checkpoint; it does not train or download one. With replay files instead of `--demo`, `--checkpoint` inspects the weights without rerunning those episodes. Raw state dictionaries additionally require `--model-config` pointing to JSON with explicit `grid_rows`, `grid_cols`, `recurrent` and `action_mode` (`tactical` or `spatial`); supplied tensor dimensions must match. The browser inspects records and architecture, while policy execution remains in Python. Physical model details are bound to the supplied synthetic scenario; this interface does not establish physical validation or controller superiority.
+
 
 The integrated example compares no intervention, a seeded valid random choice, and a deterministic downwind heuristic over the same synthetic scenario. At its 600 s horizon, the example gives 2.00 ha without intervention, 0.75 ha with the heuristic, and 1.30 ha mean over ten random-policy seeds. These figures depend on the assumed permanent one-cell water barrier and do not estimate real suppression effectiveness; see [EVALUATION.md](docs/EVALUATION.md).
 
