@@ -79,3 +79,5 @@ PY
 Checkpoints retain the existing raw `state_dict` format. `--resume` restores model weights into a fresh optimizer; optimizer state, random-generator state, model configuration, and dataset identity are not restored from that file. Preserve the matching report and input manifest. It is a restart from weights, not exact continuation of an interrupted optimizer trajectory.
 
 Finite loss and weights establish execution and serialization checks only. The magnitude or change of the loss does not establish stable optimization, policy improvement, generalization, or physical validity. The reward/physical-model audit and a frozen geographic evaluation protocol remain separate work, as recorded in [TRAINING_READINESS.md](TRAINING_READINESS.md).
+
+The flat-terrain smoke evidence above remains specific to its original hashes. The 2026-10-01 environment family changes heights/forcing and requires fresh weights; see [ENVIRONMENT_INTEGRATION.md](ENVIRONMENT_INTEGRATION.md). The broader catalog identity audit also corrected EMSR590/592/600 metadata, so old full-family outputs must be regenerated.

@@ -2,11 +2,11 @@
 
 This module provides unified ingestion for multiple Copernicus wildfire activations:
 - EMSR578: Artesa de Segre (Lleida, Catalonia / UTM Zone 31N)
-- EMSR590: Casas de Miravete / Monfragüe (Cáceres, Extremadura / UTM Zone 30N)
-- EMSR592: Sierra de Mijas (Málaga, Andalusia / UTM Zone 30N)
-- EMSR600: Vall d'Ebo (Alicante, Valencian Community / UTM Zone 30N)
+- EMSR590: Las Hurdes / Sierra de Francia (Cáceres, Extremadura / UTM Zone 30N)
+- EMSR592: Landiras / La Teste-de-Buch (Gironde / Landes, France / UTM Zone 30N)
+- EMSR600: Massarosa (Lucca, Tuscany, Italy / UTM Zone 32N)
 
-All activations are georeferenced to standard ETRS89 / UTM (Zones 29N, 30N, 31N)
+All activations are georeferenced to standard ETRS89 / UTM (Zones 29N, 30N, 31N, 32N)
 with CORINE Land Cover crosswalked to Scott & Burgan 40 fuel models.
 """
 
@@ -117,6 +117,7 @@ ACTIVATIONS: dict[str, dict[str, Any]] = {
         "country": "Spain",
         "utm_zone": 31,
         "epsg": "EPSG:25831",
+        "aoi_bounds_wgs84": (0.5, 41.5, 1.5, 42.5),
         "default_split": "development",
         "source_page": "https://mapping.emergency.copernicus.eu/activations/EMSR578/",
         "products": {
@@ -148,19 +149,20 @@ ACTIVATIONS: dict[str, dict[str, Any]] = {
     },
     "EMSR590": {
         "activation_id": "EMSR590",
-        "name": "Casas de Miravete / Monfragüe",
+        "name": "Las Hurdes / Sierra de Francia",
         "province": "Cáceres",
         "region": "Extremadura",
         "country": "Spain",
         "utm_zone": 30,
         "epsg": "EPSG:25830",
+        "aoi_bounds_wgs84": (-6.6, 40.2, -6.0, 40.7),
         "default_split": "validation",
         "source_page": "https://mapping.emergency.copernicus.eu/activations/EMSR590/",
         "products": {
             "del": {
                 "stage": "del",
                 "product_code": "PRODUCT",
-                "acquired_at_utc": "2022-07-14T18:06:06Z",
+                "acquired_at_utc": "2022-07-14T10:48:00Z",
                 "sha256": "46238c94a62a32144b5d9cb721ecb941bb8b5fa7e24bc7c4f2d8e56575871645",
                 "reported_area_ha": 4637.40,
                 "vector_filename": "EMSR590_AOI01_DEL_PRODUCT_r1_RTP01_v1_vector.zip",
@@ -169,40 +171,42 @@ ACTIVATIONS: dict[str, dict[str, Any]] = {
     },
     "EMSR592": {
         "activation_id": "EMSR592",
-        "name": "Sierra de Mijas",
-        "province": "Málaga",
-        "region": "Andalusia",
-        "country": "Spain",
+        "name": "Landiras / La Teste-de-Buch",
+        "province": "Gironde / Landes",
+        "region": "Nouvelle-Aquitaine",
+        "country": "France",
         "utm_zone": 30,
         "epsg": "EPSG:25830",
+        "aoi_bounds_wgs84": (-0.9, 44.2, -0.1, 44.9),
         "default_split": "reserved",
         "source_page": "https://mapping.emergency.copernicus.eu/activations/EMSR592/",
         "products": {
             "del": {
                 "stage": "del",
                 "product_code": "PRODUCT",
-                "acquired_at_utc": "2022-07-15T12:00:00Z",
+                "acquired_at_utc": "2022-07-17T10:26:00Z",
                 "sha256": "8891a611dee603a431b67e82ab86dc6fcd53432e0c3342f359a269ccb48537a2",
-                "reported_area_ha": 41.68,
+                "reported_area_ha": 6726.49,
                 "vector_filename": "EMSR592_AOI01_DEL_PRODUCT_r1_RTP01_v1_vector.zip",
             },
         },
     },
     "EMSR600": {
         "activation_id": "EMSR600",
-        "name": "Vall d'Ebo",
-        "province": "Alicante",
-        "region": "Valencian Community",
-        "country": "Spain",
-        "utm_zone": 30,
-        "epsg": "EPSG:25830",
+        "name": "Massarosa",
+        "province": "Lucca",
+        "region": "Tuscany",
+        "country": "Italy",
+        "utm_zone": 32,
+        "epsg": "EPSG:25832",
+        "aoi_bounds_wgs84": (10.0, 43.5, 10.7, 44.2),
         "default_split": "reserved",
         "source_page": "https://mapping.emergency.copernicus.eu/activations/EMSR600/",
         "products": {
             "del": {
                 "stage": "del",
                 "product_code": "PRODUCT",
-                "acquired_at_utc": "2022-08-14T12:00:00Z",
+                "acquired_at_utc": "2022-07-21T10:23:00Z",
                 "sha256": "e64eb4fb7f2465888a02615d2adf38278726d7fba413c4e470dfb278728ac2a0",
                 "reported_area_ha": 836.73,
                 "vector_filename": "EMSR600_AOI01_DEL_PRODUCT_r1_RTP01_v1_vector.zip",
@@ -251,6 +255,47 @@ def fetch_cems_package(activation_id: str, stage: str, output_path: Path) -> Pat
 
     output_path.write_bytes(content)
     return output_path
+
+
+def _validate_aoi_geographic_bounds(
+    activation_id: str,
+    features: list[dict[str, Any]],
+    bounds: Sequence[float],
+) -> None:
+    """Reject a correctly hashed package whose AOI belongs to another location.
+
+    Bounds are broad WGS84 envelopes recorded for each registered product AOI,
+    ordered west, south, east, north. A package digest establishes byte
+    identity; this independent check guards the catalog's geographic identity.
+    """
+    west, south, east, north = map(float, bounds)
+    coordinates: list[tuple[float, float]] = []
+
+    def collect(value: Any) -> None:
+        if (isinstance(value, (list, tuple)) and len(value) >= 2
+                and isinstance(value[0], (int, float))
+                and isinstance(value[1], (int, float))):
+            coordinates.append((float(value[0]), float(value[1])))
+        elif isinstance(value, (list, tuple)):
+            for item in value:
+                collect(item)
+
+    for feature in features:
+        geom = feature.get("geometry") or {}
+        if geom.get("type") in ("Polygon", "MultiPolygon"):
+            collect(geom.get("coordinates", []))
+
+    if not coordinates:
+        raise ValueError(f"No polygon coordinates found in AOI for {activation_id}")
+
+    outside = [(lon, lat) for lon, lat in coordinates
+               if not (west <= lon <= east and south <= lat <= north)]
+    if outside:
+        lon, lat = outside[0]
+        raise ValueError(
+            f"{activation_id}: AOI coordinate ({lon:.6f}, {lat:.6f}) falls outside "
+            f"registered WGS84 bounds ({west}, {south}, {east}, {north})"
+        )
 
 
 def _extract_water_waypoints(features: list[dict], utm_zone: int) -> list[dict[str, Any]]:
@@ -338,6 +383,12 @@ def build_cems_scenario(
         landuse_data = json.loads(archive.read(landuse_names[0]))
         hydro_data = json.loads(archive.read(hydro_names[0])) if hydro_names else {"type": "FeatureCollection", "features": []}
         obs_data = json.loads(archive.read(obs_names[0]))
+
+    _validate_aoi_geographic_bounds(
+        activation_id.upper(),
+        aoi_data.get("features", []),
+        act_info["aoi_bounds_wgs84"],
+    )
 
     # Compute bounding box in UTM coordinates from AOI polygon
     utm_coords: list[tuple[float, float]] = []
