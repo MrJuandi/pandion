@@ -48,3 +48,7 @@ Exact local export hashes, sampling conventions and diagnostic limits are in [PI
 - [CSIRO Data Access Portal, Annaburroo collection csiro:58746](https://data.csiro.au/collection/csiro:58746): collection version 1 and downloadable data. See [the source audit and diagnostic](VALIDATION_ANNABURROO.md).
 
 - [PyTorch installation guide](https://pytorch.org/get-started/locally/): installation and import checks for macOS and CPU Linux. The geographic PPO verification used PyTorch 2.14.0, Python 3.12.8, and Pyretechnics 2026.8.10 on CPU (2026-09-30); the tested version does not imply compatibility across every `torch>=2.0.0` release. CI resolves the CPU requirement from `https://download.pytorch.org/whl/cpu`.
+
+## Research interface references
+
+The focused [interface review](INTERFACE_DESIGN.md) records reviewed versions/dates, primary links and limits for FARSITE/FlamMap, IFTDSS, WIFIRE Firemap, Prometheus, Cell2FireW and NIST Smokeview. The 2026-10-01 layout review also used the [Fire2a QGIS simulator parameter groups](https://fire2a.github.io/docs/qgis-toolbox/algo_simulator.html) and [IFTDSS Map Studio task separation](https://iftdss.firenet.gov/firenetHelp/help/pageHelp/content/10-mapstudio/mapstudioabout.htm). These sources inform UI workflow choices; they do not validate Nightjar physics or policy outcomes.
