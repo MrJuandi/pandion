@@ -122,8 +122,6 @@ def pilot_map(pilot: dict, terrain: dict) -> dict:
 
 def load_policy(checkpoint: Path, report_path: Path, scenarios: list[dict]):
     """Load weights with a manifest-bound report; reject legacy unbound reports."""
-    import torch
-    from .model import SpatialActorCritic
     report = json.loads(report_path.read_text())
     if report.get("schema_version") not in ("nightjar-geographic-ppo-smoke-0.1", "nightjar-geographic-ppo-train-0.1"):
         raise ValueError("workspace requires a geographic smoke/train report with dataset provenance")
@@ -133,6 +131,9 @@ def load_policy(checkpoint: Path, report_path: Path, scenarios: list[dict]):
         raise ValueError("training report does not match the verified development family")
     if not isinstance(report.get("recurrent"), bool):
         raise ValueError("training report must specify recurrent configuration")
+    # Validate provenance first so unbound reports fail without requiring PyTorch.
+    import torch
+    from .model import SpatialActorCritic
     grid = scenarios[0]["grid"]
     model = SpatialActorCritic(grid_rows=grid["rows"], grid_cols=grid["cols"], action_dim=9, recurrent=report["recurrent"])
     model.load_state_dict(torch.load(checkpoint, weights_only=True, map_location="cpu"))
