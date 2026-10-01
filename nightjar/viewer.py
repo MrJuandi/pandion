@@ -1,71 +1,117 @@
-"""Build a self-contained Spanish viewer for Nightjar replay artifacts."""
+"""Create an offline research workspace from recorded Nightjar replay artifacts.
+
+The browser inspects recorded episodes and model descriptors. The CLI can record
+explicit synthetic scenarios and a supplied PPO checkpoint before bundling HTML,
+styles, scripts, and data without network dependencies.
+"""
 from __future__ import annotations
 
 import argparse
-from datetime import datetime, timezone
 import html
 import json
 import re
 from pathlib import Path
 from typing import Sequence
 
-from .replay_view import normalize_replay
-
 VIEWER_VERSION = "nightjar-viewer-0.4"
-_ASSETS = Path(__file__).with_name("viewer_assets")
+ASSET_DIRECTORY = Path(__file__).with_name("viewer_assets")
 
 
-def _safe_json(value: object) -> str:
-    """Serialize data so it cannot terminate the embedded script element."""
-    return (json.dumps(value, ensure_ascii=False, separators=(",", ":"))
-            .replace("&", "\\u0026").replace("<", "\\u003c")
-            .replace(">", "\\u003e").replace("\u2028", "\\u2028")
-            .replace("\u2029", "\\u2029"))
+def build_viewer_html(replays: Sequence[dict], title: str = "Nightjar Research Workspace", *, models: Sequence[dict] = ()) -> str:
+    """Bundle recorded replays and local UI assets into a portable HTML file.
 
-
-def build_viewer_html(replays: Sequence[dict], title: str = "Nightjar Replay Viewer") -> str:
-    """Build a complete offline viewer. Replay inputs are normalized at the boundary."""
+    Replay fields are preserved verbatim. Missing scientific metadata remains
+    unavailable in the UI rather than being inferred from another episode.
+    """
     if not replays:
         raise ValueError("at least one replay is required to generate viewer HTML")
-    normalized = [normalize_replay(replay) for replay in replays]
-    template = (_ASSETS / "viewer.html").read_text(encoding="utf-8")
-    css = (_ASSETS / "viewer.css").read_text(encoding="utf-8")
-    license_text = (_ASSETS / "vendor" / "THREE-LICENSE.txt").read_text(encoding="utf-8")
-    js = "/*\n" + license_text + "\n*/\n" + "\n".join(
-        (_ASSETS / name).read_text(encoding="utf-8") for name in
-        ("vendor/three-r128.min.js", "vendor/OrbitControls-r128.js", "scene3d.js", "viewer.js")
-    )
-    generated_at = datetime.now(timezone.utc).isoformat()
-    values = {"TITLE": html.escape(title, quote=True), "CSS": css,
-              "REPLAYS": _safe_json(normalized), "JS": js,
-              "GENERATED_AT": html.escape(generated_at, quote=True)}
-    # Replace template markers once; user labels can contain the same strings.
-    return re.sub(r"__(TITLE|CSS|REPLAYS|GENERATED_AT|JS)__", lambda m: values[m[1]], template)
+    if any(not isinstance(replay, dict) for replay in replays):
+        raise ValueError("each replay must be a JSON object")
+    if any(not isinstance(model, dict) for model in models):
+        raise ValueError("each model record must be a JSON object")
+    try:
+        payload = json.dumps(list(replays), sort_keys=True, allow_nan=False)
+        model_payload = json.dumps(list(models), sort_keys=True, allow_nan=False)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"replays must contain finite JSON values: {exc}") from exc
+    # JSON embedded in a script must not be able to close its HTML element.
+    payload = (payload.replace("<", "\\u003c").replace(">", "\\u003e")
+               .replace("&", "\\u0026").replace("\u2028", "\\u2028")
+               .replace("\u2029", "\\u2029"))
+    model_payload = (model_payload.replace("<", "\\u003c").replace(">", "\\u003e")
+                     .replace("&", "\\u0026").replace("\u2028", "\\u2028")
+                     .replace("\u2029", "\\u2029"))
+    replacements = {
+        "__TITLE__": html.escape(title, quote=True),
+        "__VERSION__": VIEWER_VERSION,
+        "__CSS__": (ASSET_DIRECTORY / "workspace.css").read_text(encoding="utf-8"),
+        "__JS__": (ASSET_DIRECTORY / "workspace.js").read_text(encoding="utf-8"),
+        "__PAYLOAD__": payload,
+        "__MODELS__": model_payload,
+    }
+    template = (ASSET_DIRECTORY / "workspace.html").read_text(encoding="utf-8")
+    # One pass keeps placeholder-like strings in data and titles unchanged.
+    return re.sub(r"__(?:TITLE|VERSION|CSS|JS|PAYLOAD|MODELS)__", lambda match: replacements[match[0]], template)
 
 
-def write_viewer_html(replays: Sequence[dict], output_path: Path, title: str | None = None) -> None:
-    """Generate and write the standalone viewer HTML file."""
-    if not replays:
-        raise ValueError("at least one replay is required to generate viewer HTML")
+def write_viewer_html(replays: Sequence[dict], output_path: Path, title: str | None = None, *, models: Sequence[dict] = ()) -> None:
+    """Write a portable workspace, creating the destination directory if needed."""
+    content = build_viewer_html(replays, title=title if title is not None else "Nightjar Research Workspace", models=models)
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    page_title = title or ((replays[0].get("scenario_id") or "Nightjar") + " · visor")
-    output_path.write_text(build_viewer_html(replays, title=page_title), encoding="utf-8")
+    output_path.write_text(content, encoding="utf-8")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("replays", nargs="+", type=Path, help="Paths to replay JSON files")
+    parser.add_argument("replays", nargs="*", type=Path, help="Recorded replay JSON files")
+    parser.add_argument("--demo", action="store_true", help="Replay three baselines on synthetic development case 00")
+    parser.add_argument("--scenario", type=Path, help="Run baseline comparisons on an explicit integrated synthetic scenario")
+    parser.add_argument("--checkpoint", type=Path, help="Inspect PPO weights and include their replay when running a scenario")
+    parser.add_argument("--model-config", type=Path, help="Explicit model configuration for a raw state dictionary")
     parser.add_argument("--output", type=Path, default=Path("runs/viewer.html"), help="Destination HTML file")
-    parser.add_argument("--title", type=str, default=None, help="Custom viewer page title")
+    parser.add_argument("--title", help="Custom document title")
     args = parser.parse_args()
-    replays = []
-    for replay_path in args.replays:
-        if not replay_path.exists():
-            parser.error(f"replay file not found: {replay_path}")
-        replays.append(json.loads(replay_path.read_text(encoding="utf-8")))
-    write_viewer_html(replays, args.output, title=args.title)
-    print(f"Generated Nightjar Replay Viewer at: {args.output}")
+    if sum((bool(args.demo), bool(args.scenario), bool(args.replays))) != 1:
+        parser.error("provide exactly one of replay files, --demo or --scenario")
+    if args.model_config and not args.checkpoint:
+        parser.error("--model-config requires --checkpoint")
+    try:
+        models = []
+        controller = controller_record = None
+        if args.checkpoint:
+            from .viewer_models import load_controller_checkpoint
+            config = json.loads(args.model_config.read_text()) if args.model_config else None
+            controller, controller_record = load_controller_checkpoint(args.checkpoint, config)
+            models.append(controller_record)
+        if args.demo or args.scenario:
+            from .discrimination_family import build_scenarios
+            from .integrated import run_integrated
+            from .viewer_models import physical_model_record, controller_replay
+
+            if args.demo:
+                development, _, _ = build_scenarios()
+                scenario = development[0]
+            else:
+                scenario = json.loads(args.scenario.read_text())
+            if not isinstance(scenario, dict) or scenario.get("schema_version") != "integrated-synthetic-0.1":
+                raise ValueError("--scenario requires an integrated-synthetic-0.1 JSON object")
+            replays = [run_integrated(scenario, policy) for policy in
+                       ("heuristic", "containment_heuristic", "no_intervention")]
+            physical = physical_model_record(scenario)
+            models.append(physical)
+            if controller is not None:
+                replays.insert(0, controller_replay(controller, controller_record, scenario))
+            for replay in replays:
+                replay["physical_model_id"] = physical["id"]
+                if args.demo:
+                    replay["workspace_split"] = "development"
+        else:
+            replays = [json.loads(path.read_text(encoding="utf-8")) for path in args.replays]
+        write_viewer_html(replays, args.output, title=args.title, models=models)
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        parser.error(str(exc))
+    print(f"Generated Nightjar Research Workspace at: {args.output}")
 
 
 if __name__ == "__main__":

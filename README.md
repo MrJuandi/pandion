@@ -92,7 +92,9 @@ python3 -m nightjar.geographic_ppo --smoke --scenarios-dir runs/geographic-famil
 # Offline PPO checks require the synthetic family generated above and explicit mode:
 python3 -m nightjar.geographic_ppo --smoke --synthetic --scenarios-dir runs/geographic-family-synthetic
 python3 -m nightjar.evaluate_reserved --split-version v2
-python3 -m nightjar.viewer runs/integrated-heuristic.json --output runs/viewer.html
+python3 -m nightjar.viewer --demo --output runs/viewer.html
+python3 -m nightjar.viewer runs/integrated-heuristic.json --output runs/heuristic-viewer.html
+python3 -m nightjar.viewer --scenario examples/synthetic_integrated.json --output runs/scenario-viewer.html
 python3 -m unittest discover -s tests -v
 ```
 
@@ -108,11 +110,20 @@ The example mixes GR1 (101), SH1 (141), and nonburnable (0) cells. It is a synth
 
 The same unit suite runs in GitHub Actions for pushes and pull requests. The `unit` job checks the standard-fuel path; `unit-rl` also installs CPU PyTorch and requires its import before running the suite. Tests that need a downloaded external source skip when the audited file is absent.
 
-`runs/` is ignored by Git. Omit `--output` to print a result to standard output for commands that accept it. The aircraft example exercises movement, a full-water drop, return, and refill. The fire examples produce first-arrival times and grid-cell affected area without intervention. The resolution command compares the FM1 assumptions on one physical domain at several cell sizes. Scenario contracts and limitations are in [ARCHITECTURE.md](docs/ARCHITECTURE.md) and [PHYSICAL_MODEL_V0.md](docs/PHYSICAL_MODEL_V0.md). The local browser replay tool (`nightjar.viewer`) generates a self-contained offline HTML5 viewer to audit fire arrival, delivered observations, flight path, and drop decisions interactively or compare multiple policies side-by-side.
+`runs/` is ignored by Git. Omit `--output` to print a result to standard output for commands that accept it. The aircraft example exercises movement, a full-water drop, return, and refill. The fire examples produce first-arrival times and grid-cell affected area without intervention. The resolution command compares the FM1 assumptions on one physical domain at several cell sizes. Scenario contracts and limitations are in [ARCHITECTURE.md](docs/ARCHITECTURE.md) and [PHYSICAL_MODEL_V0.md](docs/PHYSICAL_MODEL_V0.md). The local research workspace (`nightjar.viewer`) generates a self-contained offline HTML file. Open `runs/viewer.html` after the `--demo` command: it records three baselines on synthetic discrimination development case 00 without evaluating validation or reserved episodes. Separate Replay, Compare, Models and Records views provide playback, layer/cell inspection, candidate/reference maps, retrospective area curves, compatible final-metric deltas, model provenance, decision records, and JSON/PNG exports. Replay uses separate scenario/controller selectors, a large map with bottom playback, and adjacent telemetry/layers. Models show architecture and physical inputs first, with expandable provenance/configuration. Models and Records scroll vertically inside the desktop workspace, including keyboard navigation; narrow screens use document scrolling. Delivered observations remain distinct from retrospective truth; unavailable geographic arrival/provenance fields are explicitly labeled. See [INTERFACE_DESIGN.md](docs/INTERFACE_DESIGN.md) for sources and limits.
+
+To inspect an existing PPO checkpoint and add its actual deterministic development replay, use the RL dependency environment (see `requirements-rl.txt`):
+
+```sh
+python3 -m nightjar.viewer --demo --checkpoint runs/ppo-tactical-v2.pt --output runs/viewer.html
+```
+
+This requires an existing compatible checkpoint; it does not train or download one. With replay files instead of `--demo`, `--checkpoint` inspects the weights without rerunning those episodes. Raw state dictionaries additionally require `--model-config` pointing to JSON with explicit `grid_rows`, `grid_cols`, `recurrent` and `action_mode` (`tactical` or `spatial`); supplied tensor dimensions must match. The browser inspects records and architecture, while policy execution remains in Python. Physical model details are bound to the supplied synthetic scenario; this interface does not establish physical validation or controller superiority.
+
 
 The integrated example compares no intervention, a seeded valid random choice, and a deterministic downwind heuristic over the same synthetic scenario. At its 600 s horizon, the example gives 2.00 ha without intervention, 0.75 ha with the heuristic, and 1.30 ha mean over ten random-policy seeds. These figures depend on the assumed permanent one-cell water barrier and do not estimate real suppression effectiveness; see [EVALUATION.md](docs/EVALUATION.md).
 
-### Explore the research workspace
+### Explore the geographic 3D workspace
 
 Build the Spanish offline interface with real heights in the simulation and historical station conditions for Artesa:
 
@@ -127,7 +138,7 @@ OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 .venv/bin/python -m nightjar.workspace --sce
 
 Every output directory must be new or empty. The weather audit and original pilot are prepared with the commands in [PILOT_ENVIRONMENT.md](docs/PILOT_ENVIRONMENT.md). Omit both `--weather-audit` and `--pilot-scenario` to use clearly labeled synthetic constant weather with real heights. Acquisition uses IGN/CNIG terrain in Spain and Copernicus GLO-30 surface heights for France/Italy; it needs network access, `curl`, and optional Rasterio for the latter. The derived family records hashes, CRS, source and resolution and rejects missing heights. Its grid remains 100 m; source resolution is 25/30 m.
 
-Open `runs/environment-workspace/index.html` in a browser, or serve the folder locally (for example `python3 -m http.server 8000 --directory runs/environment-workspace`). The self-contained Spanish workspace follows the layout of the local FireLab viewer: a full-screen interactive Three.js scene, a header with scenario, policy, speed and playback controls, and an analysis sidebar. **Mapa 3D**, **Comparación**, **Condiciones** and **Datos y modelos** are separate views that preserve the selected scenario and elapsed time.
+Open `runs/environment-workspace/index.html` in a browser, or serve the folder locally (for example `python3 -m http.server 8000 --directory runs/environment-workspace`). This workspace uses the 3D viewer in `nightjar.viewer3d` (`python3 -m nightjar.viewer3d REPLAY.json --output runs/viewer3d.html` bundles individual replays); `nightjar.viewer` remains the research workstation with model inspection described above. The self-contained Spanish workspace follows the layout of the local FireLab viewer: a full-screen interactive Three.js scene, a header with scenario, policy, speed and playback controls, and an analysis sidebar. **Mapa 3D**, **Comparación**, **Condiciones** and **Datos y modelos** are separate views that preserve the selected scenario and elapsed time.
 
 The scene draws the DEM as a lit, shadowed mesh on a base with side walls and a 1 km reference floor that extends beyond the modelled grid, so recorded refill positions outside the crop remain visible. The terrain texture combines fuel, hillshade and hypsometric tint; **Color** switches to altitude or slope with a numeric key. At the selected time it shows burned cells as ash, the active front as glowing cells, delivered detections as dashed cell-union outlines, and drop-treated cells. The active front is derived from the arrival raster: reached cells with at least one burnable 4-neighbour not yet reached. **Estado** switches to simulator truth, the delivered observation only, or historical cartography. Equal-elevation contours, labels, a cell grid and an illustrative smoke layer can be toggled in **Simbología y capas**. The smoke is a visual effect and is not simulated.
 
@@ -164,7 +175,7 @@ NIGHTJAR_PYTHON=.venv/bin/python node tests/viewer_browser.cjs
 
 The browser check generates a deterministic five-replay fixture and covers the WebGL scene, live fire and aircraft state, height-datum invariance, camera zoom/reset/keyboard/orthographic/chase/orbit controls, layer and colour changes, the causal decision inspector, observation-only rendering, strict two-policy comparison with a synchronized camera, static cartography, playback, view navigation and deep links, the 390 px layout, and a forced WebGL-disabled fallback. It forces SwiftShader so it runs headless. These checks establish interface behavior, not physical or PPO performance; pixel comparisons are not cross-platform rendering guarantees.
 
-Replay files generated before geographic replay 0.2 may lack arrival rasters and recorded resolution. Regenerate those files; the viewer rejects ambiguous dimensions. The original `nightjar.viewer` CLI remains available for synthetic and geographic replay files.
+Replay files generated before geographic replay 0.2 may lack arrival rasters and recorded resolution. Regenerate those files; the viewer rejects ambiguous dimensions. `nightjar.viewer3d` also accepts individual synthetic and geographic replay files; `nightjar.viewer` remains the research workstation for synthetic replays and model descriptors.
 
 The scenario-family command writes eight fixed synthetic variants, a manifest, 96 full replays, and a per-run comparison report under ignored `runs/scenario-family/`. Four variants are marked development and four reserved. Four base configurations vary ignition, wind, and starting position; each is paired at 35 and 55 m provisional water radii. The reserved results are included in this diagnostic, so they are **not an untouched test** for a future controller selected after reading them. The heuristic returns the same affected area across all four base configurations at a given radius, suggesting these cases are too simple for a meaningful training comparison; see [EVALUATION.md](docs/EVALUATION.md) for the numbers and limits.
 

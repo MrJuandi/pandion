@@ -1,6 +1,6 @@
 # Viewer dependency
 
-The offline viewer embeds Three.js r128 (0.128.0) and its `OrbitControls` example, matching the rendering API used by the local FireLab reference viewer. The scene, terrain, aircraft and overlays are implemented separately in `../scene3d.js`; the interface is in `../viewer.js`.
+The offline viewer embeds Three.js r128 (0.128.0) and its `OrbitControls` example, matching the rendering API used by the local FireLab reference viewer. The scene, terrain, aircraft and overlays are implemented separately in `../scene3d.js`; the interface is in `../viewer3d.js` (module `nightjar.viewer3d`).
 
 - Upstream: https://github.com/mrdoob/three.js/tree/r128
 - Source file: https://raw.githubusercontent.com/mrdoob/three.js/r128/build/three.min.js

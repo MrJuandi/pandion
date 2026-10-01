@@ -15,7 +15,7 @@ from pathlib import Path
 from .geographic_ppo import load_geographic_split
 from .geographic_integrated import run_geographic_integrated
 from .pilot_terrain import load_terrain
-from .viewer import write_viewer_html
+from .viewer3d import write_viewer_html
 
 SCHEMA_VERSION = "nightjar-workspace-0.1"
 
