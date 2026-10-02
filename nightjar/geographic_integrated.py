@@ -25,7 +25,8 @@ from .environment import MOISTURE_KEYS, delivered_weather, edge_arrival, validat
 from .observation import build_reports, observe
 from .policies import candidate_cells, choose_order
 
-REPLAY_SCHEMA_VERSION = "nightjar-geographic-replay-0.3"
+REPLAY_SCHEMA_VERSION = "nightjar-geographic-replay-0.4"
+OBSERVATION_MODES = ("realtime", "scheduled")
 
 # 8-neighbor grid connectivity: (drow, dcol)
 NEIGHBORS = ((-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (-1, 1), (1, -1), (1, 1))
@@ -42,6 +43,7 @@ def run_geographic_integrated(
     policy: str,
     *,
     policy_seed: int | None = None,
+    observation_mode: str | None = None,
     _actions: list[dict] | None = None,
     _stop_after_steps: int | None = None,
 ) -> dict[str, Any]:
@@ -51,11 +53,17 @@ def run_geographic_integrated(
     - scenario: dict matching 'nightjar-geographic-scenario-0.1/0.2' or 'nightjar-cems-scenario-0.1'.
     - policy: 'no_intervention', 'random_valid', 'heuristic', or 'containment_heuristic'.
     - policy_seed: optional integer seed for randomized policies.
+    - observation_mode: 'realtime' (default; full grid and current weather at
+      every decision, no delivery delay) or 'scheduled' (legacy delayed
+      observation_schedule). Falls back to scenario['observation_mode'].
     - _actions: optional pre-scripted orders list for testing.
     - _stop_after_steps: optional step cutoff for smoke testing.
     """
     if policy not in {"no_intervention", "random_valid", "heuristic", "containment_heuristic"}:
         raise ValueError(f"Unknown policy: {policy}")
+    observation_mode = observation_mode or scenario.get("observation_mode", "realtime")
+    if observation_mode not in OBSERVATION_MODES:
+        raise ValueError(f"Unknown observation_mode: {observation_mode}")
 
     # Extract grid and fire parameters
     grid_meta = scenario["grid"]
@@ -155,6 +163,46 @@ def run_geographic_integrated(
         rate_cache[key] = rate
         return rate
 
+    def segment_index(time_s: float) -> int:
+        for index, segment in enumerate(physical_segments):
+            if time_s < float(segment["end_s"]):
+                return index
+        return len(physical_segments) - 1
+
+    residence_cache: dict[tuple[int, int], float] = {}
+
+    def anderson_residence_s(code: int, index: int) -> float:
+        """Anderson (1969) flaming residence t_r = 384 / sigma minutes, sigma in 1/ft.
+
+        sigma is the Rothermel characteristic surface-area-to-volume ratio,
+        weighted by the moisturized dead/live and size-class fractions.
+        """
+        key = (code, index)
+        if key not in residence_cache:
+            moisture_values = tuple(float(physical_segments[index]["moisture"][k]) for k in MOISTURE_KEYS)
+            model = fuel_models.moisturize(fuel_models.get_fuel_model(code), moisture_values)
+            sigma = sum(
+                f_i * sum(f_ij * s for f_ij, s in zip(model["f_ij"][lo:hi], model["sigma"][lo:hi]))
+                for f_i, (lo, hi) in zip(model["f_i"], ((0, 4), (4, 6)))
+            )
+            residence_cache[key] = 384.0 / sigma * 60.0 if sigma > 0 else 0.0
+        return residence_cache[key]
+
+    def burning_duration_s(r: int, c: int, ignition_s: float) -> float:
+        """Time a cell stays actively burning after the front reaches it.
+
+        Front crossing time (cell size / local head-fire rate) plus Anderson
+        particle residence. Cells are tens of metres wide, so the crossing term
+        dominates; residence alone (seconds) would make burning cells invisible
+        at decision cadence. Uses the forcing interval active at ignition.
+        """
+        index = segment_index(ignition_s)
+        behavior = behaviors(index)[r][c]
+        if behavior is None:
+            return 0.0
+        head_rate_m_s = max(0.001, float(behavior["max_spread_rate"]) / 60.0)
+        return cell_size / head_rate_m_s + anderson_residence_s(int(fuel_grid[r][c]), index)
+
     def is_burnable(r: int, c: int) -> bool:
         return 0 <= r < rows and 0 <= c < cols and int(fuel_grid[r][c]) > 0 and cell_behavior[r][c] is not None
 
@@ -187,6 +235,7 @@ def run_geographic_integrated(
 
     # State containers
     arrival: list[list[float | None]] = [[None] * cols for _ in range(rows)]
+    burnout: list[list[float | None]] = [[None] * cols for _ in range(rows)]
     barrier = [[False] * cols for _ in range(rows)]
     best = [[float("inf")] * cols for _ in range(rows)]
     queue: list[tuple[float, int, int]] = []
@@ -197,6 +246,7 @@ def run_geographic_integrated(
         for c in range(cols):
             if init_mask[r][c]:
                 arrival[r][c] = 0.0
+                burnout[r][c] = 0.0
                 best[r][c] = 0.0
                 initial_burned_count += 1
                 if is_burnable(r, c):
@@ -209,6 +259,7 @@ def run_geographic_integrated(
             if cur_time != best[r][c] or barrier[r][c] or not is_burnable(r, c):
                 continue
             arrival[r][c] = cur_time
+            burnout[r][c] = cur_time + burning_duration_s(r, c, cur_time)
 
             for dr, dc in NEIGHBORS:
                 nr, nc = r + dr, c + dc
@@ -316,17 +367,52 @@ def run_geographic_integrated(
             if r not in delivered_reports:
                 delivered_reports.append(r)
 
+    def realtime_fire_view(time_s: float) -> dict:
+        """Full-grid fire state at time_s: perfect, instantaneous observation."""
+        cells = []
+        for r in range(rows):
+            line = []
+            for c in range(cols):
+                reached = arrival[r][c] is not None and arrival[r][c] <= time_s + 1e-9
+                if not reached:
+                    state = "unburned"
+                elif burnout[r][c] is not None and burnout[r][c] > time_s + 1e-9:
+                    state = "burning"
+                else:
+                    state = "burned"
+                line.append({
+                    "fire_detected": reached,
+                    "fire_state": state,
+                    "arrival_time_s": round(arrival[r][c], 6) if reached else None,
+                    "observed_at_s": time_s,
+                    "age_s": 0.0,
+                    "source_id": "realtime",
+                })
+            cells.append(line)
+        return {"time_s": time_s, "cells": cells}
+
     pending_observation = None
 
     # Main decision and event progression loop
     while cur_sim_time < horizon_s:
-        sync_observations(cur_sim_time)
         advance_fire(cur_sim_time)
 
-        # Build current observation for the policy (STRICT ZERO-LEAKAGE)
-        fire_view = observe(delivered_reports, cur_sim_time, rows, cols)
-        weather_report = delivered_weather(forcing, cur_sim_time)
-        reported_wind = weather_report["midflame_wind_to_m_s"] if weather_report else ([0.0, 0.0] if forcing else list(wind))
+        # Build current observation for the policy. Real-time mode exposes the
+        # present state only; scheduled mode exposes delivered reports only.
+        # Neither mode exposes future arrivals or future weather.
+        if observation_mode == "realtime":
+            fire_view = realtime_fire_view(cur_sim_time)
+            weather_report = deepcopy(forcing[segment_index(cur_sim_time)]) if forcing else None
+            reported_wind = weather_report["midflame_wind_to_m_s"] if weather_report else list(wind)
+            weather_status = "realtime_station_interval" if weather_report else "modeled_constant"
+            fuel_moisture = deepcopy(physical_segments[segment_index(cur_sim_time)]["moisture"])
+        else:
+            sync_observations(cur_sim_time)
+            fire_view = observe(delivered_reports, cur_sim_time, rows, cols)
+            weather_report = delivered_weather(forcing, cur_sim_time)
+            reported_wind = weather_report["midflame_wind_to_m_s"] if weather_report else ([0.0, 0.0] if forcing else list(wind))
+            weather_status = "delivered_station_interval" if weather_report else ("not_yet_delivered" if forcing else "modeled_constant")
+            fuel_moisture = deepcopy(weather_report["moisture"]) if weather_report else (None if forcing else deepcopy(moisture))
         current_obs = {
             "time_s": cur_sim_time,
             "fire": fire_view,
@@ -342,7 +428,9 @@ def run_geographic_integrated(
             "water_source_m": [refill_x, refill_y],
             "midflame_wind_to_m_s": list(reported_wind),
             "environment_weather": weather_report,
-            "weather_status": "delivered_station_interval" if weather_report else ("not_yet_delivered" if forcing else "modeled_constant"),
+            "weather_status": weather_status,
+            "fuel_moisture": fuel_moisture,
+            "observation_mode": observation_mode,
             "cell_size_m": cell_size,
             "elevation_m": deepcopy(elevation_input) if elevation_input is not None else deepcopy(scenario.get("elevation_m", [[0.0] * cols for _ in range(rows)])),
             "known_treated_cells": known_treated_cells,
@@ -432,7 +520,8 @@ def run_geographic_integrated(
     if _stop_after_steps is None:
         # Final fire advancement to horizon only if running full episode
         advance_fire(horizon_s)
-        sync_observations(horizon_s)
+        if observation_mode == "scheduled":
+            sync_observations(horizon_s)
         eval_time = horizon_s
     else:
         eval_time = cur_sim_time
@@ -455,7 +544,10 @@ def run_geographic_integrated(
         "crs": deepcopy(scenario.get("crs", "LOCAL_METERS")),
         "origin_utm": [origin_x, origin_y],
         "provenance": deepcopy(scenario.get("provenance", {})),
+        "observation_mode": observation_mode,
         "arrival_time_s": [[round(v, 6) if v is not None else None for v in line] for line in arrival],
+        "burnout_time_s": [[round(v, 6) if v is not None else None for v in line] for line in burnout],
+        "burning_model": "front crossing (cell_size / head-fire rate) + Anderson 1969 residence 384/sigma min; initial perimeter cells treated as ignited at t=0",
         "fuel_grid": deepcopy(fuel_grid),
         "water_mask": deepcopy(fire_dict.get("water_mask", [[False] * cols for _ in range(rows)])),
         "elevation_m": deepcopy(elevation),
@@ -495,11 +587,13 @@ def main() -> None:
     parser.add_argument("scenario", type=Path, help="Path to geographic scenario JSON")
     parser.add_argument("--policy", choices=("no_intervention", "random_valid", "heuristic", "containment_heuristic"), default="heuristic")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--observation-mode", choices=OBSERVATION_MODES)
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
 
     scenario_data = json.loads(args.scenario.read_text())
-    result = run_geographic_integrated(scenario_data, policy=args.policy, policy_seed=args.seed)
+    result = run_geographic_integrated(scenario_data, policy=args.policy, policy_seed=args.seed,
+                                       observation_mode=args.observation_mode)
 
     payload = json.dumps(result, indent=2)
     if args.output:
