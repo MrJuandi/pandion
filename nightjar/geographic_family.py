@@ -28,6 +28,8 @@ from .cems_catalog import (
     ACTIVATIONS,
     build_cems_scenario,
     fetch_cems_package,
+    incidents_for_split,
+    raw_package_name,
     universal_clc_to_scott_burgan,
 )
 from .geodesy import epsg_for_utm_zone, wgs84_to_utm
@@ -136,10 +138,11 @@ def generate_geographic_scenario(
     window_rows: int = 40,
     window_cols: int = 40,
     horizon_s: float = 3600.0,
+    seed_offset: int = 0,
 ) -> dict[str, Any]:
     """Generate a single deterministic decision scenario from a CEMS base scenario."""
     base_seed = SPLIT_BASE_SEEDS.get(split, 400000)
-    seed = base_seed + index
+    seed = base_seed + seed_offset + index
     rng = random.Random(seed)
 
     # 1. Slice tactical window around burn perimeter
@@ -330,14 +333,24 @@ def build_geographic_family(
     num_res: int = 8,
     *,
     synthetic: bool = False,
+    extra_development: Sequence[str] = (),
 ) -> dict[str, Any]:
-    """Build an incident-separated family; fixtures require explicit synthetic=True."""
+    """Build an incident-separated family; fixtures require explicit synthetic=True.
+
+    ``extra_development`` names additional registered development incidents
+    whose bases must be supplied; each contributes ``num_dev`` scenarios.
+    Validation and reserved incidents are fixed.
+    """
     if min(num_dev, num_val, num_res) <= 0:
         raise ValueError("num_dev, num_val, and num_res must all be positive")
     if num_res < 2:
         raise ValueError("num_res must be at least 2 to include EMSR592 and EMSR600")
 
-    required = ("EMSR578", "EMSR590", "EMSR592", "EMSR600")
+    allowed_extra = set(incidents_for_split("development")) - {"EMSR578"}
+    unknown_extra = set(extra_development) - allowed_extra
+    if unknown_extra:
+        raise ValueError("Not registered development incidents: " + ", ".join(sorted(unknown_extra)))
+    required = ("EMSR578", "EMSR590", "EMSR592", "EMSR600") + tuple(extra_development)
     bases = dict(cems_scenarios or {})
     for key, value in bases.items():
         if key not in required:
@@ -392,6 +405,10 @@ def build_geographic_family(
     dev_base, val_base = bases["EMSR578"], bases["EMSR590"]
     reserved_bases = [bases["EMSR592"], bases["EMSR600"]]
     dev_scenarios = [generate_geographic_scenario(dev_base, i, "development") for i in range(num_dev)]
+    for position, activation_id in enumerate(extra_development, start=1):
+        # Distinct seeds per incident so weather/cadence draws differ between maps.
+        dev_scenarios.extend(generate_geographic_scenario(bases[activation_id], i, "development",
+                                                          seed_offset=1000 * position) for i in range(num_dev))
     val_scenarios = [generate_geographic_scenario(val_base, i, "validation") for i in range(num_val)]
     res_scenarios = [
         generate_geographic_scenario(reserved_bases[i % 2], i, "reserved") for i in range(num_res)
@@ -448,13 +465,16 @@ def main() -> None:
     parser.add_argument("--num-dev", type=int, default=8)
     parser.add_argument("--num-val", type=int, default=8)
     parser.add_argument("--num-res", type=int, default=8)
+    parser.add_argument("--extra-development", nargs="*", default=[],
+                        help="Additional registered development incidents (or 'all'); packages must be cached in --raw-dir")
     args = parser.parse_args()
+    extra = [a for a in incidents_for_split("development") if a != "EMSR578"] if args.extra_development == ["all"] else args.extra_development
 
     try:
         cems_scenarios = {}
         if not args.synthetic:
-            zip_paths = {activation_id: args.raw_dir / f"{activation_id.lower()}_del.zip"
-                         for activation_id in ("EMSR578", "EMSR590", "EMSR592", "EMSR600")}
+            zip_paths = {activation_id: args.raw_dir / raw_package_name(activation_id)
+                         for activation_id in ("EMSR578", "EMSR590", "EMSR592", "EMSR600", *extra)}
             missing = [str(path) for path in zip_paths.values() if not path.is_file()]
             if missing:
                 raise FileNotFoundError("Missing required local CEMS products: " + ", ".join(missing) +
@@ -467,6 +487,7 @@ def main() -> None:
             num_val=args.num_val,
             num_res=args.num_res,
             synthetic=args.synthetic,
+            extra_development=extra,
         )
         if args.output_dir.exists() and any(args.output_dir.iterdir()):
             raise FileExistsError(f"Refusing to mix with existing family data in {args.output_dir}; choose a new empty directory.")

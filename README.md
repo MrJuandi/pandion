@@ -150,6 +150,19 @@ OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 .venv/bin/python -m nightjar.workspace --sce
 
 Keep weights with their matching report. Manifest-bound development hashes must match; old flat-terrain checkpoints cannot be represented as trained on the new family. Weights do not embed report identity or optimizer state. The optional `--terrain` + `--terrain-scenario` display overlay remains for legacy flat episodes and full pilot cartography; it is unnecessary for the environment family. The full pilot is historical cartography without an episode. Training is development-only and exploratory; the number of updates does not demonstrate skill or geographic generalization.
 
+### Initial-attack scenarios and additional development incidents
+
+Small ignitions inside the CEMS burned area replace the delineation as the initial state (D-56), and five more Spanish delineation products extend development only (D-57). Validation and reserved incidents are unchanged.
+
+```sh
+# Requires the five additional verified packages in data/raw/cems (emsr583_del.zip, emsr625-aoi01_del.zip, emsr625-aoi02_del.zip, emsr602-aoi02_del.zip, emsr602-aoi04_del.zip).
+.venv/bin/python -m nightjar.geographic_family --raw-dir data/raw/cems --output-dir runs/geographic-family-expanded-20261002 --extra-development all
+.venv/bin/python -m nightjar.terrain_acquire --scenarios-dir runs/geographic-family-expanded-20261002 --output-dir data/raw/geographic-environment-new-incidents-20261002 --activations EMSR583 EMSR625_AOI01 EMSR625_AOI02 EMSR602_AOI02 EMSR602_AOI04
+# Combine with the earlier four terrain files and sources.json entries into data/raw/geographic-environment-expanded-20261002, then:
+.venv/bin/python -m nightjar.environment_family --scenarios-dir runs/geographic-family-expanded-20261002 --terrain-dir data/raw/geographic-environment-expanded-20261002 --weather-audit runs/pilot-environment-20260930/weather.json --pilot-scenario runs/emsr578-pilot-scenario.json --output-dir runs/geographic-environment-family-expanded-20261002
+.venv/bin/python -m nightjar.ignition_family --scenarios-dir runs/geographic-environment-family-expanded-20261002 --output-dir runs/geographic-ignition-family-expanded-20261002 --development-ignitions 4
+```
+
 Checks for the workspace and presentation adapters:
 
 ```sh

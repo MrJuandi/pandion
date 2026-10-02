@@ -216,6 +216,81 @@ ACTIVATIONS: dict[str, dict[str, Any]] = {
 }
 
 
+
+def _development_incident(key: str, cems_activation: str, aoi: str, name: str, province: str, region: str,
+                          utm_zone: int, bounds: tuple[float, float, float, float], delivered_at_utc: str,
+                          sha256_digest: str, burnt_area_ha: float) -> dict[str, Any]:
+    """Registry entry for an additional Spanish development incident (one AOI of a CEMS activation)."""
+    return {
+        "activation_id": key,
+        "cems_activation": cems_activation,
+        "aoi": aoi,
+        "name": name,
+        "province": province,
+        "region": region,
+        "country": "Spain",
+        "utm_zone": utm_zone,
+        "epsg": f"EPSG:{25800 + utm_zone}",
+        "aoi_bounds_wgs84": bounds,
+        "default_split": "development",
+        "source_page": f"https://mapping.emergency.copernicus.eu/activations/{cems_activation}/",
+        "products": {
+            "del": {
+                "stage": "del",
+                "product_code": "PRODUCT",
+                # Image acquisition time is printed only on the map PDF, which was not retrieved.
+                "acquired_at_utc": None,
+                "delivered_at_utc": delivered_at_utc,
+                "sha256": sha256_digest,
+                "reported_area_ha": burnt_area_ha,
+                "vector_filename": f"{cems_activation}_{aoi}_DEL_PRODUCT_r1_RTP01_v1_vector.zip",
+            },
+        },
+    }
+
+
+# Additional development-only incidents (D-57). Burnt area is the sum of the
+# observedEventA ``area`` attributes; delivery times are from the activation page.
+ACTIVATIONS.update({
+    "EMSR583": _development_incident(
+        "EMSR583", "EMSR583", "AOI01", "Castejón de Tornos", "Teruel", "Aragón", 30,
+        (-1.6, 40.8, -1.1, 41.3), "2022-06-23T14:48:38Z",
+        "59c39487e614c163d9572a827646b1e6e17f959d1933c9938173c31e57e94b06", 1496.74),
+    "EMSR625_AOI01": _development_incident(
+        "EMSR625_AOI01", "EMSR625", "AOI01", "Bejís", "Castellón", "Comunitat Valenciana", 30,
+        (-1.0, 39.6, -0.4, 40.2), "2022-08-19T18:11:46Z",
+        "65faa95e0aca6a252584b5ca5b18514ee18607176aeb549a51d00acb69d5fca3", 17525.87),
+    "EMSR625_AOI02": _development_incident(
+        "EMSR625_AOI02", "EMSR625", "AOI02", "Vall d'Ebo", "Alicante", "Comunitat Valenciana", 30,
+        (-0.5, 38.5, 0.2, 39.0), "2022-08-19T17:08:55Z",
+        "b19b8ec8b8bc6cec35933a7e2f90df6fb337cd96af3808925c6b8140161e6af2", 9332.3),
+    "EMSR602_AOI02": _development_incident(
+        "EMSR602_AOI02", "EMSR602", "AOI02", "San Esteban de Valdueza", "León", "Castilla y León", 29,
+        (-6.9, 42.2, -6.3, 42.7), "2022-07-22T00:00:00Z",
+        "ccd2e91ae04605336be7935dae6d583aeefa9d095a6345b214484d13c617f5cb", 1404.7),
+    "EMSR602_AOI04": _development_incident(
+        "EMSR602_AOI04", "EMSR602", "AOI04", "Cebreros", "Ávila", "Castilla y León", 30,
+        (-4.7, 40.3, -4.2, 40.7), "2022-07-22T00:00:00Z",
+        "7911b3c74855b1148e443945c792abe21314471ae3331297a05dfc9210237e1c", 4096.7),
+})
+
+FIXED_SPLIT_INCIDENTS = {"validation": ("EMSR590",), "reserved": ("EMSR592", "EMSR600")}
+
+
+def incidents_for_split(split: str) -> tuple[str, ...]:
+    """Registered incidents designated for a split; validation and reserved stay fixed."""
+    if split in FIXED_SPLIT_INCIDENTS:
+        return FIXED_SPLIT_INCIDENTS[split]
+    if split != "development":
+        raise ValueError(f"Unknown split: {split}")
+    return tuple(key for key, info in ACTIVATIONS.items() if info["default_split"] == "development")
+
+
+def raw_package_name(activation_id: str, stage: str = "del") -> str:
+    """Local file name for a cached package, e.g. ``emsr578_del.zip`` or ``emsr625-aoi01_del.zip``."""
+    return f"{activation_id.lower().replace('_', '-')}_{stage}.zip"
+
+
 def cems_product_url(activation_id: str, stage: str = "del") -> str:
     """Return the official download URL for a CEMS vector package."""
     activation = ACTIVATIONS.get(activation_id.upper())
@@ -224,7 +299,8 @@ def cems_product_url(activation_id: str, stage: str = "del") -> str:
     prod = activation["products"].get(stage)
     if not prod:
         raise ValueError(f"Unknown stage '{stage}' for activation {activation_id}")
-    return BASE_URL_TEMPLATE.format(activation=activation_id.upper()) + prod["vector_filename"]
+    folder = activation.get("cems_activation", activation_id.upper())
+    return BASE_URL_TEMPLATE.format(activation=folder) + prod["vector_filename"]
 
 
 def fetch_cems_package(activation_id: str, stage: str, output_path: Path) -> Path:
