@@ -18,7 +18,7 @@ from typing import Any
 from .aircraft import CAPACITY_L
 from .geographic_benchmark import run_geographic_benchmark
 from .geographic_family import canonical_hash
-from .cems_catalog import ACTIVATIONS
+from .cems_catalog import ACTIVATIONS, incidents_for_split
 from .geographic_training_env import GeographicTrainingEnv
 from .model import (
     HAS_TORCH,
@@ -76,8 +76,7 @@ def load_geographic_split(
     expected = {entry["scenario_id"]: entry for entry in split_entries}
     if len(expected) != len(split_entries):
         raise ValueError(f"Duplicate scenario IDs in manifest split '{split}': {manifest_path}")
-    designated = {"development": {"EMSR578"}, "validation": {"EMSR590"},
-                  "reserved": {"EMSR592", "EMSR600"}}[split]
+    designated = set(incidents_for_split(split))
     scenarios = []
     seen_ids = set()
     for path in paths:

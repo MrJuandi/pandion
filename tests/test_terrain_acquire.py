@@ -38,4 +38,19 @@ class TerrainAcquireTests(unittest.TestCase):
                 with self.assertRaises(ValueError):acquire_terrain(Path('unused'),out)
             self.assertFalse((out/'sources.json').exists())
 
+    def test_activation_filter_acquires_only_named_spanish_incidents(self):
+        extra={'activation_id':'EMSR602_AOI02','crs':{'code':'EPSG:25829'},
+               'grid':{'rows':2,'cols':2,'cell_size_m':100,'origin_utm_easting_m':700000.0,'origin_utm_northing_m':4700000.0}}
+        def fetch(command,check):
+            self.assertIn('crs=EPSG%3A25829',command[-3])
+            Path(command[-1]).write_text('ncols 2\nnrows 2\nxllcorner 700000\nyllcorner 4700000\ncellsize 100\n10 20\n0 30\n')
+        with tempfile.TemporaryDirectory() as temporary:
+            out=Path(temporary)/'dem'
+            loader=lambda split,*args:[self.scenario(),extra] if split=='development' else []
+            with patch('nightjar.terrain_acquire.load_geographic_split',side_effect=loader), patch('nightjar.terrain_acquire.subprocess.run',side_effect=fetch):
+                sources=acquire_terrain(Path('unused'),out,['EMSR602_AOI02'])
+                self.assertEqual(set(sources),{'EMSR602_AOI02'})
+                self.assertTrue((out/'emsr602-aoi02.asc').exists())
+                with self.assertRaises(ValueError):acquire_terrain(Path('unused'),Path(temporary)/'other',['EMSR999'])
+
 if __name__=='__main__':unittest.main()
