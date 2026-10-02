@@ -135,6 +135,12 @@ Pre-fire Sentinel-2 base images for the planned image-based policy input (D-50) 
 
 It needs network access and Rasterio (`requirements-terrain.txt`); Pillow is optional and only writes north-up previews. See [ENVIRONMENT_INTEGRATION.md](docs/ENVIRONMENT_INTEGRATION.md#pre-fire-sentinel-2-base-imagery-d-50) for scene screening, compositing and limits.
 
+Train the D-49 image policy (Sentinel-2 view plus per-cell layers and a global vector, D-52) on the same development split; `--action-mode spatial` gives one drop action per cell and `--ros` adds the Rothermel rate-of-spread channel:
+
+```sh
+OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 .venv/bin/python -m nightjar.geographic_ppo --smoke --seed 42 --scenarios-dir runs/geographic-environment-family-20261001 --input-mode image --imagery-dir data/raw/geographic-imagery-s2
+```
+
 Open `runs/environment-workspace/index.html` in a browser, or serve the folder locally (for example `python3 -m http.server 8000 --directory runs/environment-workspace`). This workspace uses the 3D viewer in `nightjar.viewer` (`python3 -m nightjar.viewer REPLAY.json --output runs/viewer.html` bundles individual replays). The self-contained Spanish workspace follows the layout of the local FireLab viewer: a full-screen interactive Three.js scene, a header with scenario, policy, speed and playback controls, and an analysis sidebar. **Mapa 3D**, **Comparación**, **Condiciones** and **Datos y modelos** are separate views that preserve the selected scenario and elapsed time.
 
 The scene draws the DEM as a lit, shadowed mesh on a base with side walls and a 1 km reference floor that extends beyond the modelled grid, so recorded refill positions outside the crop remain visible. The terrain texture combines fuel, hillshade and hypsometric tint; **Color** switches to altitude or slope with a numeric key. At the selected time it shows burned cells as ash, the active front as glowing cells, delivered detections as dashed cell-union outlines, and drop-treated cells. The active front is derived from the arrival raster: reached cells with at least one burnable 4-neighbour not yet reached. **Estado** switches to simulator truth, the delivered observation only, or historical cartography. Equal-elevation contours, labels, a cell grid and an illustrative smoke layer can be toggled in **Simbología y capas**. The smoke is a visual effect and is not simulated.
