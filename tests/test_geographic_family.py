@@ -136,6 +136,20 @@ class TestGeographicFamily(unittest.TestCase):
                         synthetic=synthetic,
                     )
 
+    def test_extra_development_incidents_extend_only_development(self):
+        family = build_geographic_family(num_dev=2, num_val=1, num_res=2, synthetic=True,
+                                         extra_development=("EMSR583", "EMSR625_AOI01"))
+        development = family["scenarios"]["development"]
+        self.assertEqual([s["activation_id"] for s in development],
+                         ["EMSR578"] * 2 + ["EMSR583"] * 2 + ["EMSR625_AOI01"] * 2)
+        self.assertEqual(len({s["seed"] for s in development}), 6)
+        self.assertEqual(family["manifest"]["incidents_by_split"]["validation"], ["EMSR590"])
+        baseline = build_geographic_family(num_dev=2, num_val=1, num_res=2, synthetic=True)
+        self.assertEqual([s["scenario_hash"] for s in development[:2]],
+                         [s["scenario_hash"] for s in baseline["scenarios"]["development"]])
+        with self.assertRaisesRegex(ValueError, "Not registered development incidents"):
+            build_geographic_family(synthetic=True, extra_development=("EMSR590",))
+
     def test_synthetic_bases_reject_real_source_zip_provenance(self):
         base = build_synthetic_cems_fixture("EMSR578", utm_zone=31)
         base["provenance"]["source_zip_sha256"] = "a" * 64
