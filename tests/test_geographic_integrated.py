@@ -142,6 +142,30 @@ class TestGeographicIntegrated(unittest.TestCase):
                     # Crossing time alone exceeds Anderson residence (seconds).
                     self.assertGreater(burnout - arrival, 1.0)
 
+    def test_initial_perimeter_interior_is_burned_and_edge_is_burning(self):
+        result = run_geographic_integrated(self.scenario, policy="no_intervention", _stop_after_steps=1)
+        cells = result["pending_observation"]["fire"]["cells"]
+        mask = self.scenario["fire"]["burn_mask"]
+        fuel = self.scenario["fire"]["fuel_grid"]
+        rows, cols = len(mask), len(mask[0])
+
+        def burnable(code):
+            return int(code) > 0 and not 91 <= int(code) <= 99
+
+        interior = edge = 0
+        for r in range(rows):
+            for c in range(cols):
+                if not mask[r][c] or not burnable(fuel[r][c]):
+                    continue
+                on_front = any(0 <= r + dr < rows and 0 <= c + dc < cols and burnable(fuel[r + dr][c + dc])
+                               and not mask[r + dr][c + dc]
+                               for dr in (-1, 0, 1) for dc in (-1, 0, 1) if dr or dc)
+                expected = "burning" if on_front else "burned"
+                self.assertEqual(cells[r][c]["fire_state"], expected, (r, c))
+                edge += on_front
+                interior += not on_front
+        self.assertGreater(edge, 0)
+
     def test_future_fire_cannot_change_realtime_observation(self):
         first = run_geographic_integrated(self.scenario, policy="no_intervention", _stop_after_steps=5)
         later = run_geographic_integrated(self.scenario, policy="no_intervention", _stop_after_steps=20)
