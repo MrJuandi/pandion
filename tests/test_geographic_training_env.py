@@ -6,6 +6,7 @@ from nightjar.geographic_family import (
     build_synthetic_cems_fixture,
     generate_geographic_scenario,
 )
+from nightjar.geographic_integrated import geographic_episode, run_geographic_integrated
 from nightjar.geographic_training_env import GeographicTrainingEnv
 
 
@@ -63,6 +64,39 @@ class TestGeographicTrainingEnv(unittest.TestCase):
     def test_reset_seed_mismatch_raises_value_error(self):
         with self.assertRaises(ValueError):
             self.env.reset(seed=99999999)
+
+    def test_incremental_steps_match_prefix_replays(self):
+        """Persistent stepping equals replaying the action prefix from scratch."""
+        import random
+        rng = random.Random(5)
+        obs = self.env.reset()
+        actions, done, area = [], False, None
+        while not done:
+            action = rng.choice(self.env.action_mask)
+            actions.append(action)
+            obs, reward, done, _ = self.env.step(action)
+            prefix = run_geographic_integrated(self.scenario, "heuristic", _actions=actions,
+                                               _stop_after_steps=len(actions), _record_observations=False)
+            if not done:
+                self.assertEqual(obs, prefix["pending_observation"])
+            if area is not None:
+                drops = prefix["drops"][-1]["treated_cells_count"] if actions[-1]["type"] == "DROP" else 0
+                self.assertAlmostEqual(reward, -(prefix["affected_area_ha"] - area) + 0.25 * drops, places=9)
+            area = prefix["affected_area_ha"]
+        self.assertEqual(self.env.replay, prefix)
+
+    def test_returned_observations_are_independent_copies(self):
+        obs = self.env.reset()
+        obs["fire"]["cells"][0][0]["fire_state"] = "tampered"
+        obs["known_treated_cells"].append([0, 0])
+        self.assertNotEqual(self.env._observation["fire"]["cells"][0][0]["fire_state"], "tampered")
+        self.assertEqual(self.env._observation["known_treated_cells"], [])
+
+    def test_full_episodes_cannot_stop_early(self):
+        episode = geographic_episode(self.scenario, "heuristic")
+        next(episode)
+        with self.assertRaises(ValueError):
+            episode.send(None)
 
 
 if __name__ == "__main__":
