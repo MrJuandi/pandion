@@ -66,23 +66,34 @@ class GeographicInputTensorizer:
     BASE_CELL_CHANNELS = 3 + len(FUEL_FAMILIES) + 2
     NUM_VECTOR_FEATURES = 2 + 3 + len(MOISTURE_KEYS) + 4
 
-    def __init__(self, scenario: dict, base_image: np.ndarray, *, include_ros: bool = False) -> None:
+    FIRE_CHANNELS = 3  # burning, burned, time since front arrival (ablation without image)
+
+    def __init__(self, scenario: dict, base_image: np.ndarray | None, *, include_ros: bool = False,
+                 explicit_fire: bool = False) -> None:
+        """``base_image=None`` with ``explicit_fire=True`` is the no-image ablation:
+        fire state enters as per-cell channels and ``extract`` returns (cells, vector)."""
         grid = scenario["grid"]
         self.rows, self.cols = int(grid["rows"]), int(grid["cols"])
         self.cell_size_m = float(grid["cell_size_m"])
         fire = scenario.get("fire", scenario)
         self.horizon_s = float(fire.get("horizon_s", scenario.get("horizon_s", 3600.0)))
         self.capacity_l = float(scenario.get("aircraft", {}).get("tank_capacity_l", DEFAULT_CAPACITY_L))
-        if base_image.ndim != 3 or base_image.shape[2] != 3 or base_image.dtype != np.uint8:
-            raise ValueError("base image must be uint8 [H, W, 3]")
-        if base_image.shape[0] % self.rows or base_image.shape[1] % self.cols:
-            raise ValueError("base image size must be a multiple of the grid")
-        self.px_per_cell = base_image.shape[0] // self.rows
-        if base_image.shape[:2] != (self.rows * self.px_per_cell, self.cols * self.px_per_cell):
-            raise ValueError("base image must use the same pixels per cell on both axes")
+        if base_image is None and not explicit_fire:
+            raise ValueError("without a base image, fire state must enter as explicit channels")
+        self.px_per_cell = 0
+        if base_image is not None:
+            if base_image.ndim != 3 or base_image.shape[2] != 3 or base_image.dtype != np.uint8:
+                raise ValueError("base image must be uint8 [H, W, 3]")
+            if base_image.shape[0] % self.rows or base_image.shape[1] % self.cols:
+                raise ValueError("base image size must be a multiple of the grid")
+            self.px_per_cell = base_image.shape[0] // self.rows
+            if base_image.shape[:2] != (self.rows * self.px_per_cell, self.cols * self.px_per_cell):
+                raise ValueError("base image must use the same pixels per cell on both axes")
         self.base_image = base_image
         self.include_ros = include_ros
-        self.num_cell_channels = self.BASE_CELL_CHANNELS + (1 if include_ros else 0)
+        self.explicit_fire = explicit_fire
+        self.num_cell_channels = (self.BASE_CELL_CHANNELS + (1 if include_ros else 0)
+                                  + (self.FIRE_CHANNELS if explicit_fire else 0))
         self._static: np.ndarray | None = None
         self._ros_cache: dict[tuple, np.ndarray] = {}
         self._diagonal_m = hypot(self.rows * self.cell_size_m, self.cols * self.cell_size_m)
@@ -142,12 +153,28 @@ class GeographicInputTensorizer:
             self._ros_cache[key] = out
         return self._ros_cache[key]
 
-    def extract(self, observation: dict) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """Return (rgb [3, H*px, W*px], cells [C, H, W], vector [V]) as float32 arrays."""
+    def fire_channels(self, observation: dict) -> np.ndarray:
+        """Explicit [3, H, W] burning, burned and time-since-arrival / horizon."""
+        out = np.zeros((self.FIRE_CHANNELS, self.rows, self.cols), dtype=np.float32)
+        now = float(observation.get("time_s", 0.0))
+        for r, line in enumerate(observation["fire"]["cells"]):
+            for c, cell in enumerate(line):
+                state = cell["fire_state"]
+                out[0, r, c] = state == "burning"
+                out[1, r, c] = state == "burned"
+                if cell.get("arrival_time_s") is not None:
+                    out[2, r, c] = min(max(now - float(cell["arrival_time_s"]), 0.0) / max(self.horizon_s, 1.0), 1.0)
+        return out
+
+    def extract(self, observation: dict) -> tuple[np.ndarray, ...]:
+        """Return (rgb [3, H*px, W*px], cells [C, H, W], vector [V]) as float32 arrays,
+        or (cells, vector) when there is no base image (explicit-fire ablation)."""
         if observation.get("observation_mode") != "realtime":
             raise ValueError("image inputs require real-time observations (D-49)")
-        view = compose_view(self.base_image, observation, self.px_per_cell)
-        rgb = np.moveaxis(view, -1, 0).astype(np.float32) / 255.0
+        rgb = None
+        if self.base_image is not None:
+            view = compose_view(self.base_image, observation, self.px_per_cell)
+            rgb = np.moveaxis(view, -1, 0).astype(np.float32) / 255.0
 
         treated = np.zeros((self.rows, self.cols), dtype=np.float32)
         for r, c in observation.get("known_treated_cells", []):
@@ -158,7 +185,10 @@ class GeographicInputTensorizer:
         dynamic = [treated, np.clip(distance, 0.0, 1.5).astype(np.float32)]
         if self.include_ros:
             dynamic.append(self.ros_channel(observation))
-        cells = np.concatenate([self._static_channels(observation), np.stack(dynamic)]).astype(np.float32)
+        parts = [self._static_channels(observation), np.stack(dynamic)]
+        if self.explicit_fire:
+            parts.append(self.fire_channels(observation))
+        cells = np.concatenate(parts).astype(np.float32)
 
         wind = observation.get("midflame_wind_to_m_s", [0.0, 0.0])
         station = (observation.get("environment_weather") or {}).get("station_weather") or {}
@@ -174,10 +204,11 @@ class GeographicInputTensorizer:
                    1.0 if aircraft.get("phase", "idle") == "idle" else 0.0,
                    min(float(aircraft.get("refill_remaining_s", 0.0)) / max(self.horizon_s, 1.0), 1.0),
                    min(float(observation.get("time_s", 0.0)) / max(self.horizon_s, 1.0), 1.0)]
-        return rgb, cells, np.asarray(vector, dtype=np.float32)
+        vector_array = np.asarray(vector, dtype=np.float32)
+        return (cells, vector_array) if rgb is None else (rgb, cells, vector_array)
 
-    def to_torch(self, observation: dict, device: Any = None) -> tuple[Any, Any, Any]:
-        """Batched tensors (rgb [1,3,H',W'], cells [1,C,H,W], vector [1,V])."""
+    def to_torch(self, observation: dict, device: Any = None) -> tuple[Any, ...]:
+        """Batched tensors matching ``extract`` with a leading batch dimension of 1."""
         import torch
 
         return tuple(torch.from_numpy(a).unsqueeze(0).to(device) for a in self.extract(observation))
