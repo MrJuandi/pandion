@@ -259,7 +259,15 @@ def run_geographic_integrated(
             if cur_time != best[r][c] or barrier[r][c] or not is_burnable(r, c):
                 continue
             arrival[r][c] = cur_time
-            burnout[r][c] = cur_time + burning_duration_s(r, c, cur_time)
+            if init_mask[r][c] and cur_time == 0.0:
+                # Mapped initial perimeter: only cells bordering unburned
+                # burnable fuel are an active front; the interior burned
+                # before the episode starts.
+                on_front = any(is_burnable(r + dr, c + dc) and not init_mask[r + dr][c + dc]
+                               for dr, dc in NEIGHBORS)
+                burnout[r][c] = burning_duration_s(r, c, 0.0) if on_front else 0.0
+            else:
+                burnout[r][c] = cur_time + burning_duration_s(r, c, cur_time)
 
             for dr, dc in NEIGHBORS:
                 nr, nc = r + dr, c + dc
@@ -547,7 +555,7 @@ def run_geographic_integrated(
         "observation_mode": observation_mode,
         "arrival_time_s": [[round(v, 6) if v is not None else None for v in line] for line in arrival],
         "burnout_time_s": [[round(v, 6) if v is not None else None for v in line] for line in burnout],
-        "burning_model": "front crossing (cell_size / head-fire rate) + Anderson 1969 residence 384/sigma min; initial perimeter cells treated as ignited at t=0",
+        "burning_model": "front crossing (cell_size / head-fire rate) + Anderson 1969 residence 384/sigma min; initial perimeter: cells bordering unburned burnable fuel ignited at t=0, interior cells already burned",
         "fuel_grid": deepcopy(fuel_grid),
         "water_mask": deepcopy(fire_dict.get("water_mask", [[False] * cols for _ in range(rows)])),
         "elevation_m": deepcopy(elevation),
