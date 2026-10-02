@@ -66,6 +66,7 @@ class GeographicTrainingEnv:
             policy="heuristic",
             _actions=self._actions,
             _stop_after_steps=len(self._actions),
+            _record_observations=False,
         )
 
     def _mask(self, observation: dict) -> list[dict]:
