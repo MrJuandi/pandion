@@ -379,3 +379,17 @@ Simulator-conditional comparisons must state the fixed scenario and assumptions 
 The Spanish offline workspace is an inspection interface, not a new evaluation protocol. It can replay deterministic inference from the source-bound geographic smoke checkpoint and existing baselines on the first requested development cases. The final area, water, flight-distance and drop counts come from each simulator replay; scrubbing the timeline does not create new endpoint measurements. Validation and reserved cases are static maps only in this workflow. Legacy visual DEM overlays do not change the flat-terrain environment, dataset splits, checkpoint selection or previously reported results. The new D-45 environment experiment uses fresh development weights and changed scenario hashes; it must be reported separately. No geographic performance/generalization claim is made by adding these views.
 
 The 2026-10-01 derived environment experiment is recorded in [ENVIRONMENT_INTEGRATION.md](ENVIRONMENT_INTEGRATION.md): six recurrent PPO updates on development only, sourced heights, and dry time-dependent Baldomar weather under explicit wind/moisture assumptions. Its first development rollout reached 1,356 ha with zero rejected orders. The environment and hashes differ from old flat-terrain runs, so this is no controlled evidence of an improvement; no validation/reserved episodes or model selection were performed.
+
+## Real-time image policy comparison (D-49–D-53, 2026-10-02)
+
+Exploratory development/validation comparison under the D-49 real-time simulator; no reserved scenario was evaluated. Family `runs/geographic-environment-family-20261001` (8 development EMSR578, 8 validation EMSR590), tactical actions, recurrent, `--select --candidates 1 --updates 60 --episodes-per-update 8`, seeds 42–45, code at commit `cbc35ae` (legacy, image) and `dd1a66a` (cells ablation, same model code plus the ablation). Image runs used `runs/geographic-imagery-s2-20261002`.
+
+Validation mean final burned area (ha), 8 scenarios:
+
+| Policy | 42 | 43 | 44 | 45 | Mean |
+|---|---|---|---|---|---|
+| Legacy `SpatialActorCritic` | 1392.75 | 1388.75 | 1392.75 | 1383.75 | 1389.50 |
+| D-53 cells ablation (no image) | 1384.25 | 1388.75 | 1384.25 | 1383.75 | 1385.25 |
+| D-52 image model | 1383.75 | 1391.38 | 1384.25 | 1392.75 | 1388.03 |
+
+Baselines on the same scenarios: no intervention 1406.62, random valid 1389.81, heuristic 1383.75, containment heuristic 1384.25. The mapped initial perimeter already covers about 1,380 of 1,600 ha, so at most about 23 ha separate no intervention from the best baseline. No learned policy beat the heuristic; differences between learned policies are a few hectares across four seeds and eight scenarios from one activation, below what this design can resolve. These runs do not satisfy the predeclared improvement criteria and support no performance claim. A larger family with smaller initial perimeters is needed for an informative comparison.
