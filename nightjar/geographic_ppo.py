@@ -36,6 +36,58 @@ else:
 SMOKE_SCHEMA_VERSION = "nightjar-geographic-ppo-smoke-0.1"
 SELECTION_SCHEMA_VERSION = "nightjar-geographic-ppo-selection-0.1"
 EVAL_SCHEMA_VERSION = "nightjar-geographic-ppo-eval-0.1"
+INPUT_MODES = ("legacy", "image")
+_IMAGE_CACHE: dict[tuple[str, str], Any] = {}
+
+
+def make_input_tensorizer(
+    scenario: dict[str, Any],
+    *,
+    input_mode: str = "legacy",
+    imagery_dir: Path | str | None = None,
+    include_ros: bool = False,
+) -> Any:
+    """Tensorizer for a scenario: legacy 10-channel rasters or D-49 image inputs."""
+    if input_mode == "legacy":
+        return GeographicTrainingEnv(scenario).observation_tensorizer()
+    if input_mode != "image":
+        raise ValueError(f"Unknown input_mode: {input_mode}")
+    if imagery_dir is None:
+        raise ValueError("image inputs need imagery_dir (output of nightjar.imagery_acquire)")
+    from .imagery_acquire import load_activation_image
+    from .policy_inputs import GeographicInputTensorizer
+
+    key = (str(imagery_dir), scenario["activation_id"])
+    if key not in _IMAGE_CACHE:
+        _IMAGE_CACHE[key] = load_activation_image(imagery_dir, scenario)
+    return GeographicInputTensorizer(scenario, _IMAGE_CACHE[key], include_ros=include_ros)
+
+
+def build_policy_model(
+    scenario: dict[str, Any],
+    *,
+    input_mode: str = "legacy",
+    action_mode: str = "tactical",
+    recurrent: bool = True,
+    imagery_dir: Path | str | None = None,
+    include_ros: bool = False,
+) -> Any:
+    """Construct the actor-critic matching an input/action configuration."""
+    _require_torch()
+    grid = scenario["grid"]
+    rows, cols = int(grid["rows"]), int(grid["cols"])
+    if input_mode == "legacy":
+        if action_mode != "tactical":
+            raise ValueError("legacy geographic inputs support tactical actions only")
+        return SpatialActorCritic(grid_rows=rows, grid_cols=cols,
+                                  action_dim=len(TACTICAL_ACTION_NAMES), recurrent=recurrent)
+    from .image_model import ImageActorCritic
+
+    tensorizer = make_input_tensorizer(scenario, input_mode="image", imagery_dir=imagery_dir, include_ros=include_ros)
+    return ImageActorCritic(cell_channels=tensorizer.num_cell_channels,
+                            vector_dim=tensorizer.NUM_VECTOR_FEATURES,
+                            px_per_cell=tensorizer.px_per_cell, grid_rows=rows, grid_cols=cols,
+                            action_mode=action_mode, recurrent=recurrent)
 
 
 def _require_torch() -> None:
@@ -161,13 +213,22 @@ def rollout_geographic(
     device: Any = None,
     deterministic: bool = False,
     drop_bonus_per_cell: float = 0.25,
+    input_mode: str = "legacy",
+    imagery_dir: Path | str | None = None,
+    include_ros: bool = False,
 ) -> tuple[list[dict], dict[str, Any]]:
-    """Execute a single rollout of the CL-415 in a geographic scenario."""
+    """Execute a single rollout of the CL-415 in a geographic scenario.
+
+    The model's ``action_mode`` (tactical by default) selects the action mapper;
+    ``input_mode`` selects legacy rasters or D-49 image inputs.
+    """
     _require_torch()
-    env = GeographicTrainingEnv(scenario, drop_bonus_per_cell=drop_bonus_per_cell, action_mode="tactical")
+    action_mode = getattr(model, "action_mode", "tactical")
+    env = GeographicTrainingEnv(scenario, drop_bonus_per_cell=drop_bonus_per_cell, action_mode=action_mode)
     observation = env.reset(seed=scenario.get("seed"))
     mapper = env.action_mapper()
-    tensorizer = env.observation_tensorizer()
+    tensorizer = make_input_tensorizer(scenario, input_mode=input_mode, imagery_dir=imagery_dir,
+                                       include_ros=include_ros)
 
     records: list[dict] = []
     rewards: list[float] = []
@@ -177,25 +238,24 @@ def rollout_geographic(
     is_recurrent = getattr(model, "recurrent", False)
 
     while not done:
-        raster, vector = tensorizer.to_torch(observation, device=device)
+        inputs = tuple(tensorizer.to_torch(observation, device=device))
         mask = mapper.to_mask_torch(observation, device=device)
 
         with torch.no_grad():
             if is_recurrent:
                 action, log_prob, _, value, next_state = model.get_action(
-                    raster, vector, mask, deterministic=deterministic, state=state
+                    *inputs, mask, deterministic=deterministic, state=state
                 )
                 state = next_state
             else:
                 action, log_prob, _, value = model.get_action(
-                    raster, vector, mask, deterministic=deterministic
+                    *inputs, mask, deterministic=deterministic
                 )
 
         next_obs, reward, done, _ = env.step_discrete(int(action.item()))
 
         records.append({
-            "raster": raster.squeeze(0),
-            "vector": vector.squeeze(0),
+            "inputs": tuple(t.squeeze(0) for t in inputs),
             "mask": mask.squeeze(0),
             "action": action.squeeze(0),
             "log_prob": log_prob.squeeze(0),
@@ -227,6 +287,10 @@ def rollout_geographic(
     return records, metrics
 
 
+def _stack_inputs(records: list[dict]) -> tuple:
+    return tuple(torch.stack(parts) for parts in zip(*(r["inputs"] for r in records)))
+
+
 def ppo_update_geographic(
     model: Any,
     optimizer: Any,
@@ -243,26 +307,24 @@ def ppo_update_geographic(
 
     if not is_recurrent:
         flat = [r for ep in episodes for r in ep]
-        raster = torch.stack([r["raster"] for r in flat])
-        vector = torch.stack([r["vector"] for r in flat])
+        inputs = _stack_inputs(flat)
         masks = torch.stack([r["mask"] for r in flat])
         actions = torch.stack([r["action"] for r in flat])
         old_log_probs = torch.stack([r["log_prob"] for r in flat]).detach()
         returns = torch.stack([r["return"] for r in flat]).detach()
         advantages = torch.stack([r["advantage"] for r in flat]).detach()
 
-        log_probs, entropy, values = model.evaluate_actions(raster, vector, masks, actions)
+        log_probs, entropy, values = model.evaluate_actions(*inputs, masks, actions)
     else:
         all_lps, all_ents, all_vals, all_old_lps, all_rets, all_advs = [], [], [], [], [], []
         for ep in episodes:
             if not ep:
                 continue
-            r_seq = torch.stack([r["raster"] for r in ep])
-            v_seq = torch.stack([r["vector"] for r in ep])
+            in_seq = _stack_inputs(ep)
             m_seq = torch.stack([r["mask"] for r in ep])
             a_seq = torch.stack([r["action"] for r in ep])
 
-            lp, ent, val = model.evaluate_actions(r_seq, v_seq, m_seq, a_seq)
+            lp, ent, val = model.evaluate_actions(*in_seq, m_seq, a_seq)
             all_lps.append(lp)
             all_ents.append(ent)
             all_vals.append(val)
@@ -296,6 +358,7 @@ def evaluate_geographic_policy(
     scenarios: list[dict[str, Any]],
     *,
     device: Any = None,
+    **input_options: Any,
 ) -> list[dict[str, Any]]:
     """Deterministically evaluate the model policy across a set of scenarios."""
     _require_torch()
@@ -303,7 +366,7 @@ def evaluate_geographic_policy(
     results = []
     with torch.no_grad():
         for sc in scenarios:
-            _, metrics = rollout_geographic(model, sc, device=device, deterministic=True)
+            _, metrics = rollout_geographic(model, sc, device=device, deterministic=True, **input_options)
             results.append(metrics)
     model.train()
     return results
@@ -318,19 +381,16 @@ def train_geographic_ppo(
     recurrent: bool = True,
     device: Any = None,
     resume_checkpoint: Path | str | None = None,
+    input_mode: str = "legacy",
+    action_mode: str = "tactical",
+    imagery_dir: Path | str | None = None,
+    include_ros: bool = False,
 ) -> tuple[Any, list[float]]:
-    """Train a SpatialActorCritic policy on geographic development scenarios."""
+    """Train a geographic policy (legacy SpatialActorCritic or D-49 ImageActorCritic)."""
     _require_torch()
-    sample_grid = dev_scenarios[0]["grid"]
-    rows = int(sample_grid["rows"])
-    cols = int(sample_grid["cols"])
-
-    model = SpatialActorCritic(
-        grid_rows=rows,
-        grid_cols=cols,
-        action_dim=len(TACTICAL_ACTION_NAMES),
-        recurrent=recurrent,
-    ).to(device)
+    input_options = {"input_mode": input_mode, "imagery_dir": imagery_dir, "include_ros": include_ros}
+    model = build_policy_model(dev_scenarios[0], action_mode=action_mode, recurrent=recurrent,
+                               **input_options).to(device)
 
     if resume_checkpoint is not None:
         checkpoint_path = Path(resume_checkpoint)
@@ -346,7 +406,7 @@ def train_geographic_ppo(
         batch_records = []
         for ep in range(episodes_per_update):
             scenario = random.choice(dev_scenarios)
-            records, _ = rollout_geographic(model, scenario, device=device, deterministic=False)
+            records, _ = rollout_geographic(model, scenario, device=device, deterministic=False, **input_options)
             batch_records.append(records)
 
         loss = ppo_update_geographic(model, optimizer, batch_records)
@@ -371,6 +431,12 @@ def main() -> None:
     parser.add_argument("--lr", type=float, default=3e-4)
     parser.add_argument("--seed", type=int, default=42, help="Seed Python and PyTorch before training")
     parser.add_argument("--feedforward", action="store_true", help="Use feedforward instead of LSTM")
+    parser.add_argument("--input-mode", choices=INPUT_MODES, default="legacy",
+                        help="legacy rasters or D-49 image inputs (needs --imagery-dir)")
+    parser.add_argument("--action-mode", choices=("tactical", "spatial"), default="tactical",
+                        help="tactical macro-actions or one drop action per cell (image inputs only)")
+    parser.add_argument("--imagery-dir", type=Path, help="output directory of nightjar.imagery_acquire")
+    parser.add_argument("--ros", action="store_true", help="add the Rothermel ROS channel (image inputs)")
     parser.add_argument("--eval-scenarios", type=int, default=None, help="Limit number of validation scenarios to evaluate")
     parser.add_argument("--checkpoint", type=Path)
     parser.add_argument("--resume", type=Path, help="Path to checkpoint to resume weights from")
@@ -384,6 +450,10 @@ def main() -> None:
     torch.manual_seed(args.seed)
 
     dev_scenarios = load_geographic_split("development", args.scenarios_dir, synthetic=args.synthetic)
+    input_options = {"input_mode": args.input_mode, "imagery_dir": args.imagery_dir, "include_ros": args.ros}
+    model_options = {"action_mode": args.action_mode, **input_options}
+    config_report = {"input_mode": args.input_mode, "action_mode": args.action_mode, "include_ros": args.ros,
+                     "imagery_dir": str(args.imagery_dir) if args.imagery_dir else None}
 
     if args.smoke or (not args.train and not args.select and not args.eval):
         print(f"Running Geographic PPO smoke test (recurrent={recurrent})...")
@@ -395,17 +465,20 @@ def main() -> None:
             recurrent=recurrent,
             device=device,
             resume_checkpoint=args.resume,
+            **model_options,
         )
         if args.checkpoint:
             args.checkpoint.parent.mkdir(parents=True, exist_ok=True)
             torch.save(model.state_dict(), args.checkpoint)
             print(f"Saved trained checkpoint -> {args.checkpoint}")
-        _, metrics = rollout_geographic(model, dev_scenarios[0], device=device, deterministic=True)
+        _, metrics = rollout_geographic(model, dev_scenarios[0], device=device, deterministic=True,
+                                        **input_options)
         report = {
             "schema_version": SMOKE_SCHEMA_VERSION,
             "dataset": _dataset_report(args.scenarios_dir, {"development": smoke_scenarios}),
             "seed": args.seed,
             "recurrent": recurrent,
+            **config_report,
             "loss": losses[0],
             "evaluation_metrics": metrics,
         }
@@ -428,18 +501,21 @@ def main() -> None:
             recurrent=recurrent,
             device=device,
             resume_checkpoint=args.resume,
+            **model_options,
         )
         if args.checkpoint:
             args.checkpoint.parent.mkdir(parents=True, exist_ok=True)
             torch.save(model.state_dict(), args.checkpoint)
             print(f"Saved trained checkpoint -> {args.checkpoint}")
 
-        _, eval_m = rollout_geographic(model, dev_scenarios[0], device=device, deterministic=True)
+        _, eval_m = rollout_geographic(model, dev_scenarios[0], device=device, deterministic=True,
+                                        **input_options)
         report = {
             "schema_version": "nightjar-geographic-ppo-train-0.1",
             "dataset": _dataset_report(args.scenarios_dir, {"development": dev_scenarios}),
             "seed": args.seed,
             "recurrent": recurrent,
+            **config_report,
             "updates": args.updates,
             "final_loss": losses[-1] if losses else 0.0,
             "evaluation": eval_m,
@@ -472,10 +548,11 @@ def main() -> None:
                 lr=args.lr,
                 recurrent=recurrent,
                 device=device,
+                **model_options,
             )
 
             # Evaluate candidate on validation scenarios
-            val_results = evaluate_geographic_policy(cand_model, val_scenarios, device=device)
+            val_results = evaluate_geographic_policy(cand_model, val_scenarios, device=device, **input_options)
             mean_burned = sum(r["final_burned_ha"] for r in val_results) / max(len(val_results), 1)
             total_drops = sum(r["drops_count"] for r in val_results)
 
@@ -504,6 +581,7 @@ def main() -> None:
             "dataset": _dataset_report(args.scenarios_dir, {"development": dev_scenarios, "validation": val_scenarios}),
             "seed": args.seed,
             "recurrent": recurrent,
+            **config_report,
             "candidates_count": args.candidates,
             "best_mean_burned_ha": round(best_mean_burned, 2),
             "candidates": candidate_reports,
@@ -521,14 +599,7 @@ def main() -> None:
         if args.eval_scenarios is not None:
             target_scenarios = target_scenarios[:args.eval_scenarios]
 
-        sample_grid = target_scenarios[0]["grid"]
-        rows, cols = int(sample_grid["rows"]), int(sample_grid["cols"])
-        model = SpatialActorCritic(
-            grid_rows=rows,
-            grid_cols=cols,
-            action_dim=len(TACTICAL_ACTION_NAMES),
-            recurrent=recurrent,
-        ).to(device)
+        model = build_policy_model(target_scenarios[0], recurrent=recurrent, **model_options).to(device)
         model.load_state_dict(torch.load(args.checkpoint, map_location=device))
         model.eval()
 
@@ -536,7 +607,7 @@ def main() -> None:
         eval_reports = []
         for sc in target_scenarios:
             bm = run_geographic_benchmark(sc, random_seeds=(42, 43))
-            _, rl_metrics = rollout_geographic(model, sc, device=device, deterministic=True)
+            _, rl_metrics = rollout_geographic(model, sc, device=device, deterministic=True, **input_options)
             no_int_ha = bm["policies"]["no_intervention"]["final_burned_ha"]
             heur_ha = bm["policies"]["heuristic"]["final_burned_ha"]
             cont_ha = bm["policies"]["containment_heuristic"]["final_burned_ha"]
@@ -564,7 +635,7 @@ def main() -> None:
 
         if args.output:
             args.output.parent.mkdir(parents=True, exist_ok=True)
-            args.output.write_text(json.dumps({"schema_version": EVAL_SCHEMA_VERSION,
+            args.output.write_text(json.dumps({"schema_version": EVAL_SCHEMA_VERSION, **config_report,
                                                "dataset": _dataset_report(args.scenarios_dir, {args.split: target_scenarios}),
                                                "reports": eval_reports}, indent=2))
             print(f"Wrote evaluation report -> {args.output}")
