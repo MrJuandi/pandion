@@ -13,6 +13,7 @@ import hashlib
 import json
 from pathlib import Path
 import random
+import time
 from typing import Any
 
 from .aircraft import CAPACITY_L
@@ -94,6 +95,20 @@ def build_policy_model(
                             px_per_cell=max(tensorizer.px_per_cell, 1), grid_rows=rows, grid_cols=cols,
                             action_mode=action_mode, recurrent=recurrent,
                             use_image=input_mode == "image")
+
+
+def resolve_device(name: str = "cpu") -> str:
+    """Map a --device choice to an available torch device string."""
+    _require_torch()
+    if name == "auto":
+        if torch.cuda.is_available():
+            return "cuda"
+        return "mps" if torch.backends.mps.is_available() else "cpu"
+    if name == "mps" and not torch.backends.mps.is_available():
+        raise RuntimeError("Apple MPS is not available on this machine")
+    if name == "cuda" and not torch.cuda.is_available():
+        raise RuntimeError("CUDA is not available on this machine")
+    return name
 
 
 def _require_torch() -> None:
@@ -303,60 +318,42 @@ def ppo_update_geographic(
     records: list[dict] | list[list[dict]],
     clip_ratio: float = 0.2,
 ) -> float:
-    """Apply one clipped PPO update over rollout episodes with BPTT if recurrent."""
+    """Apply one clipped PPO update over rollout episodes with BPTT if recurrent.
+
+    The loss is the mean over all steps of the clipped policy term, half the
+    squared value error and minus 0.01 times the entropy. Gradients are
+    accumulated one episode at a time (each episode's sums divided by the total
+    step count), which gives the same gradient as a single batched backward
+    while holding only one episode's activations in memory.
+    """
     _require_torch()
     if not records:
         return 0.0
 
-    episodes = [records] if isinstance(records[0], dict) else records
-    is_recurrent = getattr(model, "recurrent", False)
-
-    if not is_recurrent:
-        flat = [r for ep in episodes for r in ep]
-        inputs = _stack_inputs(flat)
-        masks = torch.stack([r["mask"] for r in flat])
-        actions = torch.stack([r["action"] for r in flat])
-        old_log_probs = torch.stack([r["log_prob"] for r in flat]).detach()
-        returns = torch.stack([r["return"] for r in flat]).detach()
-        advantages = torch.stack([r["advantage"] for r in flat]).detach()
+    episodes = [ep for ep in ([records] if isinstance(records[0], dict) else records) if ep]
+    total_steps = sum(len(ep) for ep in episodes)
+    optimizer.zero_grad()
+    total_loss = 0.0
+    for ep in episodes:
+        inputs = _stack_inputs(ep)
+        masks = torch.stack([r["mask"] for r in ep])
+        actions = torch.stack([r["action"] for r in ep])
+        old_log_probs = torch.stack([r["log_prob"] for r in ep]).detach()
+        returns = torch.stack([r["return"] for r in ep]).detach()
+        advantages = torch.stack([r["advantage"] for r in ep]).detach()
 
         log_probs, entropy, values = model.evaluate_actions(*inputs, masks, actions)
-    else:
-        all_lps, all_ents, all_vals, all_old_lps, all_rets, all_advs = [], [], [], [], [], []
-        for ep in episodes:
-            if not ep:
-                continue
-            in_seq = _stack_inputs(ep)
-            m_seq = torch.stack([r["mask"] for r in ep])
-            a_seq = torch.stack([r["action"] for r in ep])
+        ratio = (log_probs - old_log_probs).exp()
+        clipped_ratio = ratio.clamp(1.0 - clip_ratio, 1.0 + clip_ratio)
+        policy_sum = -torch.minimum(ratio * advantages, clipped_ratio * advantages).sum()
+        value_sum = ((values - returns) ** 2).sum()
+        loss = (policy_sum + 0.5 * value_sum - 0.01 * entropy.sum()) / total_steps
+        loss.backward()
+        total_loss += float(loss.item())
 
-            lp, ent, val = model.evaluate_actions(*in_seq, m_seq, a_seq)
-            all_lps.append(lp)
-            all_ents.append(ent)
-            all_vals.append(val)
-            all_old_lps.append(torch.stack([r["log_prob"] for r in ep]).detach())
-            all_rets.append(torch.stack([r["return"] for r in ep]).detach())
-            all_advs.append(torch.stack([r["advantage"] for r in ep]).detach())
-
-        log_probs = torch.cat(all_lps)
-        entropy = torch.cat(all_ents)
-        values = torch.cat(all_vals)
-        old_log_probs = torch.cat(all_old_lps)
-        returns = torch.cat(all_rets)
-        advantages = torch.cat(all_advs)
-
-    ratio = (log_probs - old_log_probs).exp()
-    clipped_ratio = ratio.clamp(1.0 - clip_ratio, 1.0 + clip_ratio)
-    policy_loss = -torch.minimum(ratio * advantages, clipped_ratio * advantages).mean()
-    value_loss = F.mse_loss(values, returns)
-    loss = policy_loss + 0.5 * value_loss - 0.01 * entropy.mean()
-
-    optimizer.zero_grad()
-    loss.backward()
     torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=0.5)
     optimizer.step()
-
-    return float(loss.item())
+    return total_loss
 
 
 def evaluate_geographic_policy(
@@ -391,8 +388,14 @@ def train_geographic_ppo(
     action_mode: str = "tactical",
     imagery_dir: Path | str | None = None,
     include_ros: bool = False,
+    checkpoint_path: Path | str | None = None,
+    checkpoint_every: int = 0,
 ) -> tuple[Any, list[float]]:
-    """Train a geographic policy (legacy SpatialActorCritic or D-49 ImageActorCritic)."""
+    """Train a geographic policy (legacy SpatialActorCritic or D-49 ImageActorCritic).
+
+    With ``checkpoint_every > 0`` the weights are written to ``<checkpoint_path>.partial``
+    every that many updates, so an interrupted run can continue with ``--resume``.
+    """
     _require_torch()
     input_options = {"input_mode": input_mode, "imagery_dir": imagery_dir, "include_ros": include_ros}
     model = build_policy_model(dev_scenarios[0], action_mode=action_mode, recurrent=recurrent,
@@ -408,7 +411,9 @@ def train_geographic_ppo(
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     losses = []
 
+    partial_path = Path(f"{checkpoint_path}.partial") if checkpoint_path and checkpoint_every > 0 else None
     for update_idx in range(updates):
+        started = time.monotonic()
         batch_records = []
         for ep in range(episodes_per_update):
             scenario = random.choice(dev_scenarios)
@@ -417,7 +422,11 @@ def train_geographic_ppo(
 
         loss = ppo_update_geographic(model, optimizer, batch_records)
         losses.append(loss)
-        print(f"  [Update {update_idx + 1:2d}/{updates}] PPO Loss: {loss:9.4f} (episodes: {len(batch_records)})")
+        print(f"  [Update {update_idx + 1:2d}/{updates}] PPO Loss: {loss:9.4f} "
+              f"(episodes: {len(batch_records)}, {time.monotonic() - started:.1f} s)", flush=True)
+        if partial_path is not None and (update_idx + 1) % checkpoint_every == 0:
+            partial_path.parent.mkdir(parents=True, exist_ok=True)
+            torch.save(model.state_dict(), partial_path)
 
     return model, losses
 
@@ -446,11 +455,15 @@ def main() -> None:
     parser.add_argument("--eval-scenarios", type=int, default=None, help="Limit number of validation scenarios to evaluate")
     parser.add_argument("--checkpoint", type=Path)
     parser.add_argument("--resume", type=Path, help="Path to checkpoint to resume weights from")
+    parser.add_argument("--device", choices=("cpu", "mps", "cuda", "auto"), default="cpu",
+                        help="torch device; auto picks cuda, then Apple mps, then cpu")
+    parser.add_argument("--checkpoint-every", type=int, default=0,
+                        help="also save weights to <checkpoint>.partial every N updates")
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
 
     _require_torch()
-    device = torch.device("cpu")
+    device = torch.device(resolve_device(args.device))
     recurrent = not args.feedforward
     random.seed(args.seed)
     torch.manual_seed(args.seed)
@@ -458,6 +471,7 @@ def main() -> None:
     dev_scenarios = load_geographic_split("development", args.scenarios_dir, synthetic=args.synthetic)
     input_options = {"input_mode": args.input_mode, "imagery_dir": args.imagery_dir, "include_ros": args.ros}
     model_options = {"action_mode": args.action_mode, **input_options}
+    train_options = {**model_options, "checkpoint_path": args.checkpoint, "checkpoint_every": args.checkpoint_every}
     config_report = {"input_mode": args.input_mode, "action_mode": args.action_mode, "include_ros": args.ros,
                      "imagery_dir": str(args.imagery_dir) if args.imagery_dir else None}
 
@@ -471,7 +485,7 @@ def main() -> None:
             recurrent=recurrent,
             device=device,
             resume_checkpoint=args.resume,
-            **model_options,
+            **train_options,
         )
         if args.checkpoint:
             args.checkpoint.parent.mkdir(parents=True, exist_ok=True)
@@ -484,7 +498,7 @@ def main() -> None:
             "dataset": _dataset_report(args.scenarios_dir, {"development": smoke_scenarios}),
             "seed": args.seed,
             "recurrent": recurrent,
-            **config_report,
+            **config_report, "device": str(device),
             "loss": losses[0],
             "evaluation_metrics": metrics,
         }
@@ -507,7 +521,7 @@ def main() -> None:
             recurrent=recurrent,
             device=device,
             resume_checkpoint=args.resume,
-            **model_options,
+            **train_options,
         )
         if args.checkpoint:
             args.checkpoint.parent.mkdir(parents=True, exist_ok=True)
@@ -521,7 +535,7 @@ def main() -> None:
             "dataset": _dataset_report(args.scenarios_dir, {"development": dev_scenarios}),
             "seed": args.seed,
             "recurrent": recurrent,
-            **config_report,
+            **config_report, "device": str(device),
             "updates": args.updates,
             "final_loss": losses[-1] if losses else 0.0,
             "evaluation": eval_m,
@@ -554,7 +568,7 @@ def main() -> None:
                 lr=args.lr,
                 recurrent=recurrent,
                 device=device,
-                **model_options,
+                **train_options,
             )
 
             # Evaluate candidate on validation scenarios
@@ -587,7 +601,7 @@ def main() -> None:
             "dataset": _dataset_report(args.scenarios_dir, {"development": dev_scenarios, "validation": val_scenarios}),
             "seed": args.seed,
             "recurrent": recurrent,
-            **config_report,
+            **config_report, "device": str(device),
             "candidates_count": args.candidates,
             "best_mean_burned_ha": round(best_mean_burned, 2),
             "candidates": candidate_reports,

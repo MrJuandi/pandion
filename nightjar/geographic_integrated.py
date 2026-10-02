@@ -38,6 +38,9 @@ DEFAULT_REFILL_SERVICE_S = 180.0  # 3 min approach, scoop, climbout
 DEFAULT_CAPACITY_L = 6137
 
 
+POLICIES = ("no_intervention", "random_valid", "heuristic", "containment_heuristic")
+
+
 def run_geographic_integrated(
     scenario: dict[str, Any],
     policy: str,
@@ -63,8 +66,48 @@ def run_geographic_integrated(
       audit log (default). Training prefixes disable it: the copies grow
       quadratically with episode length and nothing in training reads them.
     """
-    if policy not in {"no_intervention", "random_valid", "heuristic", "containment_heuristic"}:
+    if policy not in POLICIES:
         raise ValueError(f"Unknown policy: {policy}")
+    episode = geographic_episode(scenario, policy, policy_seed=policy_seed, observation_mode=observation_mode,
+                                 truncated=_stop_after_steps is not None,
+                                 record_observations=_record_observations)
+    rng = Random(scenario.get("seed", 42) if policy_seed is None else policy_seed)
+    step = 0
+    try:
+        observation, _, _ = next(episode)
+        while True:
+            if _stop_after_steps is not None and step >= _stop_after_steps:
+                order = None
+            elif _actions is not None and step < len(_actions):
+                order = _actions[step]
+            else:
+                order = choose_order(policy, observation, candidates=candidate_cells(observation), rng=rng)
+            step += 1
+            observation, _, _ = episode.send(order)
+    except StopIteration as finished:
+        return finished.value
+
+
+def geographic_episode(
+    scenario: dict[str, Any],
+    policy: str,
+    *,
+    policy_seed: int | None = None,
+    observation_mode: str | None = None,
+    truncated: bool = False,
+    record_observations: bool = True,
+):
+    """Step a geographic episode as a generator; simulator state persists between decisions.
+
+    Yields ``(observation, affected_area_ha, drops_log)`` at each decision and
+    receives the order to execute via ``send``. Sending ``None`` stops the
+    episode at that decision (only when ``truncated``); the replay is the
+    generator's return value. Truncated episodes are scored at the stop time
+    and record ``pending_observation``; full episodes advance to the horizon.
+    ``policy`` and ``policy_seed`` are recorded in the replay only: the caller
+    chooses orders. ``run_geographic_integrated`` is the batch driver and
+    ``GeographicTrainingEnv`` the step driver.
+    """
     observation_mode = observation_mode or scenario.get("observation_mode", "realtime")
     if observation_mode not in OBSERVATION_MODES:
         raise ValueError(f"Unknown observation_mode: {observation_mode}")
@@ -356,10 +399,8 @@ def run_geographic_integrated(
     pending_delivery: list[dict] = []
     schedule_idx = 0
 
-    rng = Random(scenario.get("seed", 42) if policy_seed is None else policy_seed)
     decisions_log: list[dict] = []
     aircraft_track = [{"time_s": 0.0, "position_m": list(aircraft_pos)}]
-    step_count = 0
 
     def sync_observations(to_time: float) -> None:
         """Capture observations and deliver ready reports up to to_time."""
@@ -448,19 +489,16 @@ def run_geographic_integrated(
             "known_treated_cells": known_treated_cells,
         }
 
-        if _stop_after_steps is not None and step_count >= _stop_after_steps:
+        burned_now = sum(1 for r in range(rows) for c in range(cols)
+                         if arrival[r][c] is not None and arrival[r][c] <= cur_sim_time + 1e-9)
+        order = yield current_obs, round(burned_now * cell_area_ha, 4), drops_log
+        if order is None:
+            if not truncated:
+                raise ValueError("an order is required; only truncated episodes can stop early")
             pending_observation = current_obs
             break
 
-        # Policy order selection
-        if _actions is not None and step_count < len(_actions):
-            order = _actions[step_count]
-        else:
-            candidates = candidate_cells(current_obs)
-            order = choose_order(policy, current_obs, candidates=candidates, rng=rng)
-
         order_type = order["type"]
-        step_count += 1
 
         if order_type == "HOLD":
             # Advance time by decision interval (e.g. 60s)
@@ -525,12 +563,12 @@ def run_geographic_integrated(
 
         # Audit output only: the controller still receives current_obs alone.
         decisions_log[-1]["decision_time_s"] = current_obs["time_s"]
-        if _record_observations:
+        if record_observations:
             decisions_log[-1]["observation"] = deepcopy(current_obs)
         aircraft_track.append({"time_s": round(cur_sim_time, 2),
                                "position_m": list(aircraft_pos)})
 
-    if _stop_after_steps is None:
+    if not truncated:
         # Final fire advancement to horizon only if running full episode
         advance_fire(horizon_s)
         if observation_mode == "scheduled":
@@ -590,7 +628,7 @@ def run_geographic_integrated(
         "decisions": decisions_log,
         "drops": drops_log,
     }
-    if _stop_after_steps is not None:
+    if truncated:
         result["pending_observation"] = pending_observation
     return result
 
