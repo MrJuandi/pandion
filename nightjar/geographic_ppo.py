@@ -211,20 +211,77 @@ def _dataset_report(scenarios_dir: Path | str, splits: dict[str, list[dict]]) ->
     }
 
 
-def returns_and_advantages(rewards: list[float], values: list[float], gamma: float = 0.99) -> tuple[Any, Any]:
-    """Compute discounted returns and normalized advantages for one rollout."""
+def returns_and_advantages(
+    rewards: list[float],
+    values: list[float],
+    gamma: float = 0.99,
+    *,
+    gae_lambda: float | None = None,
+    normalize: bool = True,
+) -> tuple[Any, Any]:
+    """Returns and advantages for one terminated episode.
+
+    ``gae_lambda=None`` (default) uses Monte Carlo discounted returns and
+    advantage = return - value. Otherwise generalized advantage estimation:
+    delta_t = r_t + gamma * V_{t+1} - V_t (V = 0 after termination),
+    A_t = sum_k (gamma * lambda)^k delta_{t+k}, and the value target is A_t + V_t.
+    ``normalize`` standardizes advantages within the episode (legacy behaviour);
+    batch-level normalization is done in ``ppo_update_geographic`` instead.
+    """
     _require_torch()
-    returns = []
-    running = 0.0
-    for reward in reversed(rewards):
-        running = reward + gamma * running
-        returns.append(running)
-    returns.reverse()
-    result = torch.tensor(returns, dtype=torch.float32)
-    advantage = result - torch.tensor(values, dtype=torch.float32)
+    value_tensor = torch.tensor(values, dtype=torch.float32)
+    if gae_lambda is None:
+        returns = []
+        running = 0.0
+        for reward in reversed(rewards):
+            running = reward + gamma * running
+            returns.append(running)
+        returns.reverse()
+        result = torch.tensor(returns, dtype=torch.float32)
+        advantage = result - value_tensor
+    else:
+        advantages = [0.0] * len(rewards)
+        running = 0.0
+        for t in reversed(range(len(rewards))):
+            next_value = values[t + 1] if t + 1 < len(values) else 0.0
+            delta = rewards[t] + gamma * next_value - values[t]
+            running = delta + gamma * gae_lambda * running
+            advantages[t] = running
+        advantage = torch.tensor(advantages, dtype=torch.float32)
+        result = advantage + value_tensor
+    if not normalize:
+        return result, advantage
     std = advantage.std(unbiased=False)
     norm_advantage = (advantage - advantage.mean()) / (std + 1e-8) if std > 1e-6 else (advantage - advantage.mean())
     return result, norm_advantage
+
+
+class RewardScaler:
+    """Divide rewards by the running standard deviation of discounted returns.
+
+    Same idea as Gymnasium's ``NormalizeReward``: keeps value targets near unit
+    scale so the critic loss does not swamp the policy term. The trainer updates
+    the statistics with each collected batch before computing its targets.
+    """
+
+    def __init__(self, gamma: float = 0.99, epsilon: float = 1e-8) -> None:
+        self.gamma, self.epsilon = gamma, epsilon
+        self.count, self.mean, self.m2 = 0, 0.0, 0.0
+
+    @property
+    def scale(self) -> float:
+        if self.count < 2:
+            return 1.0
+        return 1.0 / ((self.m2 / self.count) ** 0.5 + self.epsilon)
+
+    def update(self, rewards: list[float]) -> None:
+        running = 0.0
+        for reward in rewards:
+            running = running * self.gamma + reward
+            self.count += 1
+            delta = running - self.mean
+            self.mean += delta / self.count
+            self.m2 += delta * (running - self.mean)
 
 
 def rollout_geographic(
@@ -237,8 +294,15 @@ def rollout_geographic(
     input_mode: str = "legacy",
     imagery_dir: Path | str | None = None,
     include_ros: bool = False,
+    gamma: float = 0.99,
+    gae_lambda: float | None = None,
+    reward_scale: float = 1.0,
+    normalize_advantages: bool = True,
 ) -> tuple[list[dict], dict[str, Any]]:
     """Execute a single rollout of the CL-415 in a geographic scenario.
+
+    Value targets and advantages use rewards multiplied by ``reward_scale``;
+    ``metrics["total_reward"]`` and each record's ``reward`` stay unscaled.
 
     The model's ``action_mode`` (tactical by default) selects the action mapper;
     ``input_mode`` selects legacy rasters or D-49 image inputs.
@@ -285,10 +349,14 @@ def rollout_geographic(
         values.append(float(value.item()))
         observation = next_obs
 
-    returns, advantages = returns_and_advantages(rewards, values)
-    for record, ret, adv in zip(records, returns, advantages):
+    returns, advantages = returns_and_advantages([r * reward_scale for r in rewards], values, gamma,
+                                                 gae_lambda=gae_lambda, normalize=normalize_advantages)
+    for record, ret, adv, reward in zip(records, returns, advantages, rewards):
         record["return"] = ret.to(device)
         record["advantage"] = adv.to(device)
+        record["reward"] = reward
+    for record, value in zip(records, values):
+        record["value"] = value
 
     replay = env.replay
     metrics = {
@@ -317,43 +385,72 @@ def ppo_update_geographic(
     optimizer: Any,
     records: list[dict] | list[list[dict]],
     clip_ratio: float = 0.2,
+    *,
+    epochs: int = 1,
+    minibatches: int = 1,
+    normalize_advantages: bool = False,
+    target_kl: float | None = None,
+    value_coef: float = 0.5,
+    entropy_coef: float = 0.01,
 ) -> float:
-    """Apply one clipped PPO update over rollout episodes with BPTT if recurrent.
+    """Clipped PPO over rollout episodes, with BPTT if recurrent.
 
-    The loss is the mean over all steps of the clipped policy term, half the
-    squared value error and minus 0.01 times the entropy. Gradients are
-    accumulated one episode at a time (each episode's sums divided by the total
-    step count), which gives the same gradient as a single batched backward
-    while holding only one episode's activations in memory.
+    Each optimizer step minimizes the mean over its steps of the clipped policy
+    term + ``value_coef`` × squared value error − ``entropy_coef`` × entropy.
+    Gradients are accumulated one episode at a time (sums divided by the
+    minibatch step count), equal to one batched backward with one episode's
+    activations in memory. Minibatches are groups of whole episodes, so
+    recurrent sequences stay intact; ``epochs`` passes reuse the same rollouts.
+    ``normalize_advantages`` standardizes advantages over the whole batch.
+    ``target_kl`` stops further epochs once the mean approximate KL of an epoch
+    exceeds 1.5 × target. The defaults (1 epoch, 1 minibatch) are the original
+    single-step update. Returns the mean loss over optimizer steps.
     """
     _require_torch()
     if not records:
         return 0.0
 
     episodes = [ep for ep in ([records] if isinstance(records[0], dict) else records) if ep]
-    total_steps = sum(len(ep) for ep in episodes)
-    optimizer.zero_grad()
-    total_loss = 0.0
-    for ep in episodes:
-        inputs = _stack_inputs(ep)
-        masks = torch.stack([r["mask"] for r in ep])
-        actions = torch.stack([r["action"] for r in ep])
-        old_log_probs = torch.stack([r["log_prob"] for r in ep]).detach()
-        returns = torch.stack([r["return"] for r in ep]).detach()
-        advantages = torch.stack([r["advantage"] for r in ep]).detach()
+    adv_mean, adv_std = 0.0, 1.0
+    if normalize_advantages:
+        all_adv = torch.cat([torch.stack([r["advantage"] for r in ep]) for ep in episodes])
+        adv_mean, adv_std = float(all_adv.mean()), float(all_adv.std(unbiased=False)) + 1e-8
+    minibatches = max(1, min(minibatches, len(episodes)))
+    losses = []
+    for _ in range(max(1, epochs)):
+        order = torch.randperm(len(episodes)).tolist() if minibatches > 1 else list(range(len(episodes)))
+        groups = [order[i::minibatches] for i in range(minibatches)]
+        epoch_kl = []
+        for group in groups:
+            group_steps = sum(len(episodes[i]) for i in group)
+            optimizer.zero_grad()
+            group_loss = 0.0
+            for index in group:
+                ep = episodes[index]
+                inputs = _stack_inputs(ep)
+                masks = torch.stack([r["mask"] for r in ep])
+                actions = torch.stack([r["action"] for r in ep])
+                old_log_probs = torch.stack([r["log_prob"] for r in ep]).detach()
+                returns = torch.stack([r["return"] for r in ep]).detach()
+                advantages = (torch.stack([r["advantage"] for r in ep]).detach() - adv_mean) / adv_std
 
-        log_probs, entropy, values = model.evaluate_actions(*inputs, masks, actions)
-        ratio = (log_probs - old_log_probs).exp()
-        clipped_ratio = ratio.clamp(1.0 - clip_ratio, 1.0 + clip_ratio)
-        policy_sum = -torch.minimum(ratio * advantages, clipped_ratio * advantages).sum()
-        value_sum = ((values - returns) ** 2).sum()
-        loss = (policy_sum + 0.5 * value_sum - 0.01 * entropy.sum()) / total_steps
-        loss.backward()
-        total_loss += float(loss.item())
-
-    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=0.5)
-    optimizer.step()
-    return total_loss
+                log_probs, entropy, values = model.evaluate_actions(*inputs, masks, actions)
+                log_ratio = log_probs - old_log_probs
+                ratio = log_ratio.exp()
+                clipped_ratio = ratio.clamp(1.0 - clip_ratio, 1.0 + clip_ratio)
+                policy_sum = -torch.minimum(ratio * advantages, clipped_ratio * advantages).sum()
+                value_sum = ((values - returns) ** 2).sum()
+                loss = (policy_sum + value_coef * value_sum - entropy_coef * entropy.sum()) / group_steps
+                loss.backward()
+                group_loss += float(loss.item())
+                with torch.no_grad():
+                    epoch_kl.append(float(((ratio - 1.0) - log_ratio).sum()) / max(len(ep), 1))
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=0.5)
+            optimizer.step()
+            losses.append(group_loss)
+        if target_kl is not None and sum(epoch_kl) / len(epoch_kl) > 1.5 * target_kl:
+            break
+    return sum(losses) / len(losses)
 
 
 def evaluate_geographic_policy(
@@ -390,6 +487,11 @@ def train_geographic_ppo(
     include_ros: bool = False,
     checkpoint_path: Path | str | None = None,
     checkpoint_every: int = 0,
+    ppo_epochs: int = 1,
+    minibatches: int = 1,
+    gae_lambda: float | None = None,
+    reward_scaling: bool = False,
+    target_kl: float | None = None,
 ) -> tuple[Any, list[float]]:
     """Train a geographic policy (legacy SpatialActorCritic or D-49 ImageActorCritic).
 
@@ -412,15 +514,34 @@ def train_geographic_ppo(
     losses = []
 
     partial_path = Path(f"{checkpoint_path}.partial") if checkpoint_path and checkpoint_every > 0 else None
+    scaler = RewardScaler() if reward_scaling else None
+    # Legacy defaults keep per-episode advantage normalization; the improved
+    # update normalizes over the batch instead.
+    batch_normalized = ppo_epochs > 1 or minibatches > 1 or gae_lambda is not None or reward_scaling
     for update_idx in range(updates):
         started = time.monotonic()
         batch_records = []
         for ep in range(episodes_per_update):
             scenario = random.choice(dev_scenarios)
-            records, _ = rollout_geographic(model, scenario, device=device, deterministic=False, **input_options)
+            records, _ = rollout_geographic(model, scenario, device=device, deterministic=False,
+                                            gae_lambda=gae_lambda,
+                                            normalize_advantages=not batch_normalized, **input_options)
             batch_records.append(records)
+        if scaler is not None:
+            # Scale with statistics that include this batch, then recompute targets.
+            for records in batch_records:
+                scaler.update([r["reward"] for r in records])
+            for records in batch_records:
+                returns, advantages = returns_and_advantages(
+                    [r["reward"] * scaler.scale for r in records], [r["value"] for r in records],
+                    gae_lambda=gae_lambda, normalize=False)
+                for record, ret, adv in zip(records, returns, advantages):
+                    record["return"] = ret.to(device)
+                    record["advantage"] = adv.to(device)
 
-        loss = ppo_update_geographic(model, optimizer, batch_records)
+        loss = ppo_update_geographic(model, optimizer, batch_records, epochs=ppo_epochs,
+                                     minibatches=minibatches, normalize_advantages=batch_normalized,
+                                     target_kl=target_kl)
         losses.append(loss)
         print(f"  [Update {update_idx + 1:2d}/{updates}] PPO Loss: {loss:9.4f} "
               f"(episodes: {len(batch_records)}, {time.monotonic() - started:.1f} s)", flush=True)
@@ -457,6 +578,12 @@ def main() -> None:
     parser.add_argument("--resume", type=Path, help="Path to checkpoint to resume weights from")
     parser.add_argument("--device", choices=("cpu", "mps", "cuda", "auto"), default="cpu",
                         help="torch device; auto picks cuda, then Apple mps, then cpu")
+    parser.add_argument("--ppo-epochs", type=int, default=1, help="passes over each batch of rollouts")
+    parser.add_argument("--minibatches", type=int, default=1, help="episode groups per epoch")
+    parser.add_argument("--gae-lambda", type=float, help="GAE lambda (default: Monte Carlo returns)")
+    parser.add_argument("--reward-scaling", action="store_true",
+                        help="divide rewards by the running std of discounted returns")
+    parser.add_argument("--target-kl", type=float, help="stop epochs when approx KL exceeds 1.5x this")
     parser.add_argument("--checkpoint-every", type=int, default=0,
                         help="also save weights to <checkpoint>.partial every N updates")
     parser.add_argument("--output", type=Path)
@@ -471,8 +598,13 @@ def main() -> None:
     dev_scenarios = load_geographic_split("development", args.scenarios_dir, synthetic=args.synthetic)
     input_options = {"input_mode": args.input_mode, "imagery_dir": args.imagery_dir, "include_ros": args.ros}
     model_options = {"action_mode": args.action_mode, **input_options}
-    train_options = {**model_options, "checkpoint_path": args.checkpoint, "checkpoint_every": args.checkpoint_every}
-    config_report = {"input_mode": args.input_mode, "action_mode": args.action_mode, "include_ros": args.ros,
+    ppo_options = {"ppo_epochs": args.ppo_epochs, "minibatches": args.minibatches, "gae_lambda": args.gae_lambda,
+                   "reward_scaling": args.reward_scaling, "target_kl": args.target_kl}
+    train_options = {**model_options, **ppo_options,
+                     "checkpoint_path": args.checkpoint, "checkpoint_every": args.checkpoint_every}
+    config_report = {"ppo": {"epochs": args.ppo_epochs, "minibatches": args.minibatches,
+                             "gae_lambda": args.gae_lambda, "reward_scaling": args.reward_scaling,
+                             "target_kl": args.target_kl}, "input_mode": args.input_mode, "action_mode": args.action_mode, "include_ros": args.ros,
                      "imagery_dir": str(args.imagery_dir) if args.imagery_dir else None}
 
     if args.smoke or (not args.train and not args.select and not args.eval):

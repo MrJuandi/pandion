@@ -16,6 +16,7 @@ from nightjar.geographic_ppo import (
     HAS_TORCH,
     load_geographic_split,
     ppo_update_geographic,
+    RewardScaler,
     returns_and_advantages,
     rollout_geographic,
     train_geographic_ppo,
@@ -297,6 +298,44 @@ class TestGeographicPPO(unittest.TestCase):
             torch.nn.utils.clip_grad_norm_(batched.parameters(), max_norm=0.5)
             for a, b in zip(accumulated.parameters(), batched.parameters()):
                 torch.testing.assert_close(a.grad, b.grad, atol=1e-6, rtol=1e-5)
+
+    def test_gae_limits_match_monte_carlo_and_td(self):
+        rewards, values, gamma = [1.0, -2.0, 0.5], [0.3, -0.1, 0.2], 0.9
+        mc_ret, mc_adv = returns_and_advantages(rewards, values, gamma, normalize=False)
+        ret1, adv1 = returns_and_advantages(rewards, values, gamma, gae_lambda=1.0, normalize=False)
+        torch.testing.assert_close(adv1, mc_adv)
+        torch.testing.assert_close(ret1, mc_ret)
+        _, adv0 = returns_and_advantages(rewards, values, gamma, gae_lambda=0.0, normalize=False)
+        expected = [rewards[0] + gamma * values[1] - values[0], rewards[1] + gamma * values[2] - values[1],
+                    rewards[2] - values[2]]
+        torch.testing.assert_close(adv0, torch.tensor(expected))
+
+    def test_reward_scaler_tracks_discounted_return_std(self):
+        scaler = RewardScaler(gamma=0.0)
+        self.assertEqual(scaler.scale, 1.0)
+        scaler.update([2.0, -2.0, 2.0, -2.0])
+        self.assertAlmostEqual(scaler.scale, 0.5, places=6)
+
+    def test_multi_epoch_minibatch_update_with_gae_and_scaling(self):
+        torch.manual_seed(0)
+        random.seed(0)
+        model, losses = train_geographic_ppo([self.scenario], updates=2, episodes_per_update=2,
+                                             recurrent=True, ppo_epochs=3, minibatches=2, gae_lambda=0.95,
+                                             reward_scaling=True, target_kl=0.05)
+        self.assertEqual(len(losses), 2)
+        self.assertTrue(all(torch.isfinite(torch.tensor(l)) for l in losses))
+
+    def test_more_epochs_move_weights_further(self):
+        import copy
+        torch.manual_seed(0)
+        model = SpatialActorCritic(grid_rows=15, grid_cols=15, action_dim=len(TACTICAL_ACTION_NAMES), recurrent=True)
+        episodes = [rollout_geographic(model, self.scenario)[0] for _ in range(2)]
+        moved = []
+        for epochs in (1, 4):
+            m = copy.deepcopy(model)
+            ppo_update_geographic(m, torch.optim.Adam(m.parameters(), lr=1e-3), episodes, epochs=epochs)
+            moved.append(sum(float((a - b).abs().sum()) for a, b in zip(m.parameters(), model.parameters())))
+        self.assertGreater(moved[1], moved[0])
 
     def test_train_geographic_ppo_single_update(self):
         model, losses = train_geographic_ppo(
