@@ -50,6 +50,24 @@ class TestCemsCatalog(unittest.TestCase):
             self.assertTrue(url.startswith("https://"))
             self.assertTrue(url.endswith(".zip"))
 
+    def test_additional_development_incidents_are_development_only(self):
+        from nightjar.cems_catalog import incidents_for_split, raw_package_name
+        development = incidents_for_split("development")
+        self.assertEqual(development[0], "EMSR578")
+        self.assertEqual(set(development[1:]), {"EMSR583", "EMSR625_AOI01", "EMSR625_AOI02",
+                                                "EMSR602_AOI02", "EMSR602_AOI04"})
+        self.assertEqual(incidents_for_split("validation"), ("EMSR590",))
+        self.assertEqual(incidents_for_split("reserved"), ("EMSR592", "EMSR600"))
+        self.assertEqual(raw_package_name("EMSR578"), "emsr578_del.zip")
+        self.assertEqual(raw_package_name("EMSR625_AOI02"), "emsr625-aoi02_del.zip")
+        self.assertEqual(
+            cems_product_url("EMSR625_AOI02"),
+            "https://cems-mapping-website.s3.eu-west-1.amazonaws.com/static/activations/EMSR625/"
+            "EMSR625_AOI02_DEL_PRODUCT_r1_RTP01_v1_vector.zip",
+        )
+        self.assertEqual(ACTIVATIONS["EMSR602_AOI02"]["epsg"], "EPSG:25829")
+        self.assertIsNone(ACTIVATIONS["EMSR583"]["products"]["del"]["acquired_at_utc"])
+
     def test_registry_geography_and_crs_match_registered_activations(self):
         self.assertEqual(
             (ACTIVATIONS["EMSR590"]["name"], ACTIVATIONS["EMSR590"]["country"]),
