@@ -57,6 +57,13 @@ Exact local export hashes, sampling conventions and diagnostic limits are in [PI
 - [USFS PSW-GTR-82](https://www.fs.usda.gov/psw/publications/documents/psw_gtr082/psw_gtr082.pdf): Simard equilibrium dead-fuel moisture equations use temperature Fahrenheit and RH percent. Applying station air values with first-order 1/10/100 h relaxation is the project's uncalibrated approximation, not measured fuel moisture or a full NFDRS reconstruction.
 - [Andrews (2012), wind adjustment factor](https://research.fs.usda.gov/treesearch/39729): midflame wind depends on shelter/fuel structure. The station at 2 m is used with an explicit factor 1.0 proxy; no validated 20 ft/10 m wind adjustment is asserted for it.
 
+### Real-time observation and base imagery, consulted 2026-10-02
+
+- Anderson, H. E. (1969). *Heat transfer and fire spread*. USDA Forest Service Research Paper INT-69: flaming residence time t_r ≈ 384/σ min (σ surface-area-to-volume ratio in ft⁻¹), used with front crossing time to separate burning from burned cells (D-49).
+- [Earth Search STAC API (Element84)](https://element84.com/earth-search/) and [Sentinel-2 L2A COGs on the AWS Registry of Open Data](https://registry.opendata.aws/sentinel-2-l2a-cogs/): `sentinel-2-l2a` items with `visual` (TCI) and `scl` assets used by `imagery_acquire` (D-50).
+- [Copernicus SentiWiki, Sentinel-2 processing](https://sentiwiki.copernicus.eu/web/s2-processing): L2A scene classification (SCL) classes used to screen clouds, shadows, cirrus and invalid pixels.
+- [CEMS activation API](https://mapping.emergency.copernicus.eu/activations/api/activations/EMSR578/): `activationTime` per activation, the reference for the pre-fire search window.
+
 ## Research interface references
 
 The 2026-10-01 layout review used the [Fire2a QGIS simulator parameter groups](https://fire2a.github.io/docs/qgis-toolbox/algo_simulator.html) and [IFTDSS Map Studio task separation](https://iftdss.firenet.gov/firenetHelp/help/pageHelp/content/10-mapstudio/mapstudioabout.htm). These sources inform UI workflow choices; they do not validate Nightjar physics or policy outcomes.
