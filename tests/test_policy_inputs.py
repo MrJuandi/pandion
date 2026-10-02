@@ -104,6 +104,27 @@ class PolicyInputTests(unittest.TestCase):
         self.assertTrue((ros[~nonburnable] > 0).any())
         self.assertTrue((ros <= 1.0).all())
 
+    def test_explicit_fire_ablation_has_no_image_and_fire_channels(self):
+        obs = self.replay["decisions"][-1]["observation"]
+        tz = GeographicInputTensorizer(self.scenario, None, explicit_fire=True)
+        out = tz.extract(obs)
+        self.assertEqual(len(out), 2)
+        cells, vector = out
+        self.assertEqual(cells.shape[0], GeographicInputTensorizer.BASE_CELL_CHANNELS + 3)
+        burning, burned, age = cells[-3], cells[-2], cells[-1]
+        for r, row in enumerate(obs["fire"]["cells"]):
+            for c, cell in enumerate(row):
+                self.assertEqual(burning[r, c], float(cell["fire_state"] == "burning"))
+                self.assertEqual(burned[r, c], float(cell["fire_state"] == "burned"))
+                if cell["fire_state"] == "unburned":
+                    self.assertEqual(age[r, c], 0.0)
+        self.assertTrue((age >= 0).all() and (age <= 1).all())
+        image_tz = GeographicInputTensorizer(self.scenario, self.base)
+        np.testing.assert_array_equal(cells[:-3], image_tz.extract(obs)[1])
+        np.testing.assert_array_equal(vector, image_tz.extract(obs)[2])
+        with self.assertRaises(ValueError):
+            GeographicInputTensorizer(self.scenario, None)
+
     def test_rejects_delayed_observations_and_bad_base(self):
         delayed = run_geographic_integrated(self.scenario, policy="no_intervention",
                                             observation_mode="scheduled", _stop_after_steps=1)
@@ -183,12 +204,13 @@ class ImageModelTests(unittest.TestCase):
         from nightjar.geographic_ppo import build_policy_model, ppo_update_geographic, rollout_geographic
         with tempfile.TemporaryDirectory() as tmp:
             write_imagery(Path(tmp), self.scenario, np.full((self.rows * PX, self.rows * PX, 3), 80, np.uint8))
-            for mode in ("tactical", "spatial"):
-                options = {"input_mode": "image", "imagery_dir": tmp, "include_ros": False}
+            for input_mode, mode in (("image", "tactical"), ("image", "spatial"), ("cells", "tactical")):
+                options = {"input_mode": input_mode, "imagery_dir": tmp, "include_ros": False}
                 model = build_policy_model(self.scenario, action_mode=mode, recurrent=True, **options)
                 records, metrics = rollout_geographic(model, self.scenario, **options)
                 self.assertGreater(len(records), 0)
-                self.assertEqual(len(records[0]["inputs"]), 3)
+                self.assertEqual(len(records[0]["inputs"]), 3 if input_mode == "image" else 2)
+                self.assertEqual(hasattr(model, "rgb_encoder"), input_mode == "image")
                 optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
                 loss = ppo_update_geographic(model, optimizer, [records])
                 self.assertTrue(np.isfinite(loss))

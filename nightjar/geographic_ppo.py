@@ -36,7 +36,7 @@ else:
 SMOKE_SCHEMA_VERSION = "nightjar-geographic-ppo-smoke-0.1"
 SELECTION_SCHEMA_VERSION = "nightjar-geographic-ppo-selection-0.1"
 EVAL_SCHEMA_VERSION = "nightjar-geographic-ppo-eval-0.1"
-INPUT_MODES = ("legacy", "image")
+INPUT_MODES = ("legacy", "image", "cells")
 _IMAGE_CACHE: dict[tuple[str, str], Any] = {}
 
 
@@ -47,9 +47,13 @@ def make_input_tensorizer(
     imagery_dir: Path | str | None = None,
     include_ros: bool = False,
 ) -> Any:
-    """Tensorizer for a scenario: legacy 10-channel rasters or D-49 image inputs."""
+    """Tensorizer for a scenario: legacy rasters, D-49 image inputs, or the no-image
+    ablation ``cells`` (same per-cell/vector inputs, fire state as explicit channels)."""
     if input_mode == "legacy":
         return GeographicTrainingEnv(scenario).observation_tensorizer()
+    if input_mode == "cells":
+        from .policy_inputs import GeographicInputTensorizer
+        return GeographicInputTensorizer(scenario, None, include_ros=include_ros, explicit_fire=True)
     if input_mode != "image":
         raise ValueError(f"Unknown input_mode: {input_mode}")
     if imagery_dir is None:
@@ -83,11 +87,13 @@ def build_policy_model(
                                   action_dim=len(TACTICAL_ACTION_NAMES), recurrent=recurrent)
     from .image_model import ImageActorCritic
 
-    tensorizer = make_input_tensorizer(scenario, input_mode="image", imagery_dir=imagery_dir, include_ros=include_ros)
+    tensorizer = make_input_tensorizer(scenario, input_mode=input_mode, imagery_dir=imagery_dir,
+                                       include_ros=include_ros)
     return ImageActorCritic(cell_channels=tensorizer.num_cell_channels,
                             vector_dim=tensorizer.NUM_VECTOR_FEATURES,
-                            px_per_cell=tensorizer.px_per_cell, grid_rows=rows, grid_cols=cols,
-                            action_mode=action_mode, recurrent=recurrent)
+                            px_per_cell=max(tensorizer.px_per_cell, 1), grid_rows=rows, grid_cols=cols,
+                            action_mode=action_mode, recurrent=recurrent,
+                            use_image=input_mode == "image")
 
 
 def _require_torch() -> None:
@@ -432,7 +438,7 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=42, help="Seed Python and PyTorch before training")
     parser.add_argument("--feedforward", action="store_true", help="Use feedforward instead of LSTM")
     parser.add_argument("--input-mode", choices=INPUT_MODES, default="legacy",
-                        help="legacy rasters or D-49 image inputs (needs --imagery-dir)")
+                        help="legacy rasters, D-49 image inputs (needs --imagery-dir), or the no-image ablation 'cells'")
     parser.add_argument("--action-mode", choices=("tactical", "spatial"), default="tactical",
                         help="tactical macro-actions or one drop action per cell (image inputs only)")
     parser.add_argument("--imagery-dir", type=Path, help="output directory of nightjar.imagery_acquire")
