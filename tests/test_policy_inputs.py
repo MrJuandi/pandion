@@ -140,6 +140,28 @@ class PolicyInputTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             GeographicInputTensorizer(self.scenario, None, explicit_fire=True, include_thermal=True)
 
+    def test_fleet_features_mark_other_aircraft_target(self):
+        import copy
+        two = copy.deepcopy(self.scenario)
+        two["aircraft"]["fleet_size"] = 2
+        replay = run_geographic_integrated(two, policy="heuristic")
+        obs = next(d["observation"] for d in replay["decisions"]
+                   if any(a["phase"] == "transit_to_drop" for a in d["observation"]["fleet"]))
+        tz = GeographicInputTensorizer(two, self.base, fleet_features=True)
+        _, cells, vector = tz.extract(obs)
+        self.assertEqual(cells.shape[0], GeographicInputTensorizer.BASE_CELL_CHANNELS + 2)
+        self.assertEqual(vector.shape[0], GeographicInputTensorizer.NUM_VECTOR_FEATURES + 3)
+        other = next(a for a in obs["fleet"] if a["phase"] == "transit_to_drop")
+        size = self.scenario["grid"]["cell_size_m"]
+        r, c = round(other["target_m"][1] / size), round(other["target_m"][0] / size)
+        self.assertEqual(cells[-1][r, c], 1.0)
+        self.assertEqual(cells[-1].sum(), 1.0)
+        self.assertLess(cells[-2].min(), 1.5)
+        alone = GeographicInputTensorizer(self.scenario, self.base, fleet_features=True)
+        _, cells1, vector1 = alone.extract(self.replay["decisions"][0]["observation"])
+        self.assertTrue((cells1[-2] == 1.5).all() and (cells1[-1] == 0).all())
+        self.assertTrue((vector1[-3:] == 0).all())
+
     def test_rejects_delayed_observations_and_bad_base(self):
         delayed = run_geographic_integrated(self.scenario, policy="no_intervention",
                                             observation_mode="scheduled", _stop_after_steps=1)
