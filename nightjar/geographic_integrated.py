@@ -457,7 +457,8 @@ def geographic_episode(
             fire_view = realtime_fire_view(cur_sim_time)
             weather_report = deepcopy(forcing[segment_index(cur_sim_time)]) if forcing else None
             reported_wind = weather_report["midflame_wind_to_m_s"] if weather_report else list(wind)
-            weather_status = "realtime_station_interval" if weather_report else "modeled_constant"
+            weather_status = ("modeled_constant" if not weather_report else "realtime_station_interval"
+                              if "station_weather" in weather_report else "realtime_synthetic_interval")
             fuel_moisture = deepcopy(physical_segments[segment_index(cur_sim_time)]["moisture"])
         else:
             sync_observations(cur_sim_time)
