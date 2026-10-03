@@ -47,6 +47,25 @@ def candidate_cells(observation: dict) -> list[list[int]]:
     return [[r, c] for r, c in sorted(candidates)]
 
 
+# Cells wetted by one drop: the target and its 4-neighbours (same footprint as the
+# geographic executor). Used to keep heuristic aircraft off each other's targets.
+_DROP_FOOTPRINT = ((0, 0), (-1, 0), (1, 0), (0, -1), (0, 1))
+
+
+def claimed_cells(observation: dict) -> set[tuple[int, int]]:
+    """Cells inside the drop footprint of other aircraft already flying to a drop."""
+    ego = observation.get("aircraft_index", 0)
+    cell_size = float(observation["cell_size_m"])
+    claimed = set()
+    for other in observation.get("fleet", []):
+        if other["index"] == ego or other.get("phase") != "transit_to_drop" or other.get("target_m") is None:
+            continue
+        r = int(round(other["target_m"][1] / cell_size))
+        c = int(round(other["target_m"][0] / cell_size))
+        claimed.update((r + dr, c + dc) for dr, dc in _DROP_FOOTPRINT)
+    return claimed
+
+
 def choose_order(
     policy: str,
     observation: dict,
@@ -58,6 +77,11 @@ def choose_order(
     ``policy`` is one of ``no_intervention``, ``random_valid``,
     ``heuristic``, or ``containment_heuristic``. The latter three use only
     observed cells and static fuel/aircraft data.
+
+    With several aircraft, ``heuristic`` and ``containment_heuristic`` skip
+    candidates inside another aircraft's pending drop footprint, so two aircraft
+    do not attack the same spot; if every candidate is claimed they fall back
+    to all candidates. ``random_valid`` samples all valid candidates.
     """
     if policy not in {"no_intervention", "random_valid", "heuristic", "containment_heuristic"}:
         raise ValueError("policy must be no_intervention, random_valid, heuristic, or containment_heuristic")
@@ -71,6 +95,10 @@ def choose_order(
     candidates = candidate_cells(observation) if candidates is None else candidates
     if not candidates:
         return {"type": "HOLD"}
+    if policy != "random_valid":
+        claimed = claimed_cells(observation)
+        free = [cand for cand in candidates if (cand[0], cand[1]) not in claimed]
+        candidates = free or candidates
     if policy == "random_valid":
         if rng is None:
             raise ValueError("random_valid requires a random.Random instance")

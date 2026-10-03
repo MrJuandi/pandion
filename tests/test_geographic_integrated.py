@@ -241,6 +241,23 @@ class TestGeographicIntegrated(unittest.TestCase):
             seen = seen + [cell for drop in result["drops"] if drop["time_s"] == decision["time_s"]
                            and decision["order"]["type"] == "DROP" for cell in drop["treated_cells"]]
 
+    def test_heuristic_aircraft_do_not_share_drop_footprints(self):
+        from nightjar.policies import claimed_cells
+        for policy in ("heuristic", "containment_heuristic"):
+            result = run_geographic_integrated(self._fleet(2), policy=policy)
+            for decision in result["decisions"]:
+                if decision["order"]["type"] != "DROP":
+                    continue
+                obs = decision["observation"]
+                size = obs["cell_size_m"]
+                target = (round(decision["order"]["target_m"][1] / size), round(decision["order"]["target_m"][0] / size))
+                claimed = claimed_cells(obs)
+                if claimed:
+                    from nightjar.policies import candidate_cells
+                    free = [c for c in candidate_cells(obs) if (c[0], c[1]) not in claimed]
+                    if free:
+                        self.assertNotIn(target, claimed, policy)
+
     def test_invalid_fleet_size_rejected(self):
         with self.assertRaises(ValueError):
             run_geographic_integrated(self._fleet(0), policy="no_intervention")
