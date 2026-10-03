@@ -208,7 +208,14 @@ class GeographicInputTensorizer:
         return (cells, vector_array) if rgb is None else (rgb, cells, vector_array)
 
     def to_torch(self, observation: dict, device: Any = None) -> tuple[Any, ...]:
-        """Batched tensors matching ``extract`` with a leading batch dimension of 1."""
+        """Batched tensors matching ``extract`` with a leading batch dimension of 1.
+
+        The RGB view is returned as exact uint8 (the composite is uint8), a quarter
+        of the float32 memory in stored rollouts; ``ImageActorCritic`` rescales it.
+        """
         import torch
 
-        return tuple(torch.from_numpy(a).unsqueeze(0).to(device) for a in self.extract(observation))
+        arrays = list(self.extract(observation))
+        if self.base_image is not None:
+            arrays[0] = np.rint(arrays[0] * 255.0).astype(np.uint8)
+        return tuple(torch.from_numpy(a).unsqueeze(0).to(device) for a in arrays)
