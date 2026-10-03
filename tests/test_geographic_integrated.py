@@ -188,6 +188,63 @@ class TestGeographicIntegrated(unittest.TestCase):
         self.assertEqual(full["pending_observation"], lean["pending_observation"])
         self.assertEqual(full["outcomes"], lean["outcomes"])
 
+    def _fleet(self, size):
+        import copy
+        scenario = copy.deepcopy(self.scenario)
+        scenario["aircraft"]["fleet_size"] = size
+        return scenario
+
+    def test_two_aircraft_both_act_and_observe_the_fleet(self):
+        result = run_geographic_integrated(self._fleet(2), policy="heuristic")
+        egos = {d["aircraft_index"] for d in result["decisions"]}
+        self.assertEqual(egos, {0, 1})
+        drops = [d for d in result["decisions"] if d["order"]["type"] == "DROP"]
+        self.assertEqual({d["aircraft_index"] for d in drops}, {0, 1})
+        for decision in result["decisions"]:
+            obs = decision["observation"]
+            self.assertEqual(obs["aircraft_index"], decision["aircraft_index"])
+            ego = obs["fleet"][obs["aircraft_index"]]
+            self.assertEqual(ego["phase"], "idle")
+            self.assertEqual(ego["position_m"], obs["aircraft"]["position_m"])
+            self.assertEqual(len(obs["fleet"]), 2)
+        times = [d["decision_time_s"] for d in result["decisions"]]
+        self.assertEqual(times, sorted(times))
+        self.assertEqual({e["aircraft_index"] for e in result["aircraft_track"]}, {0, 1})
+
+    def test_other_aircraft_position_is_interpolated_during_transit(self):
+        result = run_geographic_integrated(self._fleet(2), policy="heuristic")
+        for decision in result["decisions"]:
+            for other in decision["observation"]["fleet"]:
+                if other["phase"] == "transit_to_drop" and other["busy_remaining_s"] > 1.0:
+                    self.assertNotEqual(other["position_m"], [round(v, 2) for v in other["target_m"]])
+                    return
+        self.fail("no aircraft observed in transit")
+
+    def test_drop_effects_respect_time_order_and_never_precede_decisions(self):
+        result = run_geographic_integrated(self._fleet(2), policy="heuristic")
+        drop_times = [d["time_s"] for d in result["drops"]]
+        self.assertEqual(drop_times, sorted(drop_times))
+        for decision in result["decisions"]:
+            if decision["order"]["type"] == "DROP":
+                self.assertGreaterEqual(decision["time_s"], decision["decision_time_s"])
+
+    def test_more_aircraft_do_not_change_unmitigated_fire(self):
+        one = run_geographic_integrated(self.scenario, policy="no_intervention")
+        two = run_geographic_integrated(self._fleet(2), policy="no_intervention")
+        self.assertEqual(one["arrival_time_s"], two["arrival_time_s"])
+
+    def test_audit_observation_is_what_the_controller_saw(self):
+        result = run_geographic_integrated(self.scenario, policy="heuristic")
+        seen = []
+        for decision in result["decisions"]:
+            self.assertEqual(decision["observation"]["known_treated_cells"], seen)
+            seen = seen + [cell for drop in result["drops"] if drop["time_s"] == decision["time_s"]
+                           and decision["order"]["type"] == "DROP" for cell in drop["treated_cells"]]
+
+    def test_invalid_fleet_size_rejected(self):
+        with self.assertRaises(ValueError):
+            run_geographic_integrated(self._fleet(0), policy="no_intervention")
+
     def test_unknown_observation_mode_rejected(self):
         with self.assertRaises(ValueError):
             run_geographic_integrated(self.scenario, policy="no_intervention", observation_mode="delayed")

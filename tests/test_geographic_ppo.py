@@ -325,6 +325,15 @@ class TestGeographicPPO(unittest.TestCase):
         self.assertEqual(len(losses), 2)
         self.assertTrue(all(torch.isfinite(torch.tensor(l)) for l in losses))
 
+    def test_with_fleet_rehashes_copies(self):
+        from nightjar.geographic_ppo import with_fleet
+        from nightjar.geographic_family import canonical_hash
+        self.assertIs(with_fleet([self.scenario], 1)[0], self.scenario)
+        two = with_fleet([self.scenario], 2)[0]
+        self.assertEqual(two["aircraft"]["fleet_size"], 2)
+        self.assertNotIn("fleet_size", self.scenario["aircraft"])
+        self.assertEqual(two["scenario_hash"], canonical_hash({k: v for k, v in two.items() if k != "scenario_hash"}))
+
     def test_entropy_schedule_decays_linearly(self):
         from unittest.mock import patch
         seen = []

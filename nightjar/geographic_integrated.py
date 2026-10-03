@@ -383,11 +383,24 @@ def geographic_episode(
         })
     schedule = sorted(schedule, key=lambda x: x["observed_at_s"])
 
-    # Discrete aircraft simulation state
+    # Discrete aircraft simulation state: a fleet of identical aircraft. Each has
+    # a time at which it is free again; decisions are taken for the lowest-index
+    # free aircraft, and drops take effect when that aircraft reaches the target.
+    # With one aircraft this reproduces the original sequential loop exactly.
+    fleet_size = int(ac_config.get("fleet_size", 1))
+    if fleet_size < 1:
+        raise ValueError("aircraft.fleet_size must be at least 1")
+    extra_starts = ac_config.get("fleet_initial_positions_utm") or []
+    starts = [(init_ac_x, init_ac_y)]
+    for i in range(1, fleet_size):
+        if i - 1 < len(extra_starts):
+            starts.append((float(extra_starts[i - 1][0]) - origin_x, float(extra_starts[i - 1][1]) - origin_y))
+        else:
+            starts.append((refill_x, refill_y))  # additional aircraft start at the water source
+    fleet = [{"pos": [x, y], "water": capacity_l, "free_at": 0.0, "task": None} for x, y in starts]
+    pending_effects: list[tuple[float, int, int, str, Any]] = []
+    effect_seq = 0
     cur_sim_time = 0.0
-    aircraft_pos = [init_ac_x, init_ac_y]
-    aircraft_water = capacity_l
-    aircraft_phase = "idle"
     total_flight_dist_m = 0.0
     total_water_dropped_l = 0
     refills_count = 0
@@ -400,7 +413,41 @@ def geographic_episode(
     schedule_idx = 0
 
     decisions_log: list[dict] = []
-    aircraft_track = [{"time_s": 0.0, "position_m": list(aircraft_pos)}]
+    aircraft_track = [{"time_s": 0.0, "position_m": list(fleet[0]["pos"])}] if fleet_size == 1 else [
+        {"time_s": 0.0, "position_m": list(a["pos"]), "aircraft_index": i} for i, a in enumerate(fleet)]
+
+    def apply_effects(until_s: float) -> None:
+        """Apply scheduled drop/refill completions up to ``until_s`` in time order."""
+        pending_effects.sort(key=lambda e: (e[0], e[1]))
+        while pending_effects and pending_effects[0][0] <= until_s + 1e-9:
+            effect_time, _, index, kind, payload = pending_effects.pop(0)
+            advance_fire(effect_time)
+            craft = fleet[index]
+            if kind == "drop":
+                treated = apply_water_drop(effect_time, payload[0], payload[1])
+                known_treated_cells.extend(treated)
+                craft["pos"] = [payload[0], payload[1]]
+                craft["water"] = max(0, craft["water"] - capacity_l)
+            elif kind == "refill":
+                craft["pos"] = [refill_x, refill_y]
+                craft["water"] = capacity_l
+            craft["task"] = None
+
+    def fleet_view(time_s: float) -> list[dict]:
+        """Every aircraft's state at ``time_s``; positions interpolated along transits."""
+        view = []
+        for index, craft in enumerate(fleet):
+            task = craft["task"] if craft["free_at"] > time_s + 1e-9 else None
+            position, phase, target = list(craft["pos"]), "idle", None
+            if task is not None:
+                phase, target = task["phase"], list(task["to"])
+                span = task["arrive"] - task["t0"]
+                frac = 1.0 if span <= 0 else min(max((time_s - task["t0"]) / span, 0.0), 1.0)
+                position = [task["from"][k] + frac * (task["to"][k] - task["from"][k]) for k in range(2)]
+            view.append({"index": index, "position_m": [round(position[0], 2), round(position[1], 2)],
+                         "water_l": craft["water"], "phase": phase, "target_m": target,
+                         "busy_remaining_s": round(max(craft["free_at"] - time_s, 0.0), 2)})
+        return view
 
     def sync_observations(to_time: float) -> None:
         """Capture observations and deliver ready reports up to to_time."""
@@ -447,7 +494,16 @@ def geographic_episode(
     pending_observation = None
 
     # Main decision and event progression loop
-    while cur_sim_time < horizon_s:
+    while True:
+        apply_effects(cur_sim_time)
+        if cur_sim_time >= horizon_s:
+            break
+        idle = [i for i, craft in enumerate(fleet) if craft["free_at"] <= cur_sim_time + 1e-9]
+        if not idle:
+            cur_sim_time = min(craft["free_at"] for craft in fleet)
+            continue
+        ego = idle[0]
+        aircraft_pos, aircraft_water = fleet[ego]["pos"], fleet[ego]["water"]
         advance_fire(cur_sim_time)
 
         # Build current observation for the policy. Real-time mode exposes the
@@ -473,7 +529,7 @@ def geographic_episode(
             "aircraft": {
                 "position_m": [round(aircraft_pos[0], 2), round(aircraft_pos[1], 2)],
                 "water_l": aircraft_water,
-                "phase": aircraft_phase,
+                "phase": "idle",
                 "target_m": None,
                 "refill_remaining_s": 0.0,
             },
@@ -489,6 +545,9 @@ def geographic_episode(
             "elevation_m": deepcopy(elevation_input) if elevation_input is not None else deepcopy(scenario.get("elevation_m", [[0.0] * cols for _ in range(rows)])),
             "known_treated_cells": known_treated_cells,
         }
+        if fleet_size > 1:
+            current_obs["aircraft_index"] = ego
+            current_obs["fleet"] = fleet_view(cur_sim_time)
 
         burned_now = sum(1 for r in range(rows) for c in range(cols)
                          if arrival[r][c] is not None and arrival[r][c] <= cur_sim_time + 1e-9)
@@ -500,74 +559,79 @@ def geographic_episode(
             break
 
         order_type = order["type"]
+        craft = fleet[ego]
+        decided_at = cur_sim_time
 
         if order_type == "HOLD":
-            # Advance time by decision interval (e.g. 60s)
-            advance_dt = min(60.0, horizon_s - cur_sim_time)
-            cur_sim_time += advance_dt
+            # Hold for one decision interval (60 s)
+            craft["free_at"] = decided_at + min(60.0, horizon_s - decided_at)
+            craft["task"] = {"phase": "holding", "t0": decided_at, "from": list(aircraft_pos),
+                             "to": list(aircraft_pos), "arrive": craft["free_at"]}
             decisions_log.append({
-                "time_s": round(cur_sim_time, 2),
+                "time_s": round(craft["free_at"], 2),
                 "order": order,
                 "aircraft_water_l": aircraft_water,
             })
+            track_position = list(aircraft_pos)
 
         elif order_type == "RETURN_TO_REFILL":
-            # Fly to refill waterbody
+            # Fly to the refill waterbody, then scoop
             dist = hypot(refill_x - aircraft_pos[0], refill_y - aircraft_pos[1])
             transit_time = dist / cruise_speed
             total_time = transit_time + refill_service_s
-
-            target_time = min(horizon_s, cur_sim_time + total_time)
-            # Advance fire to arrival and refill completion
-            advance_fire(min(horizon_s, cur_sim_time + transit_time))
-            advance_fire(target_time)
-
+            craft["free_at"] = min(horizon_s, decided_at + total_time)
+            craft["task"] = {"phase": "refill", "t0": decided_at, "from": list(aircraft_pos),
+                             "to": [refill_x, refill_y], "arrive": decided_at + transit_time}
+            pending_effects.append((craft["free_at"], effect_seq, ego, "refill", None))
+            effect_seq += 1
             total_flight_dist_m += dist * 2.0  # roundtrip transit consideration
-            aircraft_pos = [refill_x, refill_y]
-            aircraft_water = capacity_l
             refills_count += 1
-            cur_sim_time = target_time
-
             decisions_log.append({
-                "time_s": round(cur_sim_time, 2),
+                "time_s": round(craft["free_at"], 2),
                 "order": order,
                 "refill_transit_s": round(transit_time, 2),
-                "aircraft_water_l": aircraft_water,
+                "aircraft_water_l": capacity_l,
             })
+            track_position = [refill_x, refill_y]
 
         elif order_type == "DROP":
             target_x, target_y = order["target_m"]
             dist = hypot(target_x - aircraft_pos[0], target_y - aircraft_pos[1])
-            transit_time = dist / cruise_speed
-            drop_time = cur_sim_time + transit_time
-
+            drop_time = decided_at + dist / cruise_speed
             if drop_time <= horizon_s:
-                advance_fire(drop_time)
-                # Execute water drop
-                treated = apply_water_drop(drop_time, target_x, target_y)
-                known_treated_cells.extend(treated)
-                aircraft_water = max(0, aircraft_water - capacity_l)
+                craft["free_at"] = drop_time
+                pending_effects.append((drop_time, effect_seq, ego, "drop", (target_x, target_y)))
+                effect_seq += 1
                 drops_count += 1
                 total_water_dropped_l += capacity_l
                 total_flight_dist_m += dist
-                aircraft_pos = [target_x, target_y]
-                cur_sim_time = drop_time
+                water_after = max(0, aircraft_water - capacity_l)
+                track_position = [target_x, target_y]
             else:
                 # Horizon reached during transit
-                cur_sim_time = horizon_s
-
+                craft["free_at"] = horizon_s
+                water_after = aircraft_water
+                track_position = list(aircraft_pos)
+            craft["task"] = {"phase": "transit_to_drop", "t0": decided_at, "from": list(aircraft_pos),
+                             "to": [target_x, target_y], "arrive": drop_time}
             decisions_log.append({
-                "time_s": round(cur_sim_time, 2),
+                "time_s": round(craft["free_at"], 2),
                 "order": order,
-                "aircraft_water_l": aircraft_water,
+                "aircraft_water_l": water_after,
             })
+        else:
+            raise ValueError(f"Unknown order type: {order_type}")
 
         # Audit output only: the controller still receives current_obs alone.
         decisions_log[-1]["decision_time_s"] = current_obs["time_s"]
+        if fleet_size > 1:
+            decisions_log[-1]["aircraft_index"] = ego
         if record_observations:
             decisions_log[-1]["observation"] = deepcopy(current_obs)
-        aircraft_track.append({"time_s": round(cur_sim_time, 2),
-                               "position_m": list(aircraft_pos)})
+        track_entry = {"time_s": round(craft["free_at"], 2), "position_m": track_position}
+        if fleet_size > 1:
+            track_entry["aircraft_index"] = ego
+        aircraft_track.append(track_entry)
 
     if not truncated:
         # Final fire advancement to horizon only if running full episode
