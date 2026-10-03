@@ -39,6 +39,10 @@ Acquisition on 2026-10-02 for `runs/geographic-environment-family-expanded-20261
 
 Limits: TCI is a display product and not radiometrically calibrated reflectance. Pre-fire vegetation can differ from the state at ignition. Composite seams can join different dates. The image does not show the CEMS-mapped initial perimeter, which is drawn over it from the scenario state in the planned per-step composite. No overlay, policy input or simulator behaviour uses the imagery yet.
 
+## Multi-focus, shifting-wind family (D-60)
+
+`python3 -m nightjar.multi_ignition_family --scenarios-dir PARENT --output-dir OUT` derives, for each parent scenario, scenarios with 2–4 separated foci inside the CEMS burned area and synthetic wind that shifts every 900 s. The wind is stored as `weather_mode: "synthetic_intervals"` forcing, validated to be continuous, to cover the horizon and to be known at each interval's start. Parents with measured station intervals keep them. The viewer labels the mode "Viento sintético variable".
+
 ## Physics and observation separation
 
 Directional Pyretechnics behavior is cached by forcing interval. For each grid edge, the harmonic mean of source/target rates gives its speed. Remaining travel distance is integrated across interval boundaries; using a single start-time speed for an edge crossing a weather change is avoided. Constant-weather cases keep the legacy propagation path. The existing wind limit and minimum burnable rate remain model assumptions; heterogeneous convergence and alternative numerical schemes remain untested.
