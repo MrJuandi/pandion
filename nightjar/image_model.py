@@ -71,6 +71,7 @@ if HAS_TORCH:
             recurrent: bool = True,
             lstm_hidden_dim: int = 128,
             use_image: bool = True,
+            image_channels: int = 3,
         ) -> None:
             super().__init__()
             if action_mode not in ("tactical", "spatial"):
@@ -86,7 +87,7 @@ if HAS_TORCH:
 
             if use_image:
                 self.rgb_encoder = nn.Sequential(
-                    nn.Conv2d(3, 16, 3, padding=1), nn.LeakyReLU(0.01),
+                    nn.Conv2d(image_channels, 16, 3, padding=1), nn.LeakyReLU(0.01),
                     nn.Conv2d(16, 16, 3, padding=1), nn.LeakyReLU(0.01),
                     nn.Conv2d(16, width, kernel_size=px_per_cell, stride=px_per_cell), nn.LeakyReLU(0.01),
                 )
