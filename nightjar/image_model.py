@@ -22,6 +22,7 @@ from __future__ import annotations
 from typing import Any
 
 from .model import TACTICAL_ACTION_NAMES
+from .parametric_actions import ASPECTS, MAX_SLOTS, NUM_ACTIONS as PARAMETRIC_ACTIONS
 
 try:
     import torch
@@ -74,7 +75,7 @@ if HAS_TORCH:
             image_channels: int = 3,
         ) -> None:
             super().__init__()
-            if action_mode not in ("tactical", "spatial"):
+            if action_mode not in ("tactical", "spatial", "parametric"):
                 raise ValueError(f"Unknown action_mode: {action_mode}")
             self.config = {k: v for k, v in locals().items() if k not in ("self", "__class__")}
             self.action_mode = action_mode
@@ -83,7 +84,11 @@ if HAS_TORCH:
             self.use_image = use_image
             self.recurrent = recurrent
             self.lstm_hidden_dim = lstm_hidden_dim
-            self.action_dim = len(TACTICAL_ACTION_NAMES) if action_mode == "tactical" else 2 + grid_rows * grid_cols
+            self.action_dim = {"tactical": len(TACTICAL_ACTION_NAMES), "parametric": PARAMETRIC_ACTIONS}.get(
+                action_mode, 2 + grid_rows * grid_cols)
+            # Parametric mode: the last MAX_SLOTS cell channels are focus-slot masks.
+            self.slot_channels = MAX_SLOTS if action_mode == "parametric" else 0
+            self._slot_masks: torch.Tensor | None = None
 
             if use_image:
                 self.rgb_encoder = nn.Sequential(
@@ -104,6 +109,10 @@ if HAS_TORCH:
             self.critic_head = nn.Linear(head_dim, 1)
             if action_mode == "tactical":
                 self.actor_head = nn.Linear(head_dim, self.action_dim)
+            elif action_mode == "parametric":
+                self.global_actor_head = nn.Linear(head_dim, 2)
+                self.slot_actor_head = nn.Sequential(
+                    nn.Linear(width + head_dim + 1, 64), nn.LeakyReLU(0.01), nn.Linear(64, len(ASPECTS)))
             else:
                 self.global_actor_head = nn.Linear(head_dim, 2)
                 self.cell_condition = nn.Linear(head_dim, width)
@@ -143,6 +152,8 @@ if HAS_TORCH:
 
             Returns (cell features [B, width, H, W], latent [B, hidden_dim])."""
             rgb, cells, vector = self._split(inputs)
+            if self.slot_channels:
+                self._slot_masks = cells[:, -self.slot_channels:]
             stem_input = cells
             if self.use_image:
                 image_features = self._encode_image(rgb)
@@ -160,6 +171,15 @@ if HAS_TORCH:
             values = self.critic_head(h).squeeze(-1)
             if self.action_mode == "tactical":
                 return self.actor_head(h), values
+            if self.action_mode == "parametric":
+                # Focus k's logits come from cell features pooled over its mask, plus the latent.
+                masks = self._slot_masks
+                area = masks.sum(dim=(2, 3))
+                pooled = torch.einsum("bkhw,bchw->bkc", masks, features) / area.clamp(min=1.0)[..., None]
+                present = (area > 0).float()[..., None]
+                slot_in = torch.cat([pooled, h[:, None, :].expand(-1, masks.shape[1], -1), present], dim=-1)
+                slot_logits = self.slot_actor_head(slot_in).flatten(1)
+                return torch.cat([self.global_actor_head(h), slot_logits], dim=-1), values
             conditioned = F.leaky_relu(features + self.cell_condition(h)[:, :, None, None], 0.01)
             cell_logits = self.cell_actor_head(conditioned).flatten(1)
             return torch.cat([self.global_actor_head(h), cell_logits], dim=-1), values
