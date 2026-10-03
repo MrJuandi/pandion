@@ -27,6 +27,7 @@ import numpy as np
 from .environment import MOISTURE_KEYS
 from .geographic_integrated import DEFAULT_CAPACITY_L
 from .imagery_composite import compose_view, thermal_view
+from .parametric_actions import MAX_SLOTS, slot_masks
 
 # Fuel families from Scott & Burgan (2005) code ranges and Anderson (1982) 1-13.
 FUEL_FAMILIES = ("nonburnable", "grass", "grass_shrub", "shrub", "timber_understory", "timber_litter", "slash_blowdown")
@@ -69,7 +70,8 @@ class GeographicInputTensorizer:
     FIRE_CHANNELS = 3  # burning, burned, time since front arrival (ablation without image)
 
     def __init__(self, scenario: dict, base_image: np.ndarray | None, *, include_ros: bool = False,
-                 explicit_fire: bool = False, include_thermal: bool = False) -> None:
+                 explicit_fire: bool = False, include_thermal: bool = False,
+                 focus_slots: bool = False) -> None:
         """``base_image=None`` with ``explicit_fire=True`` is the no-image ablation:
         fire state enters as per-cell channels and ``extract`` returns (cells, vector)."""
         grid = scenario["grid"]
@@ -96,8 +98,10 @@ class GeographicInputTensorizer:
             raise ValueError("the thermal band is part of the image input; it needs a base image")
         self.include_thermal = include_thermal
         self.image_channels = 4 if include_thermal else 3
+        self.focus_slots = focus_slots
         self.num_cell_channels = (self.BASE_CELL_CHANNELS + (1 if include_ros else 0)
-                                  + (self.FIRE_CHANNELS if explicit_fire else 0))
+                                  + (self.FIRE_CHANNELS if explicit_fire else 0)
+                                  + (MAX_SLOTS if focus_slots else 0))
         self._static: np.ndarray | None = None
         self._ros_cache: dict[tuple, np.ndarray] = {}
         self._diagonal_m = hypot(self.rows * self.cell_size_m, self.cols * self.cell_size_m)
@@ -195,6 +199,9 @@ class GeographicInputTensorizer:
         parts = [self._static_channels(observation), np.stack(dynamic)]
         if self.explicit_fire:
             parts.append(self.fire_channels(observation))
+        if self.focus_slots:
+            # Last channels: masks of the parametric-action focus slots (D-61).
+            parts.append(np.asarray(slot_masks(observation), dtype=np.float32))
         cells = np.concatenate(parts).astype(np.float32)
 
         wind = observation.get("midflame_wind_to_m_s", [0.0, 0.0])
