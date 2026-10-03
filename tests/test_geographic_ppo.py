@@ -325,6 +325,18 @@ class TestGeographicPPO(unittest.TestCase):
         self.assertEqual(len(losses), 2)
         self.assertTrue(all(torch.isfinite(torch.tensor(l)) for l in losses))
 
+    def test_entropy_schedule_decays_linearly(self):
+        from unittest.mock import patch
+        seen = []
+        real = ppo_update_geographic
+        def spy(*args, **kwargs):
+            seen.append(kwargs["entropy_coef"])
+            return real(*args, **kwargs)
+        with patch("nightjar.geographic_ppo.ppo_update_geographic", side_effect=spy):
+            train_geographic_ppo([self.scenario], updates=3, episodes_per_update=1,
+                                 entropy_coef=0.05, entropy_coef_final=0.01)
+        self.assertEqual([round(x, 6) for x in seen], [0.05, 0.03, 0.01])
+
     def test_more_epochs_move_weights_further(self):
         import copy
         torch.manual_seed(0)
