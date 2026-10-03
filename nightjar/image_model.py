@@ -27,6 +27,7 @@ try:
     import torch
     import torch.nn as nn
     import torch.nn.functional as F
+    from torch.utils.checkpoint import checkpoint
     from torch.distributions import Categorical
     HAS_TORCH = True
 except ImportError:  # pragma: no cover - exercised only without PyTorch
@@ -113,6 +114,23 @@ if HAS_TORCH:
             zeros = torch.zeros(batch_size, self.lstm_hidden_dim, device=device)
             return zeros, zeros.clone()
 
+        IMAGE_CHUNK = 8
+
+        def _encode_image(self, rgb: torch.Tensor) -> torch.Tensor:
+            """Encode the view, accepting uint8 (0-255) or float (0-1) pixels.
+
+            With gradients enabled, chunks of ``IMAGE_CHUNK`` frames are
+            checkpointed: full-resolution activations are recomputed during
+            backward instead of stored. Gradients are unchanged; peak memory
+            for a long episode drops from all frames to one chunk.
+            """
+            if rgb.dtype == torch.uint8:
+                rgb = rgb.float() / 255.0
+            if not (torch.is_grad_enabled() and self.training) or rgb.shape[0] <= self.IMAGE_CHUNK:
+                return self.rgb_encoder(rgb)
+            return torch.cat([checkpoint(self.rgb_encoder, part, use_reentrant=False)
+                              for part in rgb.split(self.IMAGE_CHUNK)], dim=0)
+
         def _split(self, inputs: tuple) -> tuple:
             expected = 3 if self.use_image else 2
             if len(inputs) != expected:
@@ -126,7 +144,7 @@ if HAS_TORCH:
             rgb, cells, vector = self._split(inputs)
             stem_input = cells
             if self.use_image:
-                image_features = self.rgb_encoder(rgb)
+                image_features = self._encode_image(rgb)
                 if image_features.shape[-2:] != cells.shape[-2:]:
                     raise ValueError("RGB view does not reduce to the cell grid; check pixels per cell")
                 stem_input = torch.cat([image_features, cells], dim=1)
