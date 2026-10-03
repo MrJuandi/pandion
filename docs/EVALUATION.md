@@ -393,3 +393,19 @@ Validation mean final burned area (ha), 8 scenarios:
 | D-52 image model | 1383.75 | 1391.38 | 1384.25 | 1392.75 | 1388.03 |
 
 Baselines on the same scenarios: no intervention 1406.62, random valid 1389.81, heuristic 1383.75, containment heuristic 1384.25. The mapped initial perimeter already covers about 1,380 of 1,600 ha, so at most about 23 ha separate no intervention from the best baseline. No learned policy beat the heuristic; differences between learned policies are a few hectares across four seeds and eight scenarios from one activation, below what this design can resolve. These runs do not satisfy the predeclared improvement criteria and support no performance claim. A larger family with smaller initial perimeters is needed for an informative comparison.
+
+## Thermal image policy on the ignition family (D-55, D-58, 2026-10-03)
+
+Exploratory development/validation run; no reserved scenario was evaluated. Family `runs/geographic-ignition-family-expanded-20261002` (192 development scenarios over six incidents, 24 validation EMSR590), D-52 image model with the D-58 thermal band, tactical actions, recurrent, `--select --candidates 1 --updates 60 --episodes-per-update 8 --device mps --ppo-epochs 4 --minibatches 4 --gae-lambda 0.95 --reward-scaling --target-kl 0.02`, seeds 42–45, commit `27d5e9c`, about 20 minutes for four concurrent seeds.
+
+Validation mean final burned area (ha), 24 scenarios, same real-time simulator for all rows:
+
+| Policy | Mean |
+|---|---|
+| No intervention | 69.29 |
+| Random valid (2 seeds) | 44.06 |
+| Heuristic | 39.50 |
+| Containment heuristic | **38.79** |
+| Thermal image PPO, seed 42 / 43 / 44 / 45 | 48.50 / 39.50 / 39.50 / 39.42 |
+
+Three seeds reach the heuristic; none beats the containment heuristic, so the predeclared improvement criteria are not met. Deterministic validation actions show near-fixed macro-action preferences when a choice exists: seed 45 chose `ATTACK_HEAD_NEAREST` in 138 of 163 choices, seed 42 favoured `ATTACK_CLOSEST` (124 of 174) and is the weakest seed. The policy has learned a good default macro-action rather than situation-dependent choices.
