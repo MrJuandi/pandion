@@ -13,11 +13,45 @@ def _is_burnable_fuel(val: Any) -> bool:
     return str(val).upper() not in ("NONE", "0", "")
 
 
+# Cells wetted by one drop: the target and its 4-neighbours (same footprint as the
+# geographic executor). Two such footprints overlap iff their targets are within
+# Manhattan distance 2.
+_DROP_FOOTPRINT = ((0, 0), (-1, 0), (1, 0), (0, -1), (0, 1))
+_OVERLAP_RADIUS = 2
+
+
+def claimed_cells(observation: dict) -> set[tuple[int, int]]:
+    """Drop targets forbidden to the ego aircraft (D-63).
+
+    A target is forbidden when its footprint would overlap the footprint of
+    another aircraft already flying to a drop (Manhattan distance <= 2 between
+    targets). Read from the observed ``fleet`` only; empty with one aircraft.
+    """
+    fleet = observation.get("fleet")
+    if not fleet:
+        return set()
+    ego = observation.get("aircraft_index", 0)
+    cell_size = float(observation["cell_size_m"])
+    claimed = set()
+    for other in fleet:
+        if other["index"] == ego or other.get("phase") != "transit_to_drop" or other.get("target_m") is None:
+            continue
+        r = int(round(other["target_m"][1] / cell_size))
+        c = int(round(other["target_m"][0] / cell_size))
+        claimed.update((r + dr, c + dc)
+                       for dr in range(-_OVERLAP_RADIUS, _OVERLAP_RADIUS + 1)
+                       for dc in range(-_OVERLAP_RADIUS, _OVERLAP_RADIUS + 1)
+                       if abs(dr) + abs(dc) <= _OVERLAP_RADIUS)
+    return claimed
+
+
 def candidate_cells(observation: dict) -> list[list[int]]:
     """Return observed unburned burnable cells adjacent to an observed active fire.
 
     Only delivered cell records in ``observation['fire']['cells']`` are read;
-    unknown cells never count as either burning or unburned.
+    unknown cells never count as either burning or unburned. With several
+    aircraft, targets whose drop footprint would overlap another aircraft's
+    pending drop are excluded (D-63), for every policy and action mapper.
     """
     fire = observation["fire"]
     cells = fire["cells"]
@@ -35,6 +69,7 @@ def candidate_cells(observation: dict) -> list[list[int]]:
         if isinstance(cells[r][c], dict) and cells[r][c].get("fire_detected") is True
     }
     treated = {tuple(cell) for cell in observation.get("known_treated_cells", [])}
+    forbidden = claimed_cells(observation)
     candidates = set()
     for r, c in burning:
         for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1)):
@@ -42,28 +77,9 @@ def candidate_cells(observation: dict) -> list[list[int]]:
             if not (0 <= nr < rows and 0 <= nc < cols):
                 continue
             record = cells[nr][nc]
-            if (nr, nc) not in treated and _is_burnable_fuel(fuel[nr][nc]) and isinstance(record, dict) and record.get("fire_detected") is False:
+            if (nr, nc) not in treated and (nr, nc) not in forbidden and _is_burnable_fuel(fuel[nr][nc]) and isinstance(record, dict) and record.get("fire_detected") is False:
                 candidates.add((nr, nc))
     return [[r, c] for r, c in sorted(candidates)]
-
-
-# Cells wetted by one drop: the target and its 4-neighbours (same footprint as the
-# geographic executor). Used to keep heuristic aircraft off each other's targets.
-_DROP_FOOTPRINT = ((0, 0), (-1, 0), (1, 0), (0, -1), (0, 1))
-
-
-def claimed_cells(observation: dict) -> set[tuple[int, int]]:
-    """Cells inside the drop footprint of other aircraft already flying to a drop."""
-    ego = observation.get("aircraft_index", 0)
-    cell_size = float(observation["cell_size_m"])
-    claimed = set()
-    for other in observation.get("fleet", []):
-        if other["index"] == ego or other.get("phase") != "transit_to_drop" or other.get("target_m") is None:
-            continue
-        r = int(round(other["target_m"][1] / cell_size))
-        c = int(round(other["target_m"][0] / cell_size))
-        claimed.update((r + dr, c + dc) for dr, dc in _DROP_FOOTPRINT)
-    return claimed
 
 
 def choose_order(
@@ -78,10 +94,8 @@ def choose_order(
     ``heuristic``, or ``containment_heuristic``. The latter three use only
     observed cells and static fuel/aircraft data.
 
-    With several aircraft, ``heuristic`` and ``containment_heuristic`` skip
-    candidates inside another aircraft's pending drop footprint, so two aircraft
-    do not attack the same spot; if every candidate is claimed they fall back
-    to all candidates. ``random_valid`` samples all valid candidates.
+    With several aircraft, overlapping drops are excluded upstream by
+    ``candidate_cells``; with no admissible target the aircraft holds.
     """
     if policy not in {"no_intervention", "random_valid", "heuristic", "containment_heuristic"}:
         raise ValueError("policy must be no_intervention, random_valid, heuristic, or containment_heuristic")
@@ -95,10 +109,6 @@ def choose_order(
     candidates = candidate_cells(observation) if candidates is None else candidates
     if not candidates:
         return {"type": "HOLD"}
-    if policy != "random_valid":
-        claimed = claimed_cells(observation)
-        free = [cand for cand in candidates if (cand[0], cand[1]) not in claimed]
-        candidates = free or candidates
     if policy == "random_valid":
         if rng is None:
             raise ValueError("random_valid requires a random.Random instance")
