@@ -547,8 +547,9 @@ def _rollout_task(task: tuple) -> tuple[list[dict], dict[str, Any]]:
         _WORKER_MODELS[key] = model
     model.load_state_dict(state_dict)
     torch.manual_seed(seed)
+    kwargs = {"deterministic": False, **rollout_kwargs}
     with torch.no_grad():
-        return rollout_geographic(model, scenario, device=None, deterministic=False, **rollout_kwargs)
+        return rollout_geographic(model, scenario, device=None, **kwargs)
 
 
 def _to_device(records: list[dict], device: Any) -> list[dict]:
@@ -590,12 +591,19 @@ def train_geographic_ppo(
     image_checkpoint_chunk: int | None = None,
     augment: bool = False,
     slot_features: bool = False,
+    selection_scenarios: list[dict[str, Any]] | None = None,
+    eval_every: int = 0,
+    history: list[dict[str, Any]] | None = None,
 ) -> tuple[Any, list[float]]:
     """Train a geographic policy (legacy SpatialActorCritic or D-49 ImageActorCritic).
 
     With ``checkpoint_every > 0`` the weights are written to ``<checkpoint_path>.partial``
     every that many updates, so an interrupted run can continue with ``--resume``.
-    With ``augment`` (D-65) each episode uses one of the eight rotations/mirrors
+    With ``eval_every > 0`` and ``selection_scenarios`` (D-66) the policy is
+    evaluated deterministically every ``eval_every`` updates and at the end; the
+    weights with the lowest mean final burned area are restored before
+    returning and saved to ``<checkpoint_path>.best``. Each evaluation is appended
+    to ``history`` when given. With ``augment`` (D-65) each episode uses one of the eight rotations/mirrors
     of its scenario, chosen at random. With ``rollout_workers > 1`` the episodes of each update are collected in
     that many CPU worker processes with a copy of the current weights; the
     update itself runs on ``device``. The entropy bonus decays linearly from ``entropy_coef`` to
@@ -627,6 +635,35 @@ def train_geographic_ppo(
     losses = []
 
     partial_path = Path(f"{checkpoint_path}.partial") if checkpoint_path and checkpoint_every > 0 else None
+    best_state: dict[str, Any] | None = None
+    best_score = float("inf")
+
+    def select(update_number: int) -> None:
+        nonlocal best_state, best_score
+        eval_kwargs = {"deterministic": True, "skip_forced": skip_forced, "drop_bonus_per_cell": drop_bonus_per_cell,
+                       **input_options}
+        if pool is not None:
+            weights = {k: v.detach().cpu() for k, v in model.state_dict().items()}
+            tasks = [(build_kwargs, weights, scenario, eval_kwargs, 0) for scenario in selection_scenarios]
+            results = [metrics for _, metrics in pool.map(_rollout_task, tasks)]
+        else:
+            model.eval()
+            with torch.no_grad():
+                results = [rollout_geographic(model, scenario, device=device, **eval_kwargs)[1]
+                           for scenario in selection_scenarios]
+            model.train()
+        score = sum(r["final_burned_ha"] for r in results) / len(results)
+        improved = score < best_score
+        if improved:
+            best_score = score
+            best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
+            if checkpoint_path:
+                Path(checkpoint_path).parent.mkdir(parents=True, exist_ok=True)
+                torch.save(best_state, Path(f"{checkpoint_path}.best"))
+        if history is not None:
+            history.append({"update": update_number, "mean_final_burned_ha": round(score, 4), "best": improved})
+        print(f"  [Select @ {update_number}] mean burned {score:.2f} ha{' (best)' if improved else ''}", flush=True)
+
     scaler = RewardScaler() if reward_scaling else None
     # Legacy defaults keep per-episode advantage normalization; the improved
     # update normalizes over the batch instead.
@@ -677,7 +714,12 @@ def train_geographic_ppo(
         if partial_path is not None and (update_idx + 1) % checkpoint_every == 0:
             partial_path.parent.mkdir(parents=True, exist_ok=True)
             torch.save(model.state_dict(), partial_path)
+        if eval_every > 0 and selection_scenarios and (
+                (update_idx + 1) % eval_every == 0 or update_idx + 1 == updates):
+            select(update_idx + 1)
 
+    if best_state is not None:
+        model.load_state_dict(best_state)
     if pool is not None:
         pool.shutdown()
     return model, losses
@@ -725,6 +767,9 @@ def main() -> None:
                         help="training reward per newly treated cell (0 = burned-area change only)")
     parser.add_argument("--image-checkpoint-chunk", type=int,
                         help="checkpoint the image encoder in chunks of N frames to save memory (slower)")
+    parser.add_argument("--eval-every", type=int, default=0,
+                        help="with --select: evaluate on the selection scenarios every N updates and keep the "
+                             "best weights (D-66)")
     parser.add_argument("--augment", action="store_true",
                         help="train on random rotations/mirrors of each scenario (D-65)")
     parser.add_argument("--slot-features", action="store_true",
@@ -766,7 +811,7 @@ def main() -> None:
                    "entropy_coef": args.entropy_coef, "entropy_coef_final": args.entropy_coef_final,
                    "skip_forced": args.skip_forced, "drop_bonus_per_cell": args.drop_bonus,
                    "rollout_workers": args.rollout_workers, "augment": args.augment,
-                   "slot_features": args.slot_features,
+                   "slot_features": args.slot_features, "eval_every": args.eval_every,
                    "image_checkpoint_chunk": args.image_checkpoint_chunk}
     train_options = {**model_options, **ppo_options,
                      "checkpoint_path": args.checkpoint, "checkpoint_every": args.checkpoint_every}
@@ -865,6 +910,7 @@ def main() -> None:
             torch.manual_seed(c_seed)
             print(f"\n--- Candidate {c_idx + 1}/{args.candidates} (seed={c_seed}) ---")
 
+            selection_history: list[dict[str, Any]] = []
             cand_model, c_losses = train_geographic_ppo(
                 dev_scenarios,
                 updates=args.updates,
@@ -872,6 +918,8 @@ def main() -> None:
                 lr=args.lr,
                 recurrent=recurrent,
                 device=device,
+                selection_scenarios=val_scenarios,
+                history=selection_history,
                 **train_options,
             )
 
@@ -887,6 +935,7 @@ def main() -> None:
                 "mean_burned_ha": round(mean_burned, 2),
                 "total_drops": total_drops,
                 "losses": c_losses,
+                "selection_history": selection_history,
             })
 
             print(f"Candidate {c_idx + 1} validation mean burned: {mean_burned:.2f} ha (total drops: {total_drops})")
