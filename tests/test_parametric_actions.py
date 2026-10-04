@@ -38,16 +38,24 @@ SMALL = {(9, 9)}
 
 
 class ParametricActionTests(unittest.TestCase):
-    def test_slots_ordered_by_size_and_masks_match(self):
+    def test_slots_are_fire_fronts_ordered_by_length(self):
         obs = observation(BIG | SMALL, burned={(0, 0)})
         slots = fire_slots(obs)
-        self.assertEqual([len(s) for s in slots], [9, 1])
+        # 3x3 block: 8 border cells (the centre has no attackable neighbour); the
+        # isolated burning cell and the burned corner cell are fronts of length 1.
+        self.assertEqual([len(s) for s in slots], [8, 1, 1])
+        self.assertNotIn((3, 3), slots[0])
         masks = np.asarray(slot_masks(obs))
         self.assertEqual(masks.shape, (MAX_SLOTS, 12, 12))
-        self.assertEqual(masks[0].sum(), 9)
-        self.assertEqual(masks[1][9, 9], 1.0)
-        self.assertEqual(masks[2:].sum(), 0)
-        self.assertEqual(masks[:, 0, 0].sum(), 0)  # burned cells are not a focus
+        self.assertEqual(masks[0].sum(), 8)
+        self.assertEqual(masks[:, 0, 0].sum(), 1)  # a burned cell next to fuel is still a front
+        self.assertEqual(masks[3].sum(), 0)
+
+    def test_every_candidate_borders_some_front(self):
+        obs = observation(BIG | SMALL, burned={(0, 0), (6, 6), (6, 7)})
+        fronts = {cell for slot in fire_slots(obs) for cell in slot}
+        for r, c in candidate_cells(obs):
+            self.assertTrue(any((r + dr, c + dc) in fronts for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1))))
 
     def test_mask_enables_existing_slots_only(self):
         mapper = ParametricActionMapper(100.0)
@@ -55,7 +63,7 @@ class ParametricActionTests(unittest.TestCase):
         self.assertEqual(len(mask), NUM_ACTIONS)
         self.assertTrue(mask[0] and mask[1])
         self.assertTrue(all(mask[2:2 + 2 * len(ASPECTS)]))
-        self.assertFalse(any(mask[2 + 2 * len(ASPECTS):]))
+        self.assertFalse(any(mask[2 + 2 * len(ASPECTS):]))  # two fronts, two valid slots
         self.assertEqual(mapper.compute_mask(observation(BIG, phase="transit")), [True] + [False] * (NUM_ACTIONS - 1))
         self.assertEqual(mapper.compute_mask(observation(BIG, water=0))[1], True)
 

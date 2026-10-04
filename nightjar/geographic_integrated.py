@@ -284,6 +284,7 @@ def geographic_episode(
     arrival: list[list[float | None]] = [[None] * cols for _ in range(rows)]
     burnout: list[list[float | None]] = [[None] * cols for _ in range(rows)]
     barrier = [[False] * cols for _ in range(rows)]
+    barrier_time: dict[tuple[int, int], float] = {}
     best = [[float("inf")] * cols for _ in range(rows)]
     queue: list[tuple[float, int, int]] = []
 
@@ -357,6 +358,7 @@ def geographic_episode(
             if 0 <= nr < rows and 0 <= nc < cols:
                 if is_burnable(nr, nc) and arrival[nr][nc] is None and not barrier[nr][nc]:
                     barrier[nr][nc] = True
+                    barrier_time[(nr, nc)] = drop_time
                     treated.append([nr, nc])
         drops_log.append({
             "time_s": round(drop_time, 2),
@@ -467,8 +469,28 @@ def geographic_episode(
             if r not in delivered_reports:
                 delivered_reports.append(r)
 
+    def front_active(r: int, c: int) -> bool:
+        """True while fire is still advancing from (r, c) into a neighbour (D-67).
+
+        A neighbour that is scheduled to ignite (finite best arrival), not yet
+        reached and not protected by a water barrier means the front has not
+        left this cell, whatever its nominal burning duration.
+        """
+        for dr, dc in NEIGHBORS:
+            nr, nc = r + dr, c + dc
+            if (0 <= nr < rows and 0 <= nc < cols and arrival[nr][nc] is None
+                    and best[nr][nc] < float("inf") and not barrier[nr][nc]):
+                return True
+        return False
+
     def realtime_fire_view(time_s: float) -> dict:
-        """Full-grid fire state at time_s: perfect, instantaneous observation."""
+        """Full-grid fire state at time_s: perfect, instantaneous observation.
+
+        A reached cell is ``burning`` during its nominal burning duration (front
+        crossing at head-fire rate plus Anderson residence) and for as long as the
+        front is still advancing from it into a neighbour (D-67); otherwise
+        ``burned``. Slow flank and rear fronts therefore stay visible as burning.
+        """
         cells = []
         for r in range(rows):
             line = []
@@ -476,7 +498,7 @@ def geographic_episode(
                 reached = arrival[r][c] is not None and arrival[r][c] <= time_s + 1e-9
                 if not reached:
                     state = "unburned"
-                elif burnout[r][c] is not None and burnout[r][c] > time_s + 1e-9:
+                elif (burnout[r][c] is not None and burnout[r][c] > time_s + 1e-9) or front_active(r, c):
                     state = "burning"
                 else:
                     state = "burned"
@@ -642,6 +664,35 @@ def geographic_episode(
     else:
         eval_time = cur_sim_time
 
+    def front_end_times(end_s: float) -> list[list[float | None]]:
+        """Audit raster: when each reached cell stopped burning (D-67).
+
+        The later of its nominal burnout and the times the front left it (a
+        later-ignited neighbour, or a barrier placed on a neighbour it was
+        advancing into); ``end_s`` when the front was still active at the end.
+        """
+        out: list[list[float | None]] = []
+        for r in range(rows):
+            line: list[float | None] = []
+            for c in range(cols):
+                if arrival[r][c] is None:
+                    line.append(None)
+                    continue
+                end = burnout[r][c] if burnout[r][c] is not None else arrival[r][c]
+                for dr, dc in NEIGHBORS:
+                    nr, nc = r + dr, c + dc
+                    if not (0 <= nr < rows and 0 <= nc < cols):
+                        continue
+                    if arrival[nr][nc] is not None and arrival[nr][nc] >= arrival[r][c]:
+                        end = max(end, arrival[nr][nc])
+                    elif (nr, nc) in barrier_time and barrier_time[(nr, nc)] >= arrival[r][c]:
+                        end = max(end, barrier_time[(nr, nc)])
+                    elif arrival[nr][nc] is None and best[nr][nc] < float("inf") and not barrier[nr][nc]:
+                        end = max(end, end_s)
+                line.append(round(end, 6))
+            out.append(line)
+        return out
+
     # Compute metrics
     burned_cells_final = sum(1 for r in range(rows) for c in range(cols) if arrival[r][c] is not None and arrival[r][c] <= eval_time + 1e-9)
     final_burned_ha = round(burned_cells_final * cell_area_ha, 4)
@@ -662,8 +713,8 @@ def geographic_episode(
         "provenance": deepcopy(scenario.get("provenance", {})),
         "observation_mode": observation_mode,
         "arrival_time_s": [[round(v, 6) if v is not None else None for v in line] for line in arrival],
-        "burnout_time_s": [[round(v, 6) if v is not None else None for v in line] for line in burnout],
-        "burning_model": "front crossing (cell_size / head-fire rate) + Anderson 1969 residence 384/sigma min; initial perimeter: cells bordering unburned burnable fuel ignited at t=0, interior cells already burned",
+        "burnout_time_s": front_end_times(eval_time),
+        "burning_model": "burning while within front crossing (cell_size / head-fire rate) + Anderson 1969 residence 384/sigma min, or while the front still advances into a scheduled, untreated neighbour (D-67); initial perimeter: cells bordering unburned burnable fuel ignited at t=0, interior cells already burned",
         "fuel_grid": deepcopy(fuel_grid),
         "water_mask": deepcopy(fire_dict.get("water_mask", [[False] * cols for _ in range(rows)])),
         "elevation_m": deepcopy(elevation),
