@@ -73,6 +73,7 @@ if HAS_TORCH:
             lstm_hidden_dim: int = 128,
             use_image: bool = True,
             image_channels: int = 3,
+            slot_raw_features: bool = False,
         ) -> None:
             super().__init__()
             if action_mode not in ("tactical", "spatial", "parametric"):
@@ -88,6 +89,10 @@ if HAS_TORCH:
                 action_mode, 2 + grid_rows * grid_cols)
             # Parametric mode: the last MAX_SLOTS cell channels are focus-slot masks.
             self.slot_channels = MAX_SLOTS if action_mode == "parametric" else 0
+            # D-65: per-slot averages of the raw input channels (e.g. aircraft distance,
+            # ROS, fuel) and slot area, alongside pooled trunk features.
+            self.slot_raw_features = slot_raw_features
+            self._raw_cells: torch.Tensor | None = None
             self._slot_masks: torch.Tensor | None = None
 
             if use_image:
@@ -111,8 +116,9 @@ if HAS_TORCH:
                 self.actor_head = nn.Linear(head_dim, self.action_dim)
             elif action_mode == "parametric":
                 self.global_actor_head = nn.Linear(head_dim, 2)
+                extra = (cell_channels + 1) if slot_raw_features else 0
                 self.slot_actor_head = nn.Sequential(
-                    nn.Linear(width + head_dim + 1, 64), nn.LeakyReLU(0.01), nn.Linear(64, len(ASPECTS)))
+                    nn.Linear(width + head_dim + 1 + extra, 64), nn.LeakyReLU(0.01), nn.Linear(64, len(ASPECTS)))
             else:
                 self.global_actor_head = nn.Linear(head_dim, 2)
                 self.cell_condition = nn.Linear(head_dim, width)
@@ -157,6 +163,7 @@ if HAS_TORCH:
             rgb, cells, vector = self._split(inputs)
             if self.slot_channels:
                 self._slot_masks = cells[:, -self.slot_channels:]
+                self._raw_cells = cells
             stem_input = cells
             if self.use_image:
                 image_features = self._encode_image(rgb)
@@ -180,7 +187,11 @@ if HAS_TORCH:
                 area = masks.sum(dim=(2, 3))
                 pooled = torch.einsum("bkhw,bchw->bkc", masks, features) / area.clamp(min=1.0)[..., None]
                 present = (area > 0).float()[..., None]
-                slot_in = torch.cat([pooled, h[:, None, :].expand(-1, masks.shape[1], -1), present], dim=-1)
+                parts = [pooled, h[:, None, :].expand(-1, masks.shape[1], -1), present]
+                if self.slot_raw_features:
+                    raw = torch.einsum("bkhw,bchw->bkc", masks, self._raw_cells) / area.clamp(min=1.0)[..., None]
+                    parts += [raw, (area / 100.0)[..., None]]
+                slot_in = torch.cat(parts, dim=-1)
                 slot_logits = self.slot_actor_head(slot_in).flatten(1)
                 return torch.cat([self.global_actor_head(h), slot_logits], dim=-1), values
             conditioned = F.leaky_relu(features + self.cell_condition(h)[:, :, None, None], 0.01)
