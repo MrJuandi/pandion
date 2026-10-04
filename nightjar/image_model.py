@@ -124,7 +124,9 @@ if HAS_TORCH:
             zeros = torch.zeros(batch_size, self.lstm_hidden_dim, device=device)
             return zeros, zeros.clone()
 
-        IMAGE_CHUNK = 8
+        # Frames per checkpointed encoder chunk during training; None disables
+        # checkpointing. It saves memory but triples update time on MPS (D-64).
+        IMAGE_CHUNK: int | None = None
 
         def _encode_image(self, rgb: torch.Tensor) -> torch.Tensor:
             """Encode the view, accepting uint8 (0-255) or float (0-1) pixels.
@@ -136,7 +138,8 @@ if HAS_TORCH:
             """
             if rgb.dtype == torch.uint8:
                 rgb = rgb.float() / 255.0
-            if not (torch.is_grad_enabled() and self.training) or rgb.shape[0] <= self.IMAGE_CHUNK:
+            if (self.IMAGE_CHUNK is None or not (torch.is_grad_enabled() and self.training)
+                    or rgb.shape[0] <= self.IMAGE_CHUNK):
                 return self.rgb_encoder(rgb)
             return torch.cat([checkpoint(self.rgb_encoder, part, use_reentrant=False)
                               for part in rgb.split(self.IMAGE_CHUNK)], dim=0)
