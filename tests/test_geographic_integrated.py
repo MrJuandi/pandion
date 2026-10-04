@@ -128,6 +128,31 @@ class TestGeographicIntegrated(unittest.TestCase):
                         expected = "burning" if burnout > t + 1e-6 else "burned"
                         self.assertEqual(cell["fire_state"], expected)
 
+    def test_cells_keep_burning_while_the_front_advances_from_them(self):
+        """D-67: a 'burned' cell almost never borders a cell the fire reaches later.
+
+        The remaining cases are neighbours reached later from another direction
+        (not yet scheduled when the observation was taken); before D-67 the slow
+        flanks made this common.
+        """
+        result = run_geographic_integrated(self.scenario, policy="no_intervention")
+        arrival = result["arrival_time_s"]
+        rows, cols = len(arrival), len(arrival[0])
+        burned = later = 0
+        for decision in result["decisions"]:
+            t = decision["observation"]["time_s"]
+            cells = decision["observation"]["fire"]["cells"]
+            for r in range(rows):
+                for c in range(cols):
+                    if cells[r][c]["fire_state"] != "burned":
+                        continue
+                    burned += 1
+                    later += any(0 <= r + dr < rows and 0 <= c + dc < cols and arrival[r + dr][c + dc] is not None
+                                 and arrival[r + dr][c + dc] > t + 1e-6
+                                 for dr in (-1, 0, 1) for dc in (-1, 0, 1) if dr or dc)
+        self.assertGreater(burned, 0)
+        self.assertLess(later / burned, 0.01)
+
     def test_burning_cells_outlast_front_arrival_and_later_burn_out(self):
         result = run_geographic_integrated(self.scenario, policy="no_intervention")
         states = {cell["fire_state"]
