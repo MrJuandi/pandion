@@ -67,9 +67,14 @@ def make_input_tensorizer(
     from .imagery_acquire import load_activation_image
     from .policy_inputs import GeographicInputTensorizer
 
-    key = (str(imagery_dir), scenario["activation_id"])
+    transform = (scenario.get("augmentation") or {}).get("transform", 0)
+    key = (str(imagery_dir), scenario["activation_id"], transform)
     if key not in _IMAGE_CACHE:
-        _IMAGE_CACHE[key] = load_activation_image(imagery_dir, scenario)
+        image = load_activation_image(imagery_dir, scenario)
+        if transform:
+            from .augmentation import augment_image
+            image = augment_image(image, transform)
+        _IMAGE_CACHE[key] = image
     return GeographicInputTensorizer(scenario, _IMAGE_CACHE[key], include_ros=include_ros,
                                      include_thermal=include_thermal, focus_slots=focus_slots,
                                      fleet_features=fleet_features)
@@ -84,6 +89,7 @@ def build_policy_model(
     imagery_dir: Path | str | None = None,
     include_ros: bool = False,
     include_thermal: bool = False,
+    slot_features: bool = False,
 ) -> Any:
     """Construct the actor-critic matching an input/action configuration."""
     _require_torch()
@@ -104,7 +110,8 @@ def build_policy_model(
                             px_per_cell=max(tensorizer.px_per_cell, 1), grid_rows=rows, grid_cols=cols,
                             action_mode=action_mode, recurrent=recurrent,
                             use_image=input_mode == "image",
-                            image_channels=getattr(tensorizer, "image_channels", 3))
+                            image_channels=getattr(tensorizer, "image_channels", 3),
+                            slot_raw_features=slot_features and action_mode == "parametric")
 
 
 def with_fleet(scenarios: list[dict[str, Any]], fleet_size: int) -> list[dict[str, Any]]:
@@ -581,12 +588,15 @@ def train_geographic_ppo(
     drop_bonus_per_cell: float = 0.25,
     rollout_workers: int = 1,
     image_checkpoint_chunk: int | None = None,
+    augment: bool = False,
+    slot_features: bool = False,
 ) -> tuple[Any, list[float]]:
     """Train a geographic policy (legacy SpatialActorCritic or D-49 ImageActorCritic).
 
     With ``checkpoint_every > 0`` the weights are written to ``<checkpoint_path>.partial``
     every that many updates, so an interrupted run can continue with ``--resume``.
-    With ``rollout_workers > 1`` the episodes of each update are collected in
+    With ``augment`` (D-65) each episode uses one of the eight rotations/mirrors
+    of its scenario, chosen at random. With ``rollout_workers > 1`` the episodes of each update are collected in
     that many CPU worker processes with a copy of the current weights; the
     update itself runs on ``device``. The entropy bonus decays linearly from ``entropy_coef`` to
     ``entropy_coef_final`` over the updates (constant when the latter is None).
@@ -594,7 +604,9 @@ def train_geographic_ppo(
     _require_torch()
     input_options = {"input_mode": input_mode, "imagery_dir": imagery_dir, "include_ros": include_ros,
                      "include_thermal": include_thermal}
-    build_kwargs = {"action_mode": action_mode, "recurrent": recurrent, **input_options}
+    build_kwargs = {"action_mode": action_mode, "recurrent": recurrent, "slot_features": slot_features,
+                    **input_options}
+    augmented: dict[tuple[str, int], dict[str, Any]] = {}
     model = build_policy_model(dev_scenarios[0], **build_kwargs).to(device)
     if hasattr(model, "IMAGE_CHUNK"):
         model.IMAGE_CHUNK = image_checkpoint_chunk
@@ -626,6 +638,11 @@ def train_geographic_ppo(
                           "skip_forced": skip_forced, "drop_bonus_per_cell": drop_bonus_per_cell,
                           **input_options}
         chosen = [random.choice(dev_scenarios) for _ in range(episodes_per_update)]
+        if augment:
+            from .augmentation import NUM_TRANSFORMS, augment_scenario
+            picks = [random.randrange(NUM_TRANSFORMS) for _ in chosen]
+            chosen = [augmented.setdefault((s["scenario_id"], t), augment_scenario(s, t))
+                      for s, t in zip(chosen, picks)]
         if pool is not None:
             state_dict = {k: v.detach().cpu() for k, v in model.state_dict().items()}
             tasks = [(build_kwargs, state_dict, scenario, rollout_kwargs, random.randrange(2**31))
@@ -708,6 +725,13 @@ def main() -> None:
                         help="training reward per newly treated cell (0 = burned-area change only)")
     parser.add_argument("--image-checkpoint-chunk", type=int,
                         help="checkpoint the image encoder in chunks of N frames to save memory (slower)")
+    parser.add_argument("--augment", action="store_true",
+                        help="train on random rotations/mirrors of each scenario (D-65)")
+    parser.add_argument("--slot-features", action="store_true",
+                        help="parametric head also sees each focus slot's raw input averages and area (D-65)")
+    parser.add_argument("--holdout-activation",
+                        help="leave this development incident out of training and select on it instead of the "
+                             "validation split (cross-validation fold, D-65)")
     parser.add_argument("--rollout-workers", type=int, default=1,
                         help="CPU worker processes collecting each update's episodes (D-64)")
     parser.add_argument("--skip-forced", action="store_true",
@@ -729,20 +753,27 @@ def main() -> None:
                                args.fleet_size)
     input_options = {"input_mode": args.input_mode, "imagery_dir": args.imagery_dir, "include_ros": args.ros,
                      "include_thermal": args.thermal}
-    model_options = {"action_mode": args.action_mode, **input_options}
+    model_options = {"action_mode": args.action_mode, "slot_features": args.slot_features, **input_options}
+    holdout_scenarios = []
+    if args.holdout_activation:
+        holdout_scenarios = [s for s in dev_scenarios if s["activation_id"] == args.holdout_activation]
+        dev_scenarios = [s for s in dev_scenarios if s["activation_id"] != args.holdout_activation]
+        if not holdout_scenarios or not dev_scenarios:
+            raise ValueError(f"holdout activation {args.holdout_activation} must split the development set")
     rollout_options = {**input_options, "skip_forced": args.skip_forced}
     ppo_options = {"ppo_epochs": args.ppo_epochs, "minibatches": args.minibatches, "gae_lambda": args.gae_lambda,
                    "reward_scaling": args.reward_scaling, "target_kl": args.target_kl,
                    "entropy_coef": args.entropy_coef, "entropy_coef_final": args.entropy_coef_final,
                    "skip_forced": args.skip_forced, "drop_bonus_per_cell": args.drop_bonus,
-                   "rollout_workers": args.rollout_workers,
+                   "rollout_workers": args.rollout_workers, "augment": args.augment,
+                   "slot_features": args.slot_features,
                    "image_checkpoint_chunk": args.image_checkpoint_chunk}
     train_options = {**model_options, **ppo_options,
                      "checkpoint_path": args.checkpoint, "checkpoint_every": args.checkpoint_every}
     config_report = {"ppo": {"epochs": args.ppo_epochs, "minibatches": args.minibatches,
                              "gae_lambda": args.gae_lambda, "reward_scaling": args.reward_scaling,
                              "target_kl": args.target_kl, "entropy_coef": args.entropy_coef,
-                             "entropy_coef_final": args.entropy_coef_final}, "input_mode": args.input_mode, "action_mode": args.action_mode, "include_ros": args.ros, "include_thermal": args.thermal, "fleet_size": args.fleet_size,
+                             "entropy_coef_final": args.entropy_coef_final}, "input_mode": args.input_mode, "action_mode": args.action_mode, "include_ros": args.ros, "include_thermal": args.thermal, "fleet_size": args.fleet_size, "holdout_activation": args.holdout_activation,
                      "imagery_dir": str(args.imagery_dir) if args.imagery_dir else None}
 
     if args.smoke or (not args.train and not args.select and not args.eval):
@@ -819,6 +850,8 @@ def main() -> None:
     if args.select:
         val_scenarios = with_fleet(load_geographic_split("validation", args.scenarios_dir, synthetic=args.synthetic),
                                    args.fleet_size)
+        if holdout_scenarios:
+            val_scenarios = holdout_scenarios
         if args.eval_scenarios is not None:
             val_scenarios = val_scenarios[:args.eval_scenarios]
         print(f"Training {args.candidates} candidates on {len(dev_scenarios)} development scenarios...")
