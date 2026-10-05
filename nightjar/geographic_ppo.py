@@ -514,6 +514,34 @@ def ppo_update_geographic(
     return sum(losses) / len(losses)
 
 
+def holdout_evaluation(
+    model: Any,
+    scenarios: list[dict[str, Any]],
+    *,
+    device: Any = None,
+    **rollout_options: Any,
+) -> dict[str, Any]:
+    """Score a selected policy and the baselines on scenarios used neither for
+    training nor for selection (D-68)."""
+    policy = evaluate_geographic_policy(model, scenarios, device=device, **rollout_options)
+    names = ("no_intervention", "heuristic", "containment_heuristic", "random_valid_mean")
+    rows = []
+    for scenario, metrics in zip(scenarios, policy):
+        bench = run_geographic_benchmark(scenario, random_seeds=(42, 43))["policies"]
+        rows.append({"scenario_id": scenario["scenario_id"], "policy_ha": metrics["final_burned_ha"],
+                     **{f"{name}_ha": bench[name]["final_burned_ha"] for name in names}})
+    count = max(len(rows), 1)
+    return {
+        "activation_ids": sorted({s["activation_id"] for s in scenarios}),
+        "scenarios": len(rows),
+        "policy_mean_ha": round(sum(r["policy_ha"] for r in rows) / count, 4),
+        "baselines_mean_ha": {name: round(sum(r[f"{name}_ha"] for r in rows) / count, 4) for name in names},
+        "policy_better_than_heuristic": sum(r["policy_ha"] < r["heuristic_ha"] for r in rows),
+        "policy_equal_to_heuristic": sum(r["policy_ha"] == r["heuristic_ha"] for r in rows),
+        "rows": rows,
+    }
+
+
 def evaluate_geographic_policy(
     model: Any,
     scenarios: list[dict[str, Any]],
@@ -775,8 +803,8 @@ def main() -> None:
     parser.add_argument("--slot-features", action="store_true",
                         help="parametric head also sees each focus slot's raw input averages and area (D-65)")
     parser.add_argument("--holdout-activation",
-                        help="leave this development incident out of training and select on it instead of the "
-                             "validation split (cross-validation fold, D-65)")
+                        help="leave this development incident out of training; after selection on the validation "
+                             "split, report the selected policy and the baselines on it (clean holdout, D-68)")
     parser.add_argument("--rollout-workers", type=int, default=1,
                         help="CPU worker processes collecting each update's episodes (D-64)")
     parser.add_argument("--skip-forced", action="store_true",
@@ -895,8 +923,6 @@ def main() -> None:
     if args.select:
         val_scenarios = with_fleet(load_geographic_split("validation", args.scenarios_dir, synthetic=args.synthetic),
                                    args.fleet_size)
-        if holdout_scenarios:
-            val_scenarios = holdout_scenarios
         if args.eval_scenarios is not None:
             val_scenarios = val_scenarios[:args.eval_scenarios]
         print(f"Training {args.candidates} candidates on {len(dev_scenarios)} development scenarios...")
@@ -949,9 +975,19 @@ def main() -> None:
             torch.save(best_candidate.state_dict(), args.checkpoint)
             print(f"\nSaved best candidate checkpoint -> {args.checkpoint}")
 
+        holdout_report = None
+        if holdout_scenarios and best_candidate is not None:
+            holdout_report = holdout_evaluation(best_candidate, holdout_scenarios, device=device, **rollout_options)
+            print(f"Holdout {args.holdout_activation}: policy {holdout_report['policy_mean_ha']:.2f} ha | "
+                  f"heuristic {holdout_report['baselines_mean_ha']['heuristic']:.2f} | "
+                  f"containment {holdout_report['baselines_mean_ha']['containment_heuristic']:.2f} | "
+                  f"no intervention {holdout_report['baselines_mean_ha']['no_intervention']:.2f}")
+
         report = {
             "schema_version": SELECTION_SCHEMA_VERSION,
-            "dataset": _dataset_report(args.scenarios_dir, {"development": dev_scenarios, "validation": val_scenarios}),
+            "holdout": holdout_report,
+            "dataset": _dataset_report(args.scenarios_dir, {"development": dev_scenarios, "validation": val_scenarios,
+                                                            **({"holdout": holdout_scenarios} if holdout_scenarios else {})}),
             "seed": args.seed,
             "recurrent": recurrent,
             **config_report, "device": str(device),
