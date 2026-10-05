@@ -8,6 +8,7 @@ and real-world Copernicus CEMS scenarios (Scott & Burgan 40 fuels, georeferenced
 from __future__ import annotations
 
 import argparse
+from contextlib import ExitStack
 from copy import deepcopy
 import hashlib
 import json
@@ -287,7 +288,7 @@ def returns_and_advantages(
             advantages[t] = running
         advantage = torch.tensor(advantages, dtype=torch.float32)
         result = advantage + value_tensor
-    if not normalize:
+    if not normalize or advantage.numel() == 0:
         return result, advantage
     std = advantage.std(unbiased=False)
     norm_advantage = (advantage - advantage.mean()) / (std + 1e-8) if std > 1e-6 else (advantage - advantage.mean())
@@ -364,7 +365,7 @@ def rollout_geographic(
 
     records: list[dict] = []
     rewards: list[float] = []
-    values: list[float] = []
+    value_tensors: list[Any] = []
     total_reward = 0.0
     carried = 0.0  # forced-step reward seen before the first decision
     done = False
@@ -407,14 +408,16 @@ def rollout_geographic(
         rewards.append(reward + carried)
         carried = 0.0
         total_reward += reward
-        values.append(float(value.item()))
+        value_tensors.append(value.squeeze(0))
         observation = next_obs
 
+    values = torch.stack(value_tensors).cpu().tolist() if value_tensors else []
     returns, advantages = returns_and_advantages([r * reward_scale for r in rewards], values, gamma,
                                                  gae_lambda=gae_lambda, normalize=normalize_advantages)
+    returns, advantages = returns.to(device), advantages.to(device)
     for record, ret, adv, reward in zip(records, returns, advantages, rewards):
-        record["return"] = ret.to(device)
-        record["advantage"] = adv.to(device)
+        record["return"] = ret
+        record["advantage"] = adv
         record["reward"] = reward
     for record, value in zip(records, values):
         record["value"] = value
@@ -439,6 +442,13 @@ def rollout_geographic(
 
 def _stack_inputs(records: list[dict]) -> tuple:
     return tuple(torch.stack(parts) for parts in zip(*(r["inputs"] for r in records)))
+
+
+def _pack_episode(records: list[dict]) -> dict:
+    """Prepare immutable rollout tensors once, reused across PPO epochs."""
+    return {"inputs": _stack_inputs(records),
+            **{key: torch.stack([r[key] for r in records]).detach()
+               for key in ("mask", "action", "log_prob", "return", "advantage")}}
 
 
 def ppo_update_geographic(
@@ -472,11 +482,14 @@ def ppo_update_geographic(
         return 0.0
 
     episodes = [ep for ep in ([records] if isinstance(records[0], dict) else records) if ep]
+    if not episodes:
+        return 0.0
     adv_mean, adv_std = 0.0, 1.0
     if normalize_advantages:
         all_adv = torch.cat([torch.stack([r["advantage"] for r in ep]) for ep in episodes])
         adv_mean, adv_std = float(all_adv.mean()), float(all_adv.std(unbiased=False)) + 1e-8
     minibatches = max(1, min(minibatches, len(episodes)))
+    packed = [_pack_episode(ep) for ep in episodes]
     losses = []
     for _ in range(max(1, epochs)):
         order = torch.randperm(len(episodes)).tolist() if minibatches > 1 else list(range(len(episodes)))
@@ -488,12 +501,10 @@ def ppo_update_geographic(
             group_loss = 0.0
             for index in group:
                 ep = episodes[index]
-                inputs = _stack_inputs(ep)
-                masks = torch.stack([r["mask"] for r in ep])
-                actions = torch.stack([r["action"] for r in ep])
-                old_log_probs = torch.stack([r["log_prob"] for r in ep]).detach()
-                returns = torch.stack([r["return"] for r in ep]).detach()
-                advantages = (torch.stack([r["advantage"] for r in ep]).detach() - adv_mean) / adv_std
+                tensors = packed[index]
+                inputs, masks, actions = tensors["inputs"], tensors["mask"], tensors["action"]
+                old_log_probs, returns = tensors["log_prob"], tensors["return"]
+                advantages = (tensors["advantage"] - adv_mean) / adv_std
 
                 log_probs, entropy, values = model.evaluate_actions(*inputs, masks, actions)
                 log_ratio = log_probs - old_log_probs
@@ -622,6 +633,7 @@ def train_geographic_ppo(
     selection_scenarios: list[dict[str, Any]] | None = None,
     eval_every: int = 0,
     history: list[dict[str, Any]] | None = None,
+    rollout_envs: int = 1,
 ) -> tuple[Any, list[float]]:
     """Train a geographic policy (legacy SpatialActorCritic or D-49 ImageActorCritic).
 
@@ -632,12 +644,21 @@ def train_geographic_ppo(
     weights with the lowest mean final burned area are restored before
     returning and saved to ``<checkpoint_path>.best``. Each evaluation is appended
     to ``history`` when given. With ``augment`` (D-65) each episode uses one of the eight rotations/mirrors
-    of its scenario, chosen at random. With ``rollout_workers > 1`` the episodes of each update are collected in
-    that many CPU worker processes with a copy of the current weights; the
-    update itself runs on ``device``. The entropy bonus decays linearly from ``entropy_coef`` to
+    of its scenario, chosen at random. With ``rollout_envs == 1`` and
+    ``rollout_workers > 1`` the existing CPU model-copy collector is retained.
+    With ``rollout_envs > 1`` only the parent owns the model/device; workers own
+    simulation and tensorization. The update itself runs on ``device``. The entropy bonus decays linearly from ``entropy_coef`` to
     ``entropy_coef_final`` over the updates (constant when the latter is None).
+    ``rollout_envs`` batches policy inference over independent episodes;
+    ``rollout_workers`` optionally moves CPU environments into persistent
+    spawned processes. Policy weights stay fixed throughout collection.
+    Serial collection remains the default for seeded trajectory compatibility.
     """
     _require_torch()
+    if rollout_envs < 1 or rollout_workers < 0:
+        raise ValueError("rollout_envs must be positive and rollout_workers nonnegative")
+    if episodes_per_update < 1 or updates < 0:
+        raise ValueError("episodes_per_update must be positive and updates nonnegative")
     input_options = {"input_mode": input_mode, "imagery_dir": imagery_dir, "include_ros": include_ros,
                      "include_thermal": include_thermal}
     build_kwargs = {"action_mode": action_mode, "recurrent": recurrent, "slot_features": slot_features,
@@ -647,10 +668,6 @@ def train_geographic_ppo(
     if hasattr(model, "IMAGE_CHUNK"):
         model.IMAGE_CHUNK = image_checkpoint_chunk
     pool = None
-    if rollout_workers > 1:
-        import multiprocessing
-        from concurrent.futures import ProcessPoolExecutor
-        pool = ProcessPoolExecutor(rollout_workers, mp_context=multiprocessing.get_context("spawn"))
 
     if resume_checkpoint is not None:
         checkpoint_path = Path(resume_checkpoint)
@@ -676,10 +693,17 @@ def train_geographic_ppo(
             results = [metrics for _, metrics in pool.map(_rollout_task, tasks)]
         else:
             model.eval()
-            with torch.no_grad():
-                results = [rollout_geographic(model, scenario, device=device, **eval_kwargs)[1]
-                           for scenario in selection_scenarios]
-            model.train()
+            try:
+                if backend is not None:
+                    _, results = rollout_geographic_batch(
+                        model, selection_scenarios, device=device, rollout_envs=rollout_envs,
+                        backend=backend, **eval_kwargs)
+                else:
+                    with torch.no_grad():
+                        results = [rollout_geographic(model, scenario, device=device, **eval_kwargs)[1]
+                                   for scenario in selection_scenarios]
+            finally:
+                model.train()
         score = sum(r["final_burned_ha"] for r in results) / len(results)
         improved = score < best_score
         if improved:
@@ -696,60 +720,82 @@ def train_geographic_ppo(
     # Legacy defaults keep per-episode advantage normalization; the improved
     # update normalizes over the batch instead.
     batch_normalized = ppo_epochs > 1 or minibatches > 1 or gae_lambda is not None or reward_scaling
-    for update_idx in range(updates):
-        started = time.monotonic()
-        batch_records = []
-        rollout_kwargs = {"gae_lambda": gae_lambda, "normalize_advantages": not batch_normalized,
-                          "skip_forced": skip_forced, "drop_bonus_per_cell": drop_bonus_per_cell,
-                          **input_options}
-        chosen = [random.choice(dev_scenarios) for _ in range(episodes_per_update)]
-        if augment:
-            from .augmentation import NUM_TRANSFORMS, augment_scenario
-            picks = [random.randrange(NUM_TRANSFORMS) for _ in chosen]
-            chosen = [augmented.setdefault((s["scenario_id"], t), augment_scenario(s, t))
-                      for s, t in zip(chosen, picks)]
-        if pool is not None:
-            state_dict = {k: v.detach().cpu() for k, v in model.state_dict().items()}
-            tasks = [(build_kwargs, state_dict, scenario, rollout_kwargs, random.randrange(2**31))
-                     for scenario in chosen]
-            batch_records = [_to_device(records, device) for records, _ in pool.map(_rollout_task, tasks)]
-        else:
-            for scenario in chosen:
-                records, _ = rollout_geographic(model, scenario, device=device, deterministic=False,
-                                                **rollout_kwargs)
-                batch_records.append(records)
-        if scaler is not None:
-            # Scale with statistics that include this batch, then recompute targets.
-            for records in batch_records:
-                scaler.update([r["reward"] for r in records])
-            for records in batch_records:
-                returns, advantages = returns_and_advantages(
-                    [r["reward"] * scaler.scale for r in records], [r["value"] for r in records],
-                    gae_lambda=gae_lambda, normalize=False)
-                for record, ret, adv in zip(records, returns, advantages):
-                    record["return"] = ret.to(device)
-                    record["advantage"] = adv.to(device)
-
-        progress = update_idx / max(updates - 1, 1)
-        current_entropy = (entropy_coef if entropy_coef_final is None
-                           else entropy_coef + (entropy_coef_final - entropy_coef) * progress)
-        loss = ppo_update_geographic(model, optimizer, batch_records, epochs=ppo_epochs,
-                                     minibatches=minibatches, normalize_advantages=batch_normalized,
-                                     target_kl=target_kl, entropy_coef=current_entropy)
-        losses.append(loss)
-        print(f"  [Update {update_idx + 1:2d}/{updates}] PPO Loss: {loss:9.4f} "
-              f"(episodes: {len(batch_records)}, {time.monotonic() - started:.1f} s)", flush=True)
-        if partial_path is not None and (update_idx + 1) % checkpoint_every == 0:
-            partial_path.parent.mkdir(parents=True, exist_ok=True)
-            torch.save(model.state_dict(), partial_path)
-        if eval_every > 0 and selection_scenarios and (
-                (update_idx + 1) % eval_every == 0 or update_idx + 1 == updates):
-            select(update_idx + 1)
+    from .geographic_rollouts import RolloutBackend, rollout_geographic_batch
+    with ExitStack() as resources:
+        backend = None
+        if updates and rollout_envs > 1:
+            backend = resources.enter_context(RolloutBackend(
+                action_mode=action_mode, input_options=input_options,
+                workers=min(rollout_workers, rollout_envs, episodes_per_update),
+                skip_forced=skip_forced, drop_bonus_per_cell=drop_bonus_per_cell))
+        elif updates and rollout_workers > 1:
+            import multiprocessing
+            from concurrent.futures import ProcessPoolExecutor
+            pool = resources.enter_context(ProcessPoolExecutor(
+                rollout_workers, mp_context=multiprocessing.get_context("spawn")))
+        for update_idx in range(updates):
+            started = time.monotonic()
+            batch_records = []
+            rollout_kwargs = {"gae_lambda": gae_lambda, "normalize_advantages": not batch_normalized,
+                              "skip_forced": skip_forced, "drop_bonus_per_cell": drop_bonus_per_cell,
+                              **input_options}
+            chosen = [random.choice(dev_scenarios) for _ in range(episodes_per_update)]
+            if augment:
+                from .augmentation import NUM_TRANSFORMS, augment_scenario
+                picks = [random.randrange(NUM_TRANSFORMS) for _ in chosen]
+                chosen = [augmented.setdefault((sc["scenario_id"], t), augment_scenario(sc, t))
+                          for sc, t in zip(chosen, picks)]
+            if backend is not None:
+                batch_records, _ = rollout_geographic_batch(
+                    model, chosen, device=device, rollout_envs=rollout_envs,
+                    backend=backend, **rollout_kwargs)
+            elif pool is not None:
+                state_dict = {k: v.detach().cpu() for k, v in model.state_dict().items()}
+                tasks = [(build_kwargs, state_dict, sc, rollout_kwargs, random.randrange(2**31))
+                         for sc in chosen]
+                batch_records = [_to_device(records, device) for records, _ in pool.map(_rollout_task, tasks)]
+            else:
+                for scenario in chosen:
+                    records, _ = rollout_geographic(model, scenario, device=device, deterministic=False,
+                                                    **rollout_kwargs)
+                    batch_records.append(records)
+            if device is not None and str(device).startswith("mps"):
+                torch.mps.synchronize()
+            elif device is not None and str(device).startswith("cuda"):
+                torch.cuda.synchronize(device)
+            rollout_seconds = time.monotonic() - started
+            if scaler is not None:
+                for records in batch_records:
+                    scaler.update([r["reward"] for r in records])
+                for records in batch_records:
+                    returns, advantages = returns_and_advantages(
+                        [r["reward"] * scaler.scale for r in records], [r["value"] for r in records],
+                        gae_lambda=gae_lambda, normalize=False)
+                    returns, advantages = returns.to(device), advantages.to(device)
+                    for record, ret, adv in zip(records, returns, advantages):
+                        record["return"] = ret
+                        record["advantage"] = adv
+            progress = update_idx / max(updates - 1, 1)
+            current_entropy = (entropy_coef if entropy_coef_final is None
+                               else entropy_coef + (entropy_coef_final - entropy_coef) * progress)
+            loss = ppo_update_geographic(model, optimizer, batch_records, epochs=ppo_epochs,
+                                         minibatches=minibatches, normalize_advantages=batch_normalized,
+                                         target_kl=target_kl, entropy_coef=current_entropy)
+            losses.append(loss)
+            elapsed = time.monotonic() - started
+            print(f"  [Update {update_idx + 1:2d}/{updates}] PPO Loss: {loss:9.4f} "
+                  f"(episodes: {len(batch_records)}, {elapsed:.1f} s) "
+                  f"[rollout {rollout_seconds:.2f} s; update {elapsed - rollout_seconds:.2f} s]",
+                  flush=True)
+            if partial_path is not None and (update_idx + 1) % checkpoint_every == 0:
+                partial_path.parent.mkdir(parents=True, exist_ok=True)
+                torch.save(model.state_dict(), partial_path)
+            if eval_every > 0 and selection_scenarios and (
+                    (update_idx + 1) % eval_every == 0 or update_idx + 1 == updates):
+                select(update_idx + 1)
 
     if best_state is not None:
         model.load_state_dict(best_state)
-    if pool is not None:
-        pool.shutdown()
     return model, losses
 
 
@@ -764,6 +810,8 @@ def main() -> None:
     parser.add_argument("--synthetic", action="store_true", help="load an explicitly generated synthetic family")
     parser.add_argument("--updates", type=int, default=1)
     parser.add_argument("--episodes-per-update", type=int, default=1)
+    parser.add_argument("--rollout-envs", type=int, default=1,
+                        help="active episodes per policy inference batch (default: serial)")
     parser.add_argument("--candidates", type=int, default=2)
     parser.add_argument("--lr", type=float, default=3e-4)
     parser.add_argument("--seed", type=int, default=42, help="Seed Python and PyTorch before training")
@@ -806,7 +854,7 @@ def main() -> None:
                         help="leave this development incident out of training; after selection on the validation "
                              "split, report the selected policy and the baselines on it (clean holdout, D-68)")
     parser.add_argument("--rollout-workers", type=int, default=1,
-                        help="CPU worker processes collecting each update's episodes (D-64)")
+                        help="CPU workers; with --rollout-envs > 1 they own environments with central device inference")
     parser.add_argument("--skip-forced", action="store_true",
                         help="do not query or train on single-action steps (D-64); applies to evaluation too")
     parser.add_argument("--entropy-coef-final", type=float,
@@ -815,6 +863,8 @@ def main() -> None:
                         help="also save weights to <checkpoint>.partial every N updates")
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
+    if args.rollout_envs < 1 or args.rollout_workers < 0:
+        parser.error("--rollout-envs must be positive and --rollout-workers nonnegative")
 
     _require_torch()
     device = torch.device(resolve_device(args.device))
@@ -842,12 +892,14 @@ def main() -> None:
                    "slot_features": args.slot_features, "eval_every": args.eval_every,
                    "image_checkpoint_chunk": args.image_checkpoint_chunk}
     train_options = {**model_options, **ppo_options,
-                     "checkpoint_path": args.checkpoint, "checkpoint_every": args.checkpoint_every}
+                     "checkpoint_path": args.checkpoint, "checkpoint_every": args.checkpoint_every,
+                     "rollout_envs": args.rollout_envs, "rollout_workers": args.rollout_workers}
     config_report = {"ppo": {"epochs": args.ppo_epochs, "minibatches": args.minibatches,
                              "gae_lambda": args.gae_lambda, "reward_scaling": args.reward_scaling,
                              "target_kl": args.target_kl, "entropy_coef": args.entropy_coef,
                              "entropy_coef_final": args.entropy_coef_final}, "input_mode": args.input_mode, "action_mode": args.action_mode, "include_ros": args.ros, "include_thermal": args.thermal, "fleet_size": args.fleet_size, "holdout_activation": args.holdout_activation,
-                     "imagery_dir": str(args.imagery_dir) if args.imagery_dir else None}
+                     "imagery_dir": str(args.imagery_dir) if args.imagery_dir else None,
+                     "collection": {"rollout_envs": args.rollout_envs, "rollout_workers": args.rollout_workers}}
 
     if args.smoke or (not args.train and not args.select and not args.eval):
         print(f"Running Geographic PPO smoke test (recurrent={recurrent})...")
