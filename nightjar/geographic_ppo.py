@@ -497,11 +497,15 @@ def train_geographic_ppo(
     gae_lambda: float | None = None,
     reward_scaling: bool = False,
     target_kl: float | None = None,
+    entropy_coef: float = 0.01,
+    entropy_coef_final: float | None = None,
 ) -> tuple[Any, list[float]]:
     """Train a geographic policy (legacy SpatialActorCritic or D-49 ImageActorCritic).
 
     With ``checkpoint_every > 0`` the weights are written to ``<checkpoint_path>.partial``
     every that many updates, so an interrupted run can continue with ``--resume``.
+    The entropy bonus decays linearly from ``entropy_coef`` to
+    ``entropy_coef_final`` over the updates (constant when the latter is None).
     """
     _require_torch()
     input_options = {"input_mode": input_mode, "imagery_dir": imagery_dir, "include_ros": include_ros,
@@ -545,9 +549,12 @@ def train_geographic_ppo(
                     record["return"] = ret.to(device)
                     record["advantage"] = adv.to(device)
 
+        progress = update_idx / max(updates - 1, 1)
+        current_entropy = (entropy_coef if entropy_coef_final is None
+                           else entropy_coef + (entropy_coef_final - entropy_coef) * progress)
         loss = ppo_update_geographic(model, optimizer, batch_records, epochs=ppo_epochs,
                                      minibatches=minibatches, normalize_advantages=batch_normalized,
-                                     target_kl=target_kl)
+                                     target_kl=target_kl, entropy_coef=current_entropy)
         losses.append(loss)
         print(f"  [Update {update_idx + 1:2d}/{updates}] PPO Loss: {loss:9.4f} "
               f"(episodes: {len(batch_records)}, {time.monotonic() - started:.1f} s)", flush=True)
@@ -592,6 +599,9 @@ def main() -> None:
     parser.add_argument("--reward-scaling", action="store_true",
                         help="divide rewards by the running std of discounted returns")
     parser.add_argument("--target-kl", type=float, help="stop epochs when approx KL exceeds 1.5x this")
+    parser.add_argument("--entropy-coef", type=float, default=0.01, help="entropy bonus coefficient")
+    parser.add_argument("--entropy-coef-final", type=float,
+                        help="decay the entropy bonus linearly to this value over the updates")
     parser.add_argument("--checkpoint-every", type=int, default=0,
                         help="also save weights to <checkpoint>.partial every N updates")
     parser.add_argument("--output", type=Path)
@@ -608,12 +618,14 @@ def main() -> None:
                      "include_thermal": args.thermal}
     model_options = {"action_mode": args.action_mode, **input_options}
     ppo_options = {"ppo_epochs": args.ppo_epochs, "minibatches": args.minibatches, "gae_lambda": args.gae_lambda,
-                   "reward_scaling": args.reward_scaling, "target_kl": args.target_kl}
+                   "reward_scaling": args.reward_scaling, "target_kl": args.target_kl,
+                   "entropy_coef": args.entropy_coef, "entropy_coef_final": args.entropy_coef_final}
     train_options = {**model_options, **ppo_options,
                      "checkpoint_path": args.checkpoint, "checkpoint_every": args.checkpoint_every}
     config_report = {"ppo": {"epochs": args.ppo_epochs, "minibatches": args.minibatches,
                              "gae_lambda": args.gae_lambda, "reward_scaling": args.reward_scaling,
-                             "target_kl": args.target_kl}, "input_mode": args.input_mode, "action_mode": args.action_mode, "include_ros": args.ros, "include_thermal": args.thermal,
+                             "target_kl": args.target_kl, "entropy_coef": args.entropy_coef,
+                             "entropy_coef_final": args.entropy_coef_final}, "input_mode": args.input_mode, "action_mode": args.action_mode, "include_ros": args.ros, "include_thermal": args.thermal,
                      "imagery_dir": str(args.imagery_dir) if args.imagery_dir else None}
 
     if args.smoke or (not args.train and not args.select and not args.eval):
