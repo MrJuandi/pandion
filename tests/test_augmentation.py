@@ -43,8 +43,9 @@ class AugmentationTests(unittest.TestCase):
             moved = transform_grid(values, t)
             for r in range(4):
                 for c in range(4):
-                    x, y = transform_point((c + 0.5) * 100, (r + 0.5) * 100, t, 400, 400)
-                    self.assertEqual(moved[int(y // 100), int(x // 100)], values[r, c])
+                    # Simulator convention: cell (r, c) at (c, r) * size, points map by rounding.
+                    x, y = transform_point(c * 100.0, r * 100.0, t, 300, 300)
+                    self.assertEqual(moved[int(round(y / 100)), int(round(x / 100))], values[r, c])
 
     def test_simulated_fire_is_equivariant(self):
         base = scenario()
@@ -65,6 +66,28 @@ class AugmentationTests(unittest.TestCase):
         self.assertIn("augmentation", moved["provenance"])
         self.assertNotEqual(moved["aircraft"]["initial_position_utm"], base["aircraft"]["initial_position_utm"])
         self.assertEqual(sum(map(sum, moved["fire"]["burn_mask"])), sum(map(sum, base["fire"]["burn_mask"])))
+
+    def test_aircraft_and_water_stay_on_their_transformed_cells(self):
+        base = scenario()
+        size = float(base["grid"]["cell_size_m"])
+        x0, y0 = float(base["grid"]["origin_utm_easting_m"]), float(base["grid"]["origin_utm_northing_m"])
+        rows, cols = int(base["grid"]["rows"]), int(base["grid"]["cols"])
+
+        def cell(point):
+            return int(round((point[1] - y0) / size)), int(round((point[0] - x0) / size))
+
+        for t in range(NUM_TRANSFORMS):
+            moved = augment_scenario(base, t)
+            for key in ("initial_position_utm", "water_scooping_utm"):
+                if key not in base["aircraft"]:
+                    continue
+                r, c = cell(base["aircraft"][key])
+                if not (0 <= r < rows and 0 <= c < cols):
+                    continue  # outside the window: no cell to compare
+                marker = np.zeros((rows, cols), int)
+                marker[r, c] = 1
+                expected = tuple(np.argwhere(transform_grid(marker, t))[0])
+                self.assertEqual(cell(moved["aircraft"][key]), expected, (key, t))
 
     def test_image_follows_the_grid(self):
         image = np.zeros((8, 8, 3), np.uint8)
