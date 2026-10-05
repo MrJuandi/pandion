@@ -48,6 +48,7 @@ def make_input_tensorizer(
     imagery_dir: Path | str | None = None,
     include_ros: bool = False,
     include_thermal: bool = False,
+    focus_slots: bool = False,
 ) -> Any:
     """Tensorizer for a scenario: legacy rasters, D-49 image inputs, or the no-image
     ablation ``cells`` (same per-cell/vector inputs, fire state as explicit channels)."""
@@ -55,7 +56,8 @@ def make_input_tensorizer(
         return GeographicTrainingEnv(scenario).observation_tensorizer()
     if input_mode == "cells":
         from .policy_inputs import GeographicInputTensorizer
-        return GeographicInputTensorizer(scenario, None, include_ros=include_ros, explicit_fire=True)
+        return GeographicInputTensorizer(scenario, None, include_ros=include_ros, explicit_fire=True,
+                                         focus_slots=focus_slots)
     if input_mode != "image":
         raise ValueError(f"Unknown input_mode: {input_mode}")
     if imagery_dir is None:
@@ -67,7 +69,7 @@ def make_input_tensorizer(
     if key not in _IMAGE_CACHE:
         _IMAGE_CACHE[key] = load_activation_image(imagery_dir, scenario)
     return GeographicInputTensorizer(scenario, _IMAGE_CACHE[key], include_ros=include_ros,
-                                     include_thermal=include_thermal)
+                                     include_thermal=include_thermal, focus_slots=focus_slots)
 
 
 def build_policy_model(
@@ -92,7 +94,8 @@ def build_policy_model(
     from .image_model import ImageActorCritic
 
     tensorizer = make_input_tensorizer(scenario, input_mode=input_mode, imagery_dir=imagery_dir,
-                                       include_ros=include_ros, include_thermal=include_thermal)
+                                       include_ros=include_ros, include_thermal=include_thermal,
+                                       focus_slots=action_mode == "parametric")
     return ImageActorCritic(cell_channels=tensorizer.num_cell_channels,
                             vector_dim=tensorizer.NUM_VECTOR_FEATURES,
                             px_per_cell=max(tensorizer.px_per_cell, 1), grid_rows=rows, grid_cols=cols,
@@ -317,7 +320,8 @@ def rollout_geographic(
     observation = env.reset(seed=scenario.get("seed"))
     mapper = env.action_mapper()
     tensorizer = make_input_tensorizer(scenario, input_mode=input_mode, imagery_dir=imagery_dir,
-                                       include_ros=include_ros, include_thermal=include_thermal)
+                                       include_ros=include_ros, include_thermal=include_thermal,
+                                       focus_slots=action_mode == "parametric")
 
     records: list[dict] = []
     rewards: list[float] = []
@@ -582,8 +586,9 @@ def main() -> None:
     parser.add_argument("--feedforward", action="store_true", help="Use feedforward instead of LSTM")
     parser.add_argument("--input-mode", choices=INPUT_MODES, default="legacy",
                         help="legacy rasters, D-49 image inputs (needs --imagery-dir), or the no-image ablation 'cells'")
-    parser.add_argument("--action-mode", choices=("tactical", "spatial"), default="tactical",
-                        help="tactical macro-actions or one drop action per cell (image inputs only)")
+    parser.add_argument("--action-mode", choices=("tactical", "spatial", "parametric"), default="tactical",
+                        help="tactical macro-actions, one drop action per cell, or focus x aspect "
+                             "parameterised actions (D-61); the latter two need image or cells inputs")
     parser.add_argument("--imagery-dir", type=Path, help="output directory of nightjar.imagery_acquire")
     parser.add_argument("--ros", action="store_true", help="add the Rothermel ROS channel (image inputs)")
     parser.add_argument("--thermal", action="store_true",

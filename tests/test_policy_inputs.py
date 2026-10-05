@@ -220,7 +220,8 @@ class ImageModelTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             write_imagery(Path(tmp), self.scenario, np.full((self.rows * PX, self.rows * PX, 3), 80, np.uint8))
             for input_mode, mode, thermal in (("image", "tactical", False), ("image", "spatial", False),
-                                              ("cells", "tactical", False), ("image", "tactical", True)):
+                                              ("cells", "tactical", False), ("image", "tactical", True),
+                                              ("image", "parametric", True)):
                 options = {"input_mode": input_mode, "imagery_dir": tmp, "include_ros": False,
                            "include_thermal": thermal}
                 model = build_policy_model(self.scenario, action_mode=mode, recurrent=True, **options)
