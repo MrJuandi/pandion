@@ -216,7 +216,9 @@ def rollout_geographic_batch(
     At most ``rollout_envs`` episodes are active at once. Results retain input
     scenario order even when episode lengths differ. Batched stochastic
     sampling consumes RNG differently from serial collection, so the same
-    seed does not promise the same actions as serial mode.
+    seed does not promise the same actions as serial mode. Active episodes
+    whose input or mask shapes differ are evaluated in separate forward
+    passes. With a ``backend``, its own ``skip_forced`` and input options apply.
     """
     import torch
     from .geographic_ppo import returns_and_advantages
@@ -245,25 +247,29 @@ def rollout_geographic_batch(
             active = indices
             states: dict[int, Any] = {i: None for i in indices}
             while active:
-                forced = {i: skip_forced and int(np.count_nonzero(packets[i]["mask"])) == 1
-                          for i in active}
+                # The episode owner decides which steps are forced: it omits
+                # inputs when its skip_forced option leaves a single action.
+                forced = {i: "inputs" not in packets[i] for i in active}
                 decisions = [i for i in active if not forced[i]]
                 chosen: dict[int, int] = {}
-                row_for: dict[int, int] = {}
-                inputs = masks = actions = log_probs = estimates = next_state = None
-                if decisions:
-                    try:
-                        inputs = tuple(torch.from_numpy(np.stack(arrays)).to(device)
-                                       for arrays in zip(*(packets[i]["inputs"] for i in decisions)))
-                        masks = torch.from_numpy(np.stack([packets[i]["mask"] for i in decisions])).to(device)
-                    except ValueError as exc:
-                        raise ValueError("batched scenarios must have matching input and action shapes") from exc
+                decided: dict[int, dict] = {}
+                # Scenarios of different window sizes cannot share a tensor;
+                # each shape group gets its own forward pass.
+                groups: dict[tuple, list[int]] = {}
+                for i in decisions:
+                    key = tuple(a.shape for a in packets[i]["inputs"]) + (packets[i]["mask"].shape,)
+                    groups.setdefault(key, []).append(i)
+                for group in groups.values():
+                    inputs = tuple(torch.from_numpy(np.stack(arrays)).to(device)
+                                   for arrays in zip(*(packets[i]["inputs"] for i in group)))
+                    masks = torch.from_numpy(np.stack([packets[i]["mask"] for i in group])).to(device)
+                    next_state = None
                     with torch.no_grad():
                         if getattr(model, "recurrent", False):
                             prior_state = None
-                            if any(states[i] is not None for i in decisions):
-                                state_parts = [states[i] for i in decisions]
-                                zero_state = model.initial_state(batch_size=len(decisions), device=inputs[0].device)
+                            if any(states[i] is not None for i in group):
+                                state_parts = [states[i] for i in group]
+                                zero_state = model.initial_state(batch_size=len(group), device=inputs[0].device)
                                 prior_state = tuple(torch.cat([
                                     part[j] if part is not None else zero_state[j][row:row + 1]
                                     for row, part in enumerate(state_parts)], dim=0)
@@ -273,10 +279,12 @@ def rollout_geographic_batch(
                         else:
                             actions, log_probs, _, estimates = model.get_action(
                                 *inputs, masks, deterministic=deterministic)
-                    row_for = {i: row for row, i in enumerate(decisions)}
                     action_list = actions.cpu().tolist()
-                    for row, index in enumerate(decisions):
+                    for row, index in enumerate(group):
                         chosen[index] = int(action_list[row])
+                        decided[index] = {"inputs": tuple(t[row] for t in inputs), "mask": masks[row],
+                                          "action": actions[row], "log_prob": log_probs[row],
+                                          "value": estimates[row]}
                         if next_state is not None:
                             states[index] = tuple(t[row:row + 1] for t in next_state)
                 for index in active:
@@ -291,13 +299,11 @@ def rollout_geographic_batch(
                         else:
                             carried[index] += packet["reward"]
                     else:
-                        row = row_for[index]
-                        all_records[index].append({"inputs": tuple(t[row] for t in inputs),
-                                                   "mask": masks[row], "action": actions[row],
-                                                   "log_prob": log_probs[row]})
+                        record = decided[index]
+                        values[index].append(record.pop("value"))
+                        all_records[index].append(record)
                         rewards[index].append(carried[index] + packet["reward"])
                         carried[index] = 0.0
-                        values[index].append(estimates[row])
                     if packet["done"]:
                         metrics[index] = packet["metrics"]
                 active = [i for i in active if not packets[i]["done"]]

@@ -77,6 +77,23 @@ class BatchedRolloutTests(unittest.TestCase):
             self.assertEqual(metrics, [result[1] for result in serial])
             self.assert_episodes_equal([result[0] for result in serial], records)
 
+    def test_mixed_window_sizes_batch_in_separate_passes(self):
+        # A window clipped by a small incident grid has other input shapes.
+        fixture = build_synthetic_cems_fixture("EMSR578", rows=40, cols=40)
+        small = with_fleet([generate_geographic_scenario(fixture, index=3, split="development", window_rows=10,
+                                                         window_cols=10, horizon_s=360.0)], 2)[0]
+        scenarios = [self.scenarios[0], small, self.scenarios[2]]
+        options = {"input_mode": "cells"}
+        for recurrent in (False, True):
+            with self.subTest(recurrent=recurrent):
+                torch.manual_seed(21)
+                model = build_policy_model(scenarios[0], recurrent=recurrent, action_mode="parametric", **options)
+                serial = [rollout_geographic(model, sc, deterministic=True, **options) for sc in scenarios]
+                records, metrics = rollout_geographic_batch(model, scenarios, rollout_envs=3,
+                                                            deterministic=True, **options)
+                self.assertEqual(metrics, [result[1] for result in serial])
+                self.assert_episodes_equal([result[0] for result in serial], records)
+
     def test_skip_forced_matches_serial_with_nondefault_bonus(self):
         for mode, action_mode in (("legacy", "tactical"), ("cells", "parametric")):
             with self.subTest(mode=mode):
