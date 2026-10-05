@@ -373,6 +373,18 @@ class TestGeographicPPO(unittest.TestCase):
             _, metrics = rollout_geographic(model, self.scenario, deterministic=True)
             self.assertAlmostEqual(metrics["final_burned_ha"], best, places=4)
 
+    def test_holdout_evaluation_reports_policy_and_baselines(self):
+        from nightjar.geographic_ppo import holdout_evaluation
+        torch.manual_seed(0)
+        model = SpatialActorCritic(grid_rows=15, grid_cols=15, action_dim=len(TACTICAL_ACTION_NAMES), recurrent=True)
+        report = holdout_evaluation(model, [self.scenario])
+        self.assertEqual(report["scenarios"], 1)
+        self.assertEqual(set(report["baselines_mean_ha"]),
+                         {"no_intervention", "heuristic", "containment_heuristic", "random_valid_mean"})
+        row = report["rows"][0]
+        self.assertEqual(report["policy_mean_ha"], row["policy_ha"])
+        self.assertGreaterEqual(row["no_intervention_ha"], row["heuristic_ha"])
+
     def test_entropy_schedule_decays_linearly(self):
         from unittest.mock import patch
         seen = []

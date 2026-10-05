@@ -433,3 +433,15 @@ After this run, overlapping drops were prohibited for every policy (D-63, revise
 Exploratory development/validation run; reserved scenarios unopened. Multi-focus family with `--fleet-size 2`, thermal image model at 4 px per cell with ROS, parametric actions over fire-front slots (D-67), per-slot raw features, D4 augmentation, skipped single-action steps, no drop bonus, D-55 PPO settings, entropy 0.05→0.005, 1,000 updates × 8 episodes, 5 rollout workers, selection every 100 updates (D-66), seeds 42–45, commit `5bf5f68`.
 
 Validation mean final burned area (ha), 24 EMSR590 scenarios: no intervention 121.21, random 65.94, containment 55.62, heuristic **54.25**; selected weights for seeds 42 / 43 / 44 / 45: **49.75 / 49.33 / 49.88 / 50.79** (mean 49.94, 4.3 ha or 8% below the heuristic). Before D-67 the best selected seed reached 54.54. Every seed has several evaluation points below the heuristic (seed 42: 400–900 updates between 49.75 and 52.17), so the result is not one lucky checkpoint, but scores still oscillate between evaluations (final weights 56.83 / 55.00 / 52.88 / 53.79). Because the selection scenarios also chose the weights, these figures are optimistic; a clean estimate needs an incident used neither for training nor for selection (D-65 holdout folds) before any performance claim.
+
+### Clean holdout folds (D-68, 2026-10-05)
+
+Same configuration as the run above, seed 42, three folds run concurrently (3 rollout workers each), commit `e075f0a`. In each fold one development incident was excluded from training, the weights were selected on the validation split (EMSR590), and the selected policy and the baselines were then scored on the 32 scenarios of the excluded incident, which were used for neither training nor selection. Reserved scenarios remain unopened.
+
+| Held-out incident | No intervention | Random | Containment | Heuristic | **Policy** | Policy − heuristic | Scenarios better / equal / worse than heuristic |
+|---|---|---|---|---|---|---|---|
+| EMSR583 | 276.72 | 221.55 | 183.69 | 159.12 | **155.19** | −3.93 ha (−2.5%) | 18 / 2 / 12 |
+| EMSR602_AOI04 | 112.19 | 91.03 | 84.53 | 86.00 | **78.53** | −7.47 ha (−8.7%) | 25 / 1 / 6 |
+| EMSR625_AOI01 | 109.25 | 82.67 | 71.19 | 70.75 | **67.44** | −3.31 ha (−4.7%) | 18 / 5 / 9 |
+
+On all three unseen incidents the selected policy burns less than both heuristics on average and wins more scenarios than it loses. This is one seed per fold and three folds of six development incidents, so it is evidence of generalisation within this simulator and scenario family, not a validated operational result; the predeclared criteria in this document and the reserved split remain the reference for any formal claim.
