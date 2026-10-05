@@ -1,15 +1,28 @@
 """Unit and integration tests for the geographic integrated decision environment."""
 
+from copy import deepcopy
 import unittest
 
+from nightjar.environment import SCHEMA_VERSION as ENVIRONMENT_SCHEMA_VERSION
 from nightjar.geographic_family import (
     build_synthetic_cems_fixture,
     generate_geographic_scenario,
 )
 from nightjar.geographic_integrated import (
     REPLAY_SCHEMA_VERSION,
+    geographic_episode,
     run_geographic_integrated,
 )
+
+
+def growing_fire_scenario(horizon_s=3600.0):
+    """Uniform GR2 under a brisk wind: the front is still advancing at the horizon."""
+    fixture = build_synthetic_cems_fixture("EMSR578", utm_zone=31, rows=60, cols=60)
+    scenario = generate_geographic_scenario(fixture, index=0, split="development", window_rows=40,
+                                            window_cols=40, horizon_s=horizon_s)
+    scenario["fire"]["fuel_grid"] = [[102] * 40 for _ in range(40)]
+    scenario["fire"]["burn_mask"] = [[abs(r - 20) <= 1 and abs(c - 20) <= 1 for c in range(40)] for r in range(40)]
+    return scenario
 
 
 class TestGeographicIntegrated(unittest.TestCase):
@@ -291,6 +304,49 @@ class TestGeographicIntegrated(unittest.TestCase):
     def test_unknown_observation_mode_rejected(self):
         with self.assertRaises(ValueError):
             run_geographic_integrated(self.scenario, policy="no_intervention", observation_mode="delayed")
+
+
+    def test_future_forcing_cannot_change_observed_fire_state(self):
+        """Burning/burned must not reveal whether a future wind lets the front cross an edge."""
+        base = growing_fire_scenario()
+        moisture = base["fire"]["moisture"]
+
+        def with_late_wind(wind):
+            scenario = deepcopy(base)
+            scenario["environment"] = {"schema_version": ENVIRONMENT_SCHEMA_VERSION,
+                                       "weather_mode": "synthetic_intervals", "forcing": [
+                {"start_s": 0.0, "end_s": 3300.0, "available_at_s": 0.0,
+                 "midflame_wind_to_m_s": [3.0, 0.0], "moisture": moisture},
+                {"start_s": 3300.0, "end_s": 3600.0, "available_at_s": 3300.0,
+                 "midflame_wind_to_m_s": wind, "moisture": moisture}]}
+            return scenario
+
+        steady, reversed_late = with_late_wind([3.0, 0.0]), with_late_wind([-8.0, 0.0])
+        for steps in (50, 52, 54):  # decisions at 3000-3240 s, before the late interval starts
+            first = run_geographic_integrated(steady, "no_intervention", _stop_after_steps=steps)
+            second = run_geographic_integrated(reversed_late, "no_intervention", _stop_after_steps=steps)
+            self.assertLess(first["pending_observation"]["time_s"], 3300.0)
+            self.assertEqual(first["pending_observation"]["fire"], second["pending_observation"]["fire"])
+
+    def test_truncated_episode_reaching_the_horizon_is_scored_at_the_horizon(self):
+        """The step driver (training, RL evaluation) and the batch driver (baselines) agree."""
+        scenario = growing_fire_scenario()
+        scenario["fire"]["wind_to_m_s"] = [4.0, 0.0]
+        scenario["fire"]["burn_mask"] = [[abs(r - 20) <= 1 and abs(c - 5) <= 1 for c in range(40)] for r in range(40)]
+
+        def hold_to_the_end(truncated):
+            episode = geographic_episode(scenario, "no_intervention", truncated=truncated, record_observations=False)
+            next(episode)
+            try:
+                while True:
+                    episode.send({"type": "HOLD"})
+            except StopIteration as finished:
+                return finished.value
+
+        full, stepped = hold_to_the_end(False), hold_to_the_end(True)
+        self.assertIsNone(stepped["pending_observation"])
+        self.assertEqual(stepped["outcomes"], full["outcomes"])
+        self.assertEqual(stepped["arrival_time_s"], full["arrival_time_s"])
 
 
 if __name__ == "__main__":
