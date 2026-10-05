@@ -22,7 +22,7 @@ from __future__ import annotations
 import math
 from typing import Any
 
-from .aircraft import CAPACITY_L
+from .aircraft import tank_capacity_l
 from .policies import candidate_cells
 
 MAX_SLOTS = 4
@@ -108,7 +108,7 @@ class ParametricActionMapper:
             mask[1] = True
             return mask
         mask[0] = True
-        if aircraft["water_l"] < float(aircraft.get("capacity_l", CAPACITY_L)):
+        if aircraft["water_l"] < tank_capacity_l(aircraft):
             mask[1] = True
         candidates = candidate_cells(observation)
         for k, cluster in enumerate(fire_slots(observation)):

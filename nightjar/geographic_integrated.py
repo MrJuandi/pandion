@@ -456,7 +456,7 @@ def geographic_episode(
                 frac = 1.0 if span <= 0 else min(max((time_s - task["t0"]) / span, 0.0), 1.0)
                 position = [task["from"][k] + frac * (task["to"][k] - task["from"][k]) for k in range(2)]
             view.append({"index": index, "position_m": [round(position[0], 2), round(position[1], 2)],
-                         "water_l": craft["water"], "phase": phase, "target_m": target,
+                         "water_l": craft["water"], "capacity_l": capacity_l, "phase": phase, "target_m": target,
                          "busy_remaining_s": round(max(craft["free_at"] - time_s, 0.0), 2)})
         return view
 
@@ -558,6 +558,7 @@ def geographic_episode(
             "aircraft": {
                 "position_m": [round(aircraft_pos[0], 2), round(aircraft_pos[1], 2)],
                 "water_l": aircraft_water,
+                "capacity_l": capacity_l,
                 "phase": "idle",
                 "target_m": None,
                 "refill_remaining_s": 0.0,

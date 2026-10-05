@@ -12,7 +12,7 @@ from nightjar.augmentation import (
     transform_point,
     transform_vector,
 )
-from nightjar.geographic_family import build_synthetic_cems_fixture, generate_geographic_scenario
+from nightjar.geographic_family import build_synthetic_cems_fixture, canonical_hash, generate_geographic_scenario
 from nightjar.geographic_integrated import run_geographic_integrated
 
 
@@ -64,6 +64,9 @@ class AugmentationTests(unittest.TestCase):
         moved = augment_scenario(base, 5)
         self.assertEqual(moved["augmentation"], {"transform": 5})
         self.assertIn("augmentation", moved["provenance"])
+        self.assertEqual(moved["provenance"]["augmentation"]["source_scenario_hash"], base["scenario_hash"])
+        self.assertEqual(moved["scenario_hash"],
+                         canonical_hash({k: v for k, v in moved.items() if k != "scenario_hash"}))
         self.assertNotEqual(moved["aircraft"]["initial_position_utm"], base["aircraft"]["initial_position_utm"])
         self.assertEqual(sum(map(sum, moved["fire"]["burn_mask"])), sum(map(sum, base["fire"]["burn_mask"])))
 
