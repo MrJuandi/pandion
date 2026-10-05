@@ -13,6 +13,7 @@ from nightjar.imagery_acquire import (
     best_available_pixel,
     buffer_pixels,
     cems_code,
+    downsample_imagery,
     family_grid,
     match_to_reference,
     load_activation_image,
@@ -144,6 +145,20 @@ class ImageryAcquireTests(unittest.TestCase):
             np.save(directory / "emsr578.npy", image[::-1])
             with self.assertRaises(ValueError):
                 load_activation_image(directory, scenario())
+
+    def test_downsample_imagery_mean_pools_and_stays_loadable(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src, dst = Path(tmp) / "src", Path(tmp) / "dst"
+            src.mkdir()
+            image = np.arange(4 * 6 * 3, dtype=np.uint8).reshape(4, 6, 3)
+            self._write_imagery(src, image)
+            manifest = json.loads((src / "sources.json").read_text())
+            manifest["activations"]["EMSR578"]["pixel_size_m"] = 50.0
+            (src / "sources.json").write_text(json.dumps(manifest))
+            downsample_imagery(src, dst, 2)
+            small = load_activation_image(dst, scenario())
+            self.assertEqual(small.shape, (2, 3, 3))
+            self.assertEqual(small[0, 0, 0], round(image[:2, :2, 0].mean()))
 
     def test_load_activation_image_rejects_wrong_shape(self):
         with tempfile.TemporaryDirectory() as tmp:

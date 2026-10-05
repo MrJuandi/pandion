@@ -296,6 +296,36 @@ def acquire_imagery(scenarios_dir: Path, output_dir: Path, *, px_per_cell: int =
     return sources
 
 
+def downsample_imagery(source_dir: Path | str, output_dir: Path | str, factor: int = 2) -> dict:
+    """Write a copy of an imagery directory with ``factor`` x ``factor`` mean-pooled pixels.
+
+    Keeps the grid, CRS and provenance; updates pixels per cell, pixel size,
+    shape and hash, and records the derivation. Used for 4 px per cell (D-64).
+    """
+    source_dir, output_dir = Path(source_dir), Path(output_dir)
+    if output_dir.exists() and any(output_dir.iterdir()):
+        raise ValueError("downsampled imagery output must be new or empty")
+    manifest = json.loads((source_dir / "sources.json").read_text())
+    if manifest.get("schema_version") != SCHEMA_VERSION:
+        raise ValueError("unsupported imagery manifest")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    for activation, source in manifest["activations"].items():
+        if source["px_per_cell"] % factor:
+            raise ValueError(f"{activation}: {source['px_per_cell']} px per cell is not divisible by {factor}")
+        image = np.load(source_dir / source["array"]).astype(np.float32)
+        h, w, _ = image.shape
+        small = np.rint(image.reshape(h // factor, factor, w // factor, factor, 3).mean(axis=(1, 3))).astype(np.uint8)
+        np.save(output_dir / source["array"], small)
+        source.update(px_per_cell=source["px_per_cell"] // factor, pixel_size_m=source["pixel_size_m"] * factor,
+                      array_shape=list(small.shape),
+                      array_sha256=sha256((output_dir / source["array"]).read_bytes()).hexdigest(),
+                      derived_from={"imagery_dir": str(source_dir), "pooling": f"{factor}x{factor} mean",
+                                    "source_sha256": source["array_sha256"]})
+    manifest["created_at_utc"] = _iso(datetime.now(timezone.utc))
+    (output_dir / "sources.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n")
+    return manifest
+
+
 def load_activation_image(imagery_dir: Path | str, scenario: dict) -> np.ndarray:
     """Return the [rows*px, cols*px, 3] uint8 base image for a scenario, row 0 south.
 
@@ -326,12 +356,16 @@ def load_activation_image(imagery_dir: Path | str, scenario: dict) -> np.ndarray
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("scenarios_dir", type=Path)
+    parser.add_argument("scenarios_dir", type=Path, help="scenario family, or an imagery dir with --downsample")
     parser.add_argument("output_dir", type=Path)
+    parser.add_argument("--downsample", type=int, help="mean-pool an existing imagery dir by this factor instead")
     parser.add_argument("--px-per-cell", type=int, default=DEFAULT_PX_PER_CELL)
     parser.add_argument("--margin-days", type=int, default=DEFAULT_MARGIN_DAYS)
     parser.add_argument("--window-days", type=int, default=DEFAULT_WINDOW_DAYS)
     args = parser.parse_args()
+    if args.downsample:
+        downsample_imagery(args.scenarios_dir, args.output_dir, args.downsample)
+        return
     acquire_imagery(args.scenarios_dir, args.output_dir, px_per_cell=args.px_per_cell,
                     margin_days=args.margin_days, window_days=args.window_days)
 
