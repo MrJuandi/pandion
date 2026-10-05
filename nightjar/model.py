@@ -423,6 +423,10 @@ class ActionMapper:
         if action_mode == "tactical":
             self._tactical = TacticalActionMapper(cell_size_m)
             self.num_actions = self._tactical.num_actions
+        elif action_mode == "parametric":
+            from .parametric_actions import ParametricActionMapper
+            self._tactical = ParametricActionMapper(cell_size_m)
+            self.num_actions = self._tactical.num_actions
         else:
             self._tactical = None
             self.num_actions = 2 + rows * cols
