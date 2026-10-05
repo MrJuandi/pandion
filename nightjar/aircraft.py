@@ -14,6 +14,11 @@ from math import hypot, isfinite
 CAPACITY_L = 6137.0  # CL-415 reference capacity; see docs/PHYSICAL_MODEL_V0.md
 
 
+def tank_capacity_l(aircraft: dict) -> float:
+    """Tank capacity of an observed aircraft; observations without one are CL-415s."""
+    return float(aircraft.get("capacity_l", CAPACITY_L))
+
+
 def _point(value: object, name: str) -> list[float]:
     if not isinstance(value, list) or len(value) != 2:
         raise ValueError(f"{name} must be [x_m, y_m]")

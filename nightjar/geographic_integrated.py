@@ -300,6 +300,17 @@ def geographic_episode(
                 if is_burnable(r, c):
                     heappush(queue, (0.0, r, c))
 
+    def linked(r: int, c: int, dr: int, dc: int) -> bool:
+        """Fuel allows spread from (r, c) to its neighbour (dr, dc); diagonals need both orthogonal cells."""
+        return is_burnable(r + dr, c + dc) and not (dr and dc and (not is_burnable(r + dr, c) or not is_burnable(r, c + dc)))
+
+    def blockers(r: int, c: int, dr: int, dc: int) -> tuple[tuple[int, int], ...]:
+        """Cells whose water barrier stops spread along this edge: the target and, for diagonals, both orthogonals."""
+        return ((r + dr, c + dc), (r + dr, c), (r, c + dc)) if dr and dc else ((r + dr, c + dc),)
+
+    def can_spread(r: int, c: int, dr: int, dc: int) -> bool:
+        return linked(r, c, dr, dc) and not any(barrier[br][bc] for br, bc in blockers(r, c, dr, dc))
+
     def advance_fire(until_s: float) -> None:
         """Advance physical Rothermel fire propagation up to until_s."""
         while queue and queue[0][0] <= until_s + 1e-9:
@@ -319,9 +330,7 @@ def geographic_episode(
 
             for dr, dc in NEIGHBORS:
                 nr, nc = r + dr, c + dc
-                if not is_burnable(nr, nc) or barrier[nr][nc]:
-                    continue
-                if dr and dc and (barrier[r + dr][c] or barrier[r][c + dc] or not is_burnable(r + dr, c) or not is_burnable(r, c + dc)):
+                if not can_spread(r, c, dr, dc):
                     continue
 
                 dist = hypot(dc * cell_size, dr * cell_size)
@@ -447,7 +456,7 @@ def geographic_episode(
                 frac = 1.0 if span <= 0 else min(max((time_s - task["t0"]) / span, 0.0), 1.0)
                 position = [task["from"][k] + frac * (task["to"][k] - task["from"][k]) for k in range(2)]
             view.append({"index": index, "position_m": [round(position[0], 2), round(position[1], 2)],
-                         "water_l": craft["water"], "phase": phase, "target_m": target,
+                         "water_l": craft["water"], "capacity_l": capacity_l, "phase": phase, "target_m": target,
                          "busy_remaining_s": round(max(craft["free_at"] - time_s, 0.0), 2)})
         return view
 
@@ -470,18 +479,16 @@ def geographic_episode(
                 delivered_reports.append(r)
 
     def front_active(r: int, c: int) -> bool:
-        """True while fire is still advancing from (r, c) into a neighbour (D-67).
+        """True while fire can still advance from (r, c) into a neighbour (D-67).
 
-        A neighbour that is scheduled to ignite (finite best arrival), not yet
-        reached and not protected by a water barrier means the front has not
-        left this cell, whatever its nominal burning duration.
+        A neighbour the fire can spread into (burnable, not yet reached, not
+        protected by a water barrier) means the front has not left this cell,
+        whatever its nominal burning duration. Only the present state is used:
+        whether the scheduled arrival is finite depends on future forcing and
+        the horizon, so it must not decide what the controller observes.
         """
-        for dr, dc in NEIGHBORS:
-            nr, nc = r + dr, c + dc
-            if (0 <= nr < rows and 0 <= nc < cols and arrival[nr][nc] is None
-                    and best[nr][nc] < float("inf") and not barrier[nr][nc]):
-                return True
-        return False
+        return is_burnable(r, c) and any(
+            can_spread(r, c, dr, dc) and arrival[r + dr][c + dc] is None for dr, dc in NEIGHBORS)
 
     def realtime_fire_view(time_s: float) -> dict:
         """Full-grid fire state at time_s: perfect, instantaneous observation.
@@ -551,6 +558,7 @@ def geographic_episode(
             "aircraft": {
                 "position_m": [round(aircraft_pos[0], 2), round(aircraft_pos[1], 2)],
                 "water_l": aircraft_water,
+                "capacity_l": capacity_l,
                 "phase": "idle",
                 "target_m": None,
                 "refill_remaining_s": 0.0,
@@ -655,8 +663,11 @@ def geographic_episode(
             track_entry["aircraft_index"] = ego
         aircraft_track.append(track_entry)
 
-    if not truncated:
-        # Final fire advancement to horizon only if running full episode
+    if not truncated or pending_observation is None:
+        # The episode reached the horizon (truncated or not): score it there.
+        # Fire must be advanced explicitly; the last decision may precede the
+        # horizon by a HOLD interval or a transit, and only pending effects
+        # advance it inside the loop.
         advance_fire(horizon_s)
         if observation_mode == "scheduled":
             sync_observations(horizon_s)
@@ -667,9 +678,10 @@ def geographic_episode(
     def front_end_times(end_s: float) -> list[list[float | None]]:
         """Audit raster: when each reached cell stopped burning (D-67).
 
-        The later of its nominal burnout and the times the front left it (a
-        later-ignited neighbour, or a barrier placed on a neighbour it was
-        advancing into); ``end_s`` when the front was still active at the end.
+        The later of its nominal burnout and, for each neighbour the fire could
+        still spread into when this cell was reached, the time that edge closed
+        (the neighbour ignited, or a barrier blocked it); ``end_s`` when an edge
+        was still open at the end. Matches ``front_active`` at every decision.
         """
         out: list[list[float | None]] = []
         for r in range(rows):
@@ -679,16 +691,17 @@ def geographic_episode(
                     line.append(None)
                     continue
                 end = burnout[r][c] if burnout[r][c] is not None else arrival[r][c]
+                if not is_burnable(r, c):
+                    line.append(round(end, 6))
+                    continue
                 for dr, dc in NEIGHBORS:
-                    nr, nc = r + dr, c + dc
-                    if not (0 <= nr < rows and 0 <= nc < cols):
+                    if not linked(r, c, dr, dc):
                         continue
-                    if arrival[nr][nc] is not None and arrival[nr][nc] >= arrival[r][c]:
-                        end = max(end, arrival[nr][nc])
-                    elif (nr, nc) in barrier_time and barrier_time[(nr, nc)] >= arrival[r][c]:
-                        end = max(end, barrier_time[(nr, nc)])
-                    elif arrival[nr][nc] is None and best[nr][nc] < float("inf") and not barrier[nr][nc]:
-                        end = max(end, end_s)
+                    nr, nc = r + dr, c + dc
+                    closed = min([arrival[nr][nc] if arrival[nr][nc] is not None else float("inf")]
+                                 + [barrier_time.get(cell, float("inf")) for cell in blockers(r, c, dr, dc)])
+                    if closed > arrival[r][c]:
+                        end = max(end, min(closed, end_s))
                 line.append(round(end, 6))
             out.append(line)
         return out
@@ -714,7 +727,7 @@ def geographic_episode(
         "observation_mode": observation_mode,
         "arrival_time_s": [[round(v, 6) if v is not None else None for v in line] for line in arrival],
         "burnout_time_s": front_end_times(eval_time),
-        "burning_model": "burning while within front crossing (cell_size / head-fire rate) + Anderson 1969 residence 384/sigma min, or while the front still advances into a scheduled, untreated neighbour (D-67); initial perimeter: cells bordering unburned burnable fuel ignited at t=0, interior cells already burned",
+        "burning_model": "burning while within front crossing (cell_size / head-fire rate) + Anderson 1969 residence 384/sigma min, or while it borders a neighbour the fire can still spread into (burnable, unreached, no barrier; D-67, D-69); initial perimeter: cells bordering unburned burnable fuel ignited at t=0, interior cells already burned",
         "fuel_grid": deepcopy(fuel_grid),
         "water_mask": deepcopy(fire_dict.get("water_mask", [[False] * cols for _ in range(rows)])),
         "elevation_m": deepcopy(elevation),
