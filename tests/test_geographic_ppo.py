@@ -270,6 +270,34 @@ class TestGeographicPPO(unittest.TestCase):
         loss = ppo_update_geographic(model, optimizer, records)
         self.assertTrue(torch.isfinite(torch.tensor(loss)))
 
+    def test_ppo_update_accumulation_equals_batched_loss(self):
+        import copy
+        for recurrent in (True, False):
+            torch.manual_seed(0)
+            model = SpatialActorCritic(grid_rows=15, grid_cols=15, action_dim=len(TACTICAL_ACTION_NAMES),
+                                       recurrent=recurrent)
+            episodes = [rollout_geographic(model, self.scenario)[0] for _ in range(2)]
+            accumulated = copy.deepcopy(model)
+            ppo_update_geographic(accumulated, torch.optim.SGD(accumulated.parameters(), lr=0.0), episodes)
+            batched = copy.deepcopy(model)
+            parts = []
+            for ep in episodes:
+                inputs = tuple(torch.stack(x) for x in zip(*(r["inputs"] for r in ep)))
+                lp, ent, val = batched.evaluate_actions(*inputs, torch.stack([r["mask"] for r in ep]),
+                                                        torch.stack([r["action"] for r in ep]))
+                parts.append((lp, ent, val, ep))
+            lp = torch.cat([p[0] for p in parts]); ent = torch.cat([p[1] for p in parts])
+            val = torch.cat([p[2] for p in parts]); flat = [r for p in parts for r in p[3]]
+            old = torch.stack([r["log_prob"] for r in flat]); ret = torch.stack([r["return"] for r in flat])
+            adv = torch.stack([r["advantage"] for r in flat])
+            ratio = (lp - old).exp()
+            loss = (-torch.minimum(ratio * adv, ratio.clamp(0.8, 1.2) * adv).mean()
+                    + 0.5 * ((val - ret) ** 2).mean() - 0.01 * ent.mean())
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(batched.parameters(), max_norm=0.5)
+            for a, b in zip(accumulated.parameters(), batched.parameters()):
+                torch.testing.assert_close(a.grad, b.grad, atol=1e-6, rtol=1e-5)
+
     def test_train_geographic_ppo_single_update(self):
         model, losses = train_geographic_ppo(
             [self.scenario],

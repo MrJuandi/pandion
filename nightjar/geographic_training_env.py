@@ -7,11 +7,18 @@ with CL-415 aerial operations and continuous-time Rothermel fire spread.
 from __future__ import annotations
 
 from copy import deepcopy
+import pickle
 from typing import Any
 
 from .aircraft import CAPACITY_L
-from .geographic_integrated import run_geographic_integrated
+from .geographic_integrated import geographic_episode
 from .policies import candidate_cells
+
+
+def _copy(value: Any) -> Any:
+    """Defensive deep copy; pickle is several times faster than deepcopy for
+    full-grid observations of plain dicts, lists and numbers."""
+    return pickle.loads(pickle.dumps(value, protocol=pickle.HIGHEST_PROTOCOL))
 
 
 def valid_geographic_actions(observation: dict) -> list[dict]:
@@ -53,21 +60,27 @@ class GeographicTrainingEnv:
         self._scenario = deepcopy(scenario)
         self._drop_bonus_per_cell = float(drop_bonus_per_cell)
         self._action_mode = action_mode
-        self._actions: list[dict] = []
+        self._episode: Any = None
         self._observation: dict | None = None
         self._replay: dict | None = None
         self._area_ha = 0.0
         self._drop_count = 0
         self._terminated = False
 
-    def _run_prefix(self) -> dict:
-        return run_geographic_integrated(
-            self._scenario,
-            policy="heuristic",
-            _actions=self._actions,
-            _stop_after_steps=len(self._actions),
-            _record_observations=False,
-        )
+    def _advance(self, order: dict | None) -> tuple[dict | None, float, list[dict]]:
+        """Advance the persistent episode; returns (observation or None, area_ha, drops).
+
+        The simulator state is kept between decisions, so a step costs one
+        decision interval instead of a replay of the whole prefix. Results are
+        identical to replaying the prefix with ``run_geographic_integrated``.
+        """
+        try:
+            observation, area_ha, drops = (next(self._episode) if order is None
+                                           else self._episode.send(order))
+            return _copy(observation), area_ha, drops
+        except StopIteration as finished:
+            self._replay = finished.value
+            return None, self._replay["affected_area_ha"], self._replay.get("drops", [])
 
     def _mask(self, observation: dict) -> list[dict]:
         return valid_geographic_actions(observation)
@@ -92,13 +105,15 @@ class GeographicTrainingEnv:
         """Reset to the scenario seed; a supplied seed must match its metadata."""
         if seed is not None and seed != self._scenario.get("seed"):
             raise ValueError("reset seed must match scenario seed for reproducible replay")
-        self._actions = []
         self._terminated = False
-        self._replay = self._run_prefix()
-        self._observation = deepcopy(self._replay["pending_observation"])
-        self._area_ha = self._replay["affected_area_ha"]
-        self._drop_count = len(self._replay.get("drops", []))
-        return deepcopy(self._observation)
+        self._replay = None
+        self._episode = geographic_episode(self._scenario, "heuristic", truncated=True,
+                                           record_observations=False)
+        observation, self._area_ha, drops = self._advance(None)
+        self._drop_count = len(drops)
+        self._terminated = observation is None
+        self._observation = observation
+        return _copy(self._observation)
 
     def step(self, action: dict) -> tuple[dict, float, bool, dict]:
         """Apply an action from current mask and return (obs, reward, done, info)."""
@@ -111,24 +126,20 @@ class GeographicTrainingEnv:
             raise ValueError(f"invalid action; choose one of the actions in info['action_mask']: {valid!r}")
 
         previous_observation = self._observation
-        self._actions.append(deepcopy(action))
-        self._replay = self._run_prefix()
-        new_area = self._replay["affected_area_ha"]
+        next_observation, new_area, new_drops = self._advance(deepcopy(action))
         reward = -(new_area - self._area_ha)
         self._area_ha = new_area
 
-        new_drops = self._replay.get("drops", [])
         if self._drop_bonus_per_cell > 0 and len(new_drops) > self._drop_count:
             for drop_record in new_drops[self._drop_count:]:
                 treated = len(drop_record.get("treated_cells", []))
                 reward += treated * self._drop_bonus_per_cell
         self._drop_count = len(new_drops)
 
-        next_observation = self._replay.get("pending_observation")
         self._terminated = next_observation is None
         if next_observation is None:
             next_observation = previous_observation
-        self._observation = deepcopy(next_observation)
+        self._observation = next_observation  # already a private copy from _advance
 
         info = {
             "action_mask": self._mask(self._observation) if not self._terminated else [],
@@ -136,7 +147,7 @@ class GeographicTrainingEnv:
             "reward_units": self.reward_units,
             "reward_definition": self.reward_definition,
         }
-        return deepcopy(self._observation), float(reward), self._terminated, info
+        return _copy(self._observation), float(reward), self._terminated, info
 
     def action_mapper(self) -> Any:
         """Return an ActionMapper matched to this geographic scenario's dimensions."""
