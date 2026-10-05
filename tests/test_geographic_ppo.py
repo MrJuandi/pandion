@@ -373,6 +373,43 @@ class TestGeographicPPO(unittest.TestCase):
             _, metrics = rollout_geographic(model, self.scenario, deterministic=True)
             self.assertAlmostEqual(metrics["final_burned_ha"], best, places=4)
 
+    def test_batched_training_combines_augmentation_slots_and_best_selection(self):
+        from nightjar.geographic_ppo import with_fleet
+        from nightjar.geographic_rollouts import rollout_geographic_batch
+        real = rollout_geographic_batch
+        calls = []
+
+        def collect(*args, **kwargs):
+            calls.append((kwargs.get("deterministic", False), kwargs["skip_forced"],
+                          kwargs["drop_bonus_per_cell"], kwargs["backend"]))
+            return real(*args, **kwargs)
+
+        scenarios = with_fleet([self.scenario], 2)
+        for workers in (0, 2):
+            with self.subTest(workers=workers), tempfile.TemporaryDirectory() as tmp:
+                calls.clear()
+                history = []
+                checkpoint = Path(tmp) / "model.pt"
+                with patch("nightjar.geographic_rollouts.rollout_geographic_batch", side_effect=collect):
+                    model, losses = train_geographic_ppo(
+                        scenarios, updates=2, episodes_per_update=2,
+                        input_mode="cells", action_mode="parametric", slot_features=True,
+                        augment=True, skip_forced=True, drop_bonus_per_cell=0,
+                        rollout_envs=2, rollout_workers=workers, gae_lambda=.95,
+                        reward_scaling=True, selection_scenarios=scenarios,
+                        eval_every=1, history=history, checkpoint_path=checkpoint)
+                self.assertEqual([c[0] for c in calls], [False, True, False, True])
+                self.assertTrue(all(c[1] and c[2] == 0 for c in calls))
+                self.assertTrue(all(c[3] is calls[0][3] for c in calls))
+                self.assertTrue(calls[0][3].closed)
+                self.assertTrue(all(not p.is_alive() for p in calls[0][3].processes))
+                self.assertEqual([h["update"] for h in history], [1, 2])
+                self.assertTrue(model.slot_raw_features)
+                self.assertTrue(all(math.isfinite(loss) for loss in losses))
+                saved = torch.load(f"{checkpoint}.best", weights_only=True)
+                for key, value in model.state_dict().items():
+                    torch.testing.assert_close(value, saved[key], rtol=0, atol=0)
+
     def test_holdout_evaluation_reports_policy_and_baselines(self):
         from nightjar.geographic_ppo import holdout_evaluation
         torch.manual_seed(0)

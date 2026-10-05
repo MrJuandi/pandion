@@ -6,6 +6,10 @@
 
 The [verification record](GEOGRAPHIC_PPO_VERIFICATION.md) documents one-update recurrent PPO smoke checks on EMSR578 development data, training seed 42, finite loss/weights, zero rejected orders in deterministic development evaluation, and exact weights/deterministic-metrics preservation after loading. Two fresh runs in the same CPU runtime matched. This is an execution/serialization diagnostic: no baseline comparison, geographic model selection, held-out result, or policy-superiority claim is made. Physical calibration and the result-bearing geographic protocol remain open.
 
+## Training throughput checks (2026-10-05)
+
+The [training performance record](TRAINING_PERFORMANCE.md) separates D-71's collection/preparation implementation from development-only learner prototypes. Fixed-rollout timing compares the same 413 decisions, initial weights, targets and optimizer groups; fresh on-policy follow-ups compare complete training time. Model-output/gradient comparisons and finite checkpoints are technical checks. Fewer PPO epochs change the learning budget, and lower PPO loss is not a quality endpoint. No validation or reserved scenario was opened for these timing probes; the measurements do not establish learned-policy superiority, equal long-run quality or physical validity.
+
 ## Descriptive workspace comparisons
 
 The offline viewer provides candidate/reference maps, step curves of retrospective reached area and episode-end metrics. A delta is candidate minus reference and requires matching nonmissing scenario hash, horizon, grid dimensions and resolution, distinct runs and finite recorded values. It is unavailable when those requirements fail. Area derives from recorded arrival times and cell size; missing truth cannot produce a curve. A single paired episode cannot estimate generalization or uncertainty, and the workspace computes no policy ranking or statistical test. These displays do not modify the predeclared evaluation criteria below.

@@ -51,7 +51,8 @@ def _bilinear_upsample(grid: np.ndarray, px_per_cell: int) -> np.ndarray:
     return rows[:, c0] * (1.0 - wc)[None, :] + rows[:, c1] * wc[None, :]
 
 
-def thermal_view(observation: dict, px_per_cell: int, cell_size_m: float) -> np.ndarray:
+def thermal_view(observation: dict, px_per_cell: int, cell_size_m: float,
+                 masks: dict[str, np.ndarray] | None = None) -> np.ndarray:
     """Float32 [rows*px, cols*px] thermal band in [0, 1], row 0 south.
 
     Burning cells are 1. Burned cells start at 0.7 and cool as
@@ -60,7 +61,8 @@ def thermal_view(observation: dict, px_per_cell: int, cell_size_m: float) -> np.
     centre. Cell values are resampled bilinearly and burning cells are then
     drawn as sharp full-intensity blocks. Uses only the controller observation.
     """
-    masks = state_masks(observation)
+    if masks is None:
+        masks = state_masks(observation)
     rows, cols = masks["burning"].shape
     now = float(observation.get("time_s", 0.0))
     field = np.zeros((rows, cols), dtype=np.float64)
@@ -116,9 +118,11 @@ def state_masks(observation: dict) -> dict[str, np.ndarray]:
     return {"burning": burning, "burned": burned, "treated": treated}
 
 
-def compose_view(base: np.ndarray, observation: dict, px_per_cell: int) -> np.ndarray:
+def compose_view(base: np.ndarray, observation: dict, px_per_cell: int,
+                 masks: dict[str, np.ndarray] | None = None) -> np.ndarray:
     """Return the uint8 [rows*px, cols*px, 3] view for one decision, row 0 south."""
-    masks = state_masks(observation)
+    if masks is None:
+        masks = state_masks(observation)
     rows, cols = masks["burning"].shape
     if base.shape != (rows * px_per_cell, cols * px_per_cell, 3) or base.dtype != np.uint8:
         raise ValueError("base image does not match the observation grid")
