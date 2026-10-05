@@ -334,6 +334,26 @@ class TestGeographicPPO(unittest.TestCase):
         self.assertNotIn("fleet_size", self.scenario["aircraft"])
         self.assertEqual(two["scenario_hash"], canonical_hash({k: v for k, v in two.items() if k != "scenario_hash"}))
 
+    def test_skip_forced_keeps_total_reward_and_drops_single_action_steps(self):
+        torch.manual_seed(0)
+        model = SpatialActorCritic(grid_rows=15, grid_cols=15, action_dim=len(TACTICAL_ACTION_NAMES), recurrent=True)
+        full, full_metrics = rollout_geographic(model, self.scenario, deterministic=True)
+        torch.manual_seed(0)
+        skipped, skip_metrics = rollout_geographic(model, self.scenario, deterministic=True, skip_forced=True)
+        self.assertTrue(all(int(r["mask"].sum()) > 1 for r in skipped))
+        self.assertLessEqual(len(skipped), len(full))
+        self.assertAlmostEqual(sum(r["reward"] for r in skipped), skip_metrics["total_reward"], places=4)
+
+    def test_rollout_workers_match_independent_of_worker_count(self):
+        results = []
+        for workers in (2, 3):
+            random.seed(0)
+            torch.manual_seed(0)
+            _, losses = train_geographic_ppo([self.scenario], updates=1, episodes_per_update=3,
+                                             rollout_workers=workers, gae_lambda=0.95, reward_scaling=True)
+            results.append(losses)
+        self.assertEqual(results[0], results[1])
+
     def test_entropy_schedule_decays_linearly(self):
         from unittest.mock import patch
         seen = []

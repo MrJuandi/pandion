@@ -330,8 +330,15 @@ def rollout_geographic(
     gae_lambda: float | None = None,
     reward_scale: float = 1.0,
     normalize_advantages: bool = True,
+    skip_forced: bool = False,
 ) -> tuple[list[dict], dict[str, Any]]:
     """Execute a single rollout of the CL-415 in a geographic scenario.
+
+    With ``skip_forced`` (D-64), steps whose mask allows a single action are
+    executed without querying the model and are not training records; their
+    reward is added to the preceding decision (or the first one), so returns
+    are unchanged while forward passes and BPTT length shrink. The recurrent
+    state then advances only at real decisions, in training and evaluation alike.
 
     Value targets and advantages use rewards multiplied by ``reward_scale``;
     ``metrics["total_reward"]`` and each record's ``reward`` stay unscaled.
@@ -351,11 +358,23 @@ def rollout_geographic(
     records: list[dict] = []
     rewards: list[float] = []
     values: list[float] = []
+    total_reward = 0.0
+    carried = 0.0  # forced-step reward seen before the first decision
     done = False
     state = None
     is_recurrent = getattr(model, "recurrent", False)
 
     while not done:
+        if skip_forced:
+            valid = mapper.compute_mask(observation)
+            if sum(valid) == 1:
+                observation, reward, done, _ = env.step_discrete(valid.index(True))
+                total_reward += reward
+                if rewards:
+                    rewards[-1] += reward
+                else:
+                    carried += reward
+                continue
         inputs = tuple(tensorizer.to_torch(observation, device=device))
         mask = mapper.to_mask_torch(observation, device=device)
 
@@ -378,7 +397,9 @@ def rollout_geographic(
             "action": action.squeeze(0),
             "log_prob": log_prob.squeeze(0),
         })
-        rewards.append(reward)
+        rewards.append(reward + carried)
+        carried = 0.0
+        total_reward += reward
         values.append(float(value.item()))
         observation = next_obs
 
@@ -403,7 +424,7 @@ def rollout_geographic(
         "water_dropped_l": replay["aircraft_metrics"]["total_water_dropped_l"],
         "flight_distance_km": replay["aircraft_metrics"]["total_flight_distance_km"],
         "rejected_orders": replay["aircraft_metrics"]["rejected_orders"],
-        "total_reward": round(float(sum(rewards)), 4),
+        "total_reward": round(float(total_reward), 4),
         "steps_count": len(records),
     }
     return records, metrics
@@ -505,6 +526,34 @@ def evaluate_geographic_policy(
     return results
 
 
+_WORKER_MODELS: dict[str, Any] = {}
+
+
+def _rollout_task(task: tuple) -> tuple[list[dict], dict[str, Any]]:
+    """Worker-process rollout on CPU with the current weights (D-64)."""
+    build_kwargs, state_dict, scenario, rollout_kwargs, seed = task
+    torch.set_num_threads(1)
+    key = repr(sorted(build_kwargs.items()))
+    model = _WORKER_MODELS.get(key)
+    if model is None:
+        model = build_policy_model(scenario, **build_kwargs)
+        _WORKER_MODELS[key] = model
+    model.load_state_dict(state_dict)
+    torch.manual_seed(seed)
+    with torch.no_grad():
+        return rollout_geographic(model, scenario, device=None, deterministic=False, **rollout_kwargs)
+
+
+def _to_device(records: list[dict], device: Any) -> list[dict]:
+    for record in records:
+        for key, value in list(record.items()):
+            if key == "inputs":
+                record[key] = tuple(t.to(device) for t in value)
+            elif torch.is_tensor(value):
+                record[key] = value.to(device)
+    return records
+
+
 def train_geographic_ppo(
     dev_scenarios: list[dict[str, Any]],
     *,
@@ -528,19 +577,32 @@ def train_geographic_ppo(
     target_kl: float | None = None,
     entropy_coef: float = 0.01,
     entropy_coef_final: float | None = None,
+    skip_forced: bool = False,
+    drop_bonus_per_cell: float = 0.25,
+    rollout_workers: int = 1,
+    image_checkpoint_chunk: int | None = None,
 ) -> tuple[Any, list[float]]:
     """Train a geographic policy (legacy SpatialActorCritic or D-49 ImageActorCritic).
 
     With ``checkpoint_every > 0`` the weights are written to ``<checkpoint_path>.partial``
     every that many updates, so an interrupted run can continue with ``--resume``.
-    The entropy bonus decays linearly from ``entropy_coef`` to
+    With ``rollout_workers > 1`` the episodes of each update are collected in
+    that many CPU worker processes with a copy of the current weights; the
+    update itself runs on ``device``. The entropy bonus decays linearly from ``entropy_coef`` to
     ``entropy_coef_final`` over the updates (constant when the latter is None).
     """
     _require_torch()
     input_options = {"input_mode": input_mode, "imagery_dir": imagery_dir, "include_ros": include_ros,
                      "include_thermal": include_thermal}
-    model = build_policy_model(dev_scenarios[0], action_mode=action_mode, recurrent=recurrent,
-                               **input_options).to(device)
+    build_kwargs = {"action_mode": action_mode, "recurrent": recurrent, **input_options}
+    model = build_policy_model(dev_scenarios[0], **build_kwargs).to(device)
+    if hasattr(model, "IMAGE_CHUNK"):
+        model.IMAGE_CHUNK = image_checkpoint_chunk
+    pool = None
+    if rollout_workers > 1:
+        import multiprocessing
+        from concurrent.futures import ProcessPoolExecutor
+        pool = ProcessPoolExecutor(rollout_workers, mp_context=multiprocessing.get_context("spawn"))
 
     if resume_checkpoint is not None:
         checkpoint_path = Path(resume_checkpoint)
@@ -560,12 +622,20 @@ def train_geographic_ppo(
     for update_idx in range(updates):
         started = time.monotonic()
         batch_records = []
-        for ep in range(episodes_per_update):
-            scenario = random.choice(dev_scenarios)
-            records, _ = rollout_geographic(model, scenario, device=device, deterministic=False,
-                                            gae_lambda=gae_lambda,
-                                            normalize_advantages=not batch_normalized, **input_options)
-            batch_records.append(records)
+        rollout_kwargs = {"gae_lambda": gae_lambda, "normalize_advantages": not batch_normalized,
+                          "skip_forced": skip_forced, "drop_bonus_per_cell": drop_bonus_per_cell,
+                          **input_options}
+        chosen = [random.choice(dev_scenarios) for _ in range(episodes_per_update)]
+        if pool is not None:
+            state_dict = {k: v.detach().cpu() for k, v in model.state_dict().items()}
+            tasks = [(build_kwargs, state_dict, scenario, rollout_kwargs, random.randrange(2**31))
+                     for scenario in chosen]
+            batch_records = [_to_device(records, device) for records, _ in pool.map(_rollout_task, tasks)]
+        else:
+            for scenario in chosen:
+                records, _ = rollout_geographic(model, scenario, device=device, deterministic=False,
+                                                **rollout_kwargs)
+                batch_records.append(records)
         if scaler is not None:
             # Scale with statistics that include this batch, then recompute targets.
             for records in batch_records:
@@ -591,6 +661,8 @@ def train_geographic_ppo(
             partial_path.parent.mkdir(parents=True, exist_ok=True)
             torch.save(model.state_dict(), partial_path)
 
+    if pool is not None:
+        pool.shutdown()
     return model, losses
 
 
@@ -632,6 +704,14 @@ def main() -> None:
                         help="divide rewards by the running std of discounted returns")
     parser.add_argument("--target-kl", type=float, help="stop epochs when approx KL exceeds 1.5x this")
     parser.add_argument("--entropy-coef", type=float, default=0.01, help="entropy bonus coefficient")
+    parser.add_argument("--drop-bonus", type=float, default=0.25,
+                        help="training reward per newly treated cell (0 = burned-area change only)")
+    parser.add_argument("--image-checkpoint-chunk", type=int,
+                        help="checkpoint the image encoder in chunks of N frames to save memory (slower)")
+    parser.add_argument("--rollout-workers", type=int, default=1,
+                        help="CPU worker processes collecting each update's episodes (D-64)")
+    parser.add_argument("--skip-forced", action="store_true",
+                        help="do not query or train on single-action steps (D-64); applies to evaluation too")
     parser.add_argument("--entropy-coef-final", type=float,
                         help="decay the entropy bonus linearly to this value over the updates")
     parser.add_argument("--checkpoint-every", type=int, default=0,
@@ -650,9 +730,13 @@ def main() -> None:
     input_options = {"input_mode": args.input_mode, "imagery_dir": args.imagery_dir, "include_ros": args.ros,
                      "include_thermal": args.thermal}
     model_options = {"action_mode": args.action_mode, **input_options}
+    rollout_options = {**input_options, "skip_forced": args.skip_forced}
     ppo_options = {"ppo_epochs": args.ppo_epochs, "minibatches": args.minibatches, "gae_lambda": args.gae_lambda,
                    "reward_scaling": args.reward_scaling, "target_kl": args.target_kl,
-                   "entropy_coef": args.entropy_coef, "entropy_coef_final": args.entropy_coef_final}
+                   "entropy_coef": args.entropy_coef, "entropy_coef_final": args.entropy_coef_final,
+                   "skip_forced": args.skip_forced, "drop_bonus_per_cell": args.drop_bonus,
+                   "rollout_workers": args.rollout_workers,
+                   "image_checkpoint_chunk": args.image_checkpoint_chunk}
     train_options = {**model_options, **ppo_options,
                      "checkpoint_path": args.checkpoint, "checkpoint_every": args.checkpoint_every}
     config_report = {"ppo": {"epochs": args.ppo_epochs, "minibatches": args.minibatches,
@@ -678,7 +762,7 @@ def main() -> None:
             torch.save(model.state_dict(), args.checkpoint)
             print(f"Saved trained checkpoint -> {args.checkpoint}")
         _, metrics = rollout_geographic(model, dev_scenarios[0], device=device, deterministic=True,
-                                        **input_options)
+                                        **rollout_options)
         report = {
             "schema_version": SMOKE_SCHEMA_VERSION,
             "dataset": _dataset_report(args.scenarios_dir, {"development": smoke_scenarios}),
@@ -715,7 +799,7 @@ def main() -> None:
             print(f"Saved trained checkpoint -> {args.checkpoint}")
 
         _, eval_m = rollout_geographic(model, dev_scenarios[0], device=device, deterministic=True,
-                                        **input_options)
+                                        **rollout_options)
         report = {
             "schema_version": "nightjar-geographic-ppo-train-0.1",
             "dataset": _dataset_report(args.scenarios_dir, {"development": dev_scenarios}),
@@ -759,7 +843,7 @@ def main() -> None:
             )
 
             # Evaluate candidate on validation scenarios
-            val_results = evaluate_geographic_policy(cand_model, val_scenarios, device=device, **input_options)
+            val_results = evaluate_geographic_policy(cand_model, val_scenarios, device=device, **rollout_options)
             mean_burned = sum(r["final_burned_ha"] for r in val_results) / max(len(val_results), 1)
             total_drops = sum(r["drops_count"] for r in val_results)
 
@@ -815,7 +899,7 @@ def main() -> None:
         eval_reports = []
         for sc in target_scenarios:
             bm = run_geographic_benchmark(sc, random_seeds=(42, 43))
-            _, rl_metrics = rollout_geographic(model, sc, device=device, deterministic=True, **input_options)
+            _, rl_metrics = rollout_geographic(model, sc, device=device, deterministic=True, **rollout_options)
             no_int_ha = bm["policies"]["no_intervention"]["final_burned_ha"]
             heur_ha = bm["policies"]["heuristic"]["final_burned_ha"]
             cont_ha = bm["policies"]["containment_heuristic"]["final_burned_ha"]
