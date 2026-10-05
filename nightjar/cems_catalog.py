@@ -374,7 +374,128 @@ def _validate_aoi_geographic_bounds(
         )
 
 
+# CL-415 scooping needs a long, wide, open water surface (the manufacturer quotes
+# roughly 1.3-1.4 km of water length and about 90 m width at sea level). CEMS
+# hydrography also maps ponds, pools and marshes, so a water body is eligible
+# only if it passes these geometric proxies; they are screening thresholds, not
+# an operational assessment of depth, obstacles or approach paths.
+SCOOPING_MIN_AREA_HA = 10.0
+SCOOPING_MIN_EXTENT_M = 1300.0
+SCOOPING_MIN_CLEARANCE_M = 45.0  # distance from the scooping point to the shore (half width)
+NON_SCOOPABLE_TYPE_PREFIXES = ("BH090",)  # land subject to inundation (marsh, lagoons)
+
+# Reviewed scooping sources outside the CEMS area of interest, per activation.
+# CEMS maps hydrography only inside the AOI, so the reservoirs aircraft would
+# actually use can be missing. Each entry: name, utm_easting_m, utm_northing_m
+# (a point on open water, activation UTM zone), area_ha, source and reference.
+#
+# The entries below are OpenStreetMap natural=water / landuse=reservoir polygons
+# within 30 km of the tactical window centre, retrieved from the Overpass API on
+# 2026-10-05 and screened with _extract_water_waypoints (same thresholds and
+# scooping_point as CEMS hydrography); the 1-3 nearest eligible bodies are kept.
+# Excluded on review: Meandro El Melero (osm way/704298460, EMSR590), a river bend
+# whose 1.4 km extent is the diagonal of a curve rather than a straight run.
+# Data (c) OpenStreetMap contributors, available under the ODbL.
+OSM_RETRIEVED_UTC = "2026-10-05"
+
+
+def _osm_source(name: str, easting_m: float, northing_m: float, area_ha: float, extent_m: float,
+                shore_clearance_m: float, osm_id: str) -> dict[str, Any]:
+    return {"name": name, "utm_easting_m": easting_m, "utm_northing_m": northing_m, "area_ha": area_ha,
+            "extent_m": extent_m, "shore_clearance_m": shore_clearance_m, "source": "OpenStreetMap",
+            "reference": f"osm {osm_id}, retrieved {OSM_RETRIEVED_UTC}"}
+
+
+SCOOPING_SOURCES: dict[str, list[dict[str, Any]]] = {
+    "EMSR578": [
+        _osm_source("Pantà de Camarasa", 322486.15, 4643939.15, 551.08, 14160.5, 285.8, "relation/5598197"),
+        _osm_source("Pantà de Sant Llorenç de Montgai", 320647.84, 4636430.05, 126.26, 4676.4, 360.5, "relation/6004039"),
+        _osm_source("Pantà de Terradets", 325406.12, 4659203.28, 276.94, 5154.8, 410.0, "relation/5598230"),
+    ],
+    "EMSR590": [
+        _osm_source("Embalse de Águeda", 205364.89, 4491741.66, 121.77, 7744.2, 148.4, "way/48120464"),
+        _osm_source("Unnamed reservoir", 199781.31, 4485847.04, 16.01, 2606.0, 53.0, "way/675416760"),
+    ],
+    "EMSR625_AOI01": [
+        _osm_source("Pantano del Regajo", 711437.29, 4418791.29, 75.01, 3210.5, 250.1, "way/30016888"),
+        _osm_source("Embalse de Arenoso", 708428.31, 4440890.81, 294.76, 6192.4, 438.9, "relation/2566648"),
+        _osm_source("Embassament d'Algar", 724426.17, 4407558.45, 13.45, 1427.7, 56.0, "way/981657125"),
+    ],
+    "EMSR602_AOI02": [
+        _osm_source("Embalse de la Fuente del Azufre", 699460.02, 4715769.74, 23.5, 2573.0, 96.5, "way/23609119"),
+        _osm_source("Embalse de Campañana", 683931.75, 4708094.96, 92.94, 1935.2, 360.4, "way/47234341"),
+        _osm_source("Encoro de Penarrubia", 679858.92, 4703635.5, 112.26, 5832.6, 190.1, "relation/18080576"),
+    ],
+}
+
+
+def _ring_area_m2(ring: np.ndarray) -> float:
+    x, y = ring[:, 0], ring[:, 1]
+    return abs(float(np.dot(x, np.roll(y, -1)) - np.dot(np.roll(x, -1), y))) / 2.0
+
+
+def _inside_rings(points: np.ndarray, rings: list[np.ndarray]) -> np.ndarray:
+    """Even-odd test over all rings of one polygon (outer ring and holes)."""
+    inside = np.zeros(len(points), dtype=bool)
+    px, py = points[:, 0][:, None], points[:, 1][:, None]
+    for ring in rings:
+        x1, y1 = ring[:, 0][None, :], ring[:, 1][None, :]
+        x2, y2 = np.roll(ring[:, 0], -1)[None, :], np.roll(ring[:, 1], -1)[None, :]
+        with np.errstate(divide="ignore", invalid="ignore"):
+            crosses = ((y1 > py) != (y2 > py)) & (px < x1 + (py - y1) * (x2 - x1) / (y2 - y1))
+        inside ^= (crosses.sum(axis=1) % 2).astype(bool)
+    return inside
+
+
+def _shore_distance(points: np.ndarray, rings: list[np.ndarray]) -> np.ndarray:
+    a = np.concatenate([ring for ring in rings])
+    b = np.concatenate([np.roll(ring, -1, axis=0) for ring in rings])
+    ab = b - a
+    length2 = np.maximum((ab ** 2).sum(axis=1), 1e-12)
+    best = np.full(len(points), np.inf)
+    for chunk in range(0, len(points), 512):
+        p = points[chunk:chunk + 512][:, None, :]
+        t = np.clip(((p - a[None]) * ab[None]).sum(axis=2) / length2[None], 0.0, 1.0)
+        nearest = a[None] + t[..., None] * ab[None]
+        best[chunk:chunk + 512] = np.sqrt(((p - nearest) ** 2).sum(axis=2)).min(axis=1)
+    return best
+
+
+def scooping_point(polygons: list[list[np.ndarray]]) -> tuple[float, float, float]:
+    """Point on open water farthest from the shore: (x, y, clearance_m).
+
+    ``polygons`` are lists of UTM rings (outer ring first, then holes). A grid
+    search is refined once around the best cell; the result always lies inside
+    the water, unlike the mean of the polygon vertices.
+    """
+    best = (0.0, 0.0, -1.0)
+    for rings in polygons:
+        points = np.concatenate(rings)
+        (x0, y0), (x1, y1) = points.min(axis=0), points.max(axis=0)
+        step = max(5.0, math.sqrt(max((x1 - x0) * (y1 - y0), 1.0) / 2500.0))
+        centre, span = ((x0 + x1) / 2, (y0 + y1) / 2), ((x1 - x0) / 2 + step, (y1 - y0) / 2 + step)
+        for _ in range(2):
+            gx = np.arange(centre[0] - span[0], centre[0] + span[0] + step, step)
+            gy = np.arange(centre[1] - span[1], centre[1] + span[1] + step, step)
+            grid = np.stack(np.meshgrid(gx, gy), axis=-1).reshape(-1, 2)
+            grid = grid[_inside_rings(grid, rings)]
+            if not len(grid):
+                break
+            distance = _shore_distance(grid, rings)
+            k = int(np.argmax(distance))
+            if distance[k] > best[2]:
+                best = (float(grid[k, 0]), float(grid[k, 1]), float(distance[k]))
+            centre, span, step = tuple(grid[k]), (2 * step, 2 * step), step / 5
+    return best
+
+
 def _extract_water_waypoints(features: list[dict], utm_zone: int) -> list[dict[str, Any]]:
+    """Hydrography polygons with size, extent and a scooping point on open water.
+
+    ``eligible_for_scooping`` applies the CL-415 screening thresholds above.
+    The point of an eligible body is the open-water point farthest from the
+    shore; other bodies keep the mean of their vertices (informative only).
+    """
     waypoints = []
     for hf in features:
         props = hf.get("properties", {})
@@ -383,32 +504,52 @@ def _extract_water_waypoints(features: list[dict], utm_zone: int) -> list[dict[s
         coords = geom.get("coordinates", [])
         if not coords:
             continue
-        all_pts = []
         if gtype == "Point":
-            all_pts.append((float(coords[0]), float(coords[1])))
+            polygons_ll = []
+            all_ll = [(float(coords[0]), float(coords[1]))]
         elif gtype in ("Polygon", "MultiPolygon"):
-            polys = [coords] if gtype == "Polygon" else coords
-            for poly in polys:
-                for ring in poly:
-                    for pt in ring:
-                        all_pts.append((float(pt[0]), float(pt[1])))
-        if not all_pts:
+            polygons_ll = [coords] if gtype == "Polygon" else coords
+            all_ll = [(float(pt[0]), float(pt[1])) for poly in polygons_ll for ring in poly for pt in ring]
+        else:
             continue
-        clon = sum(p[0] for p in all_pts) / len(all_pts)
-        clat = sum(p[1] for p in all_pts) / len(all_pts)
-        ux, uy = wgs84_to_utm(clon, clat, zone=utm_zone)
+        if not all_ll:
+            continue
+        polygons = [[np.array([wgs84_to_utm(float(pt[0]), float(pt[1]), zone=utm_zone) for pt in ring])
+                     for ring in poly if len(ring) >= 3] for poly in polygons_ll]
+        polygons = [rings for rings in polygons if rings]
+        area_ha = sum(_ring_area_m2(rings[0]) - sum(_ring_area_m2(h) for h in rings[1:])
+                      for rings in polygons) / 1e4
+        utm_points = np.concatenate([ring for rings in polygons for ring in rings]) if polygons else None
+        extent_m = float(np.hypot(*(utm_points.max(axis=0) - utm_points.min(axis=0)))) if utm_points is not None else 0.0
         obj_type = props.get("obj_type", "Waterbody")
         name = props.get("name", obj_type)
         if name == "Unknown":
             name = obj_type
+        candidate = (area_ha >= SCOOPING_MIN_AREA_HA and extent_m >= SCOOPING_MIN_EXTENT_M
+                     and not str(obj_type).startswith(NON_SCOOPABLE_TYPE_PREFIXES))
+        clearance = None
+        if candidate:
+            ux, uy, clearance = scooping_point(polygons)
+            point = "open-water point farthest from the shore"
+        else:
+            clon = sum(p[0] for p in all_ll) / len(all_ll)
+            clat = sum(p[1] for p in all_ll) / len(all_ll)
+            ux, uy = wgs84_to_utm(clon, clat, zone=utm_zone)
+            point = "mean of polygon vertices (may lie outside the water)"
+        eligible = bool(candidate and clearance is not None and clearance >= SCOOPING_MIN_CLEARANCE_M)
+        lon, lat = utm_to_wgs84(ux, uy, zone=utm_zone)
         waypoints.append({
             "name": name,
             "obj_type": obj_type,
-            "lon_deg": round(clon, 6),
-            "lat_deg": round(clat, 6),
+            "lon_deg": round(lon, 6),
+            "lat_deg": round(lat, 6),
             "utm_easting_m": round(ux, 2),
             "utm_northing_m": round(uy, 2),
-            "eligible_for_scooping": True,
+            "area_ha": round(area_ha, 2),
+            "extent_m": round(extent_m, 1),
+            "shore_clearance_m": round(clearance, 1) if clearance is not None else None,
+            "point": point,
+            "eligible_for_scooping": eligible,
         })
     return waypoints
 
