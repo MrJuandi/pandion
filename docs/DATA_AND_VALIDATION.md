@@ -28,6 +28,8 @@ No data layer is promoted from “inferred” to “observed” because it is di
 | Weather observations | [AEMET OpenData](https://www.aemet.es/en/datos_abiertos/AEMET_OpenData) | Historical or current station/forecast products subject to availability, interpolation and valid timestamps. |
 | Historical meteorological context | [ERA5 hourly data](https://www.ecmwf.int/en/forecasts/datasets/era5-hourly-data-single-levels-1940-present) | Reanalysis useful for historical experiments; its grid is much coarser than tactical fire cells and it is not an operational minute-by-minute measurement. |
 
+Geographic development incidents (D-57, D-73) are 20 mainland-Spain CEMS delineation AOIs from 2019–2022; their fuel comes from the package naturalLandUseA layer through the inferred CORINE crosswalk, terrain from IGN WCS, and the refill point from CEMS hydrography or a reviewed OpenStreetMap water body (D-70). Classes outside the crosswalk (213, 241, 244, 331, 332, 334) are non-burnable by default. Burnt-area delineations are post-event satellite products used to place synthetic ignitions; they are not observed spread histories.
+
 Protected assets, roads, water access, airspace, aircraft performance and operational constraints need their own sourced datasets or clearly marked initial approximations. Licensing and redistribution must be reviewed before including files in a public repository.
 
 ## 3. Physical model validation

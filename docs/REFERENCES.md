@@ -64,6 +64,12 @@ Exact local export hashes, sampling conventions and diagnostic limits are in [PI
 - [Copernicus SentiWiki, Sentinel-2 processing](https://sentiwiki.copernicus.eu/web/s2-processing): L2A scene classification (SCL) classes used to screen clouds, shadows, cirrus and invalid pixels.
 - [CEMS activation API](https://mapping.emergency.copernicus.eu/activations/api/activations/EMSR578/): `activationTime` per activation, the reference for the pre-fire search window.
 
+### Additional development incidents and scooping sources, consulted 2026-10-05
+
+- [CEMS activation list API](https://mapping.emergency.copernicus.eu/activations/api/activations/): wildfire activations in Spain, screened for delineation vector packages under `static/activations/{code}/{code}_AOI{nn}_DEL_PRODUCT_r1_RTP01_v{n}_vector.zip` (D-73). Registered packages are SHA-256 pinned in `nightjar.cems_catalog`.
+- [CEMS Rapid Mapping public activations API](https://rapidmapping.emergency.copernicus.eu/backend/dashboard-api/public-activations/?code=EMSR921): products from 2023 on; their DEL packages (e.g. EMSR921 AOI01) contain areaOfInterestA, observedEventA and imageFootprintA but no naturalLandUseA or hydrography, so they cannot be built with the CEMS land-use fuel path.
+- [OpenStreetMap Overpass API](https://overpass-api.de/): `natural=water` and `landuse=reservoir` within 30 km of each tactical window, screened with the D-70 CL-415 thresholds; data © OpenStreetMap contributors, ODbL.
+
 ## Research interface references
 
 The 2026-10-01 layout review used the [Fire2a QGIS simulator parameter groups](https://fire2a.github.io/docs/qgis-toolbox/algo_simulator.html) and [IFTDSS Map Studio task separation](https://iftdss.firenet.gov/firenetHelp/help/pageHelp/content/10-mapstudio/mapstudioabout.htm). These sources inform UI workflow choices; they do not validate Nightjar physics or policy outcomes.

@@ -274,7 +274,7 @@ ACTIVATIONS.update({
         "7911b3c74855b1148e443945c792abe21314471ae3331297a05dfc9210237e1c", 4096.7),
 })
 
-# Further development-only incidents (D-71): every mainland-Spain wildfire
+# Further development-only incidents (D-73): every mainland-Spain wildfire
 # delineation package on the CEMS mapping site (2019-2022) that carries the
 # naturalLandUseA, observedEventA and areaOfInterestA layers. Later Rapid Mapping
 # packages (2023 onwards) no longer include land use and are not usable as is.
@@ -494,7 +494,7 @@ SCOOPING_SOURCES: dict[str, list[dict[str, Any]]] = {
         _osm_source("Embalse de Campañana", 683931.75, 4708094.96, 92.94, 1935.2, 360.4, "way/47234341"),
         _osm_source("Encoro de Penarrubia", 679858.92, 4703635.5, 112.26, 5832.6, 190.1, "relation/18080576"),
     ],
-    # D-71 incidents without an eligible CEMS body, same query and screen.
+    # D-73 incidents without an eligible CEMS body, same query and screen.
     # OSM water=river sections were excluded on review (river reaches, not
     # scoopable straight runs), e.g. near EMSR458 and EMSR623.
     "EMSR375": [

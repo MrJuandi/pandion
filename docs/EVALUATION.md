@@ -466,3 +466,15 @@ and execution; it is not a new pooled evaluation. The earlier preview's D-70
 EMSR583 checkpoint must not be used to characterize D-71 results. Regenerated
 refill metrics count completed services and actual travel within the episode;
 this correction changes those audit metrics, not the trained weights.
+### Holdout folds after D-69 and D-70 (2026-10-05)
+
+The table above predates D-69 (causal burning state, horizon scoring) and D-70 (scoopable refill points 7–22 km away instead of nearby ponds), so its numbers are superseded. The same configuration was re-run on `runs/geographic-multi-ignition-family-d70-20261005` (all families regenerated with the D-70 refill points; imagery reused because grids are unchanged), seed 42, commit `99160c1`, 3 concurrent folds. Selection on validation (EMSR590, 24 scenarios): heuristic 112.62, containment 115.42, no intervention 144.33 ha; selected weights 105.54 / 105.12 / 103.75 ha. Summary from `python -m nightjar.fold_report runs/geographic-holdout-folds-d70-20261005` (95% bootstrap interval, 10,000 resamples):
+
+| Held-out incident | Policy | Heuristic | Containment | Policy − heuristic (95% CI) | Better / equal / worse |
+|---|---|---|---|---|---|
+| EMSR583 | 134.5 | **128.2** | 148.0 | +6.31 [−3.03, +17.25] (+4.9%) | 14 / 2 / 16 |
+| EMSR602_AOI04 | **62.5** | 73.0 | 71.8 | −10.53 [−14.69, −6.47] (−14.4%) | 23 / 4 / 5 |
+| EMSR625_AOI01 | **76.3** | 78.7 | 79.2 | −2.41 [−5.34, +0.34] (−3.1%) | 14 / 3 / 15 |
+| Pooled (3 folds) | **91.1** | 93.3 | 99.7 | −2.21 [−5.72, +1.82] (−2.4%) | 51 / 9 / 36 |
+
+With realistic refill distances the policy still beats containment on every fold and clearly beats the heuristic on EMSR602_AOI04, but loses on EMSR583 (the largest fire, refilling 7.4 km away) and the pooled interval includes zero. One seed and three of six folds do not support a generalisation claim; D-73 adds development incidents and the fold report for a fuller sweep.
