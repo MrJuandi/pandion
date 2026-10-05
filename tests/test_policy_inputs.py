@@ -6,12 +6,14 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 
 from nightjar.geographic_family import build_synthetic_cems_fixture, generate_geographic_scenario
 from nightjar.geographic_integrated import run_geographic_integrated
 from nightjar.imagery_acquire import SCHEMA_VERSION
+from nightjar.imagery_composite import compose_view, thermal_view
 from nightjar.model import HAS_TORCH, ActionMapper
 from nightjar.policy_inputs import FUEL_FAMILIES, GeographicInputTensorizer, elevation_gradient, fuel_family
 
@@ -191,6 +193,61 @@ class ImageModelTests(unittest.TestCase):
                                 px_per_cell=PX, grid_rows=self.rows, grid_cols=self.rows,
                                 action_mode=action_mode, recurrent=recurrent, width=8, hidden_dim=16,
                                 lstm_hidden_dim=16)
+
+    def test_byte_arrays_match_legacy_rint_conversion_without_mutating_inputs(self):
+        decisions = [d["observation"] for d in run_geographic_integrated(
+            self.scenario, policy="heuristic")["decisions"]]
+        selected = {0: decisions[0], len(decisions) - 1: decisions[-1]}
+        for index, observation in enumerate(decisions):
+            states = {cell["fire_state"] for row in observation["fire"]["cells"] for cell in row}
+            if "burning" in states:
+                selected.setdefault(index, observation)
+            if "burned" in states:
+                selected.setdefault(index, observation)
+        observations = [deepcopy(selected[i]) for i in sorted(selected)]
+        rng = np.random.default_rng(1701)
+        base = rng.integers(0, 256, size=(self.rows * PX, self.rows * PX, 3), dtype=np.uint8)
+        original_base = base.copy()
+
+        for thermal in (False, True):
+            tz = GeographicInputTensorizer(self.scenario, base, include_thermal=thermal)
+            for observation in observations:
+                with self.subTest(thermal=thermal, time_s=observation.get("time_s")):
+                    original_observation = deepcopy(observation)
+
+                    # Recreate the former float32 image path directly, without calling
+                    # either tensorizer extraction method for the image oracle.
+                    view = compose_view(base, observation, PX)
+                    legacy_image = np.moveaxis(view, -1, 0).astype(np.float32) / 255.0
+                    if thermal:
+                        heat = thermal_view(observation, PX, tz.cell_size_m)
+                        legacy_image = np.concatenate(
+                            [legacy_image, np.rint(heat * 255.0)[None] / 255.0]
+                        ).astype(np.float32)
+                    expected_image = np.rint(legacy_image * 255.0).astype(np.uint8)
+
+                    float_inputs = tz.extract(observation)
+                    arrays = tz.extract_arrays(observation)
+                    tensors = tz.to_torch(observation)
+                    np.testing.assert_array_equal(float_inputs[0], legacy_image)
+                    np.testing.assert_array_equal(arrays[0], expected_image)
+                    np.testing.assert_array_equal(tensors[0][0].numpy(), expected_image)
+                    self.assertEqual(arrays[0].dtype, np.uint8)
+                    self.assertEqual(arrays[1].dtype, np.float32)
+                    self.assertEqual(arrays[2].dtype, np.float32)
+                    np.testing.assert_array_equal(arrays[1], float_inputs[1])
+                    np.testing.assert_array_equal(arrays[2], float_inputs[2])
+                    np.testing.assert_array_equal(tensors[1][0].numpy(), float_inputs[1])
+                    np.testing.assert_array_equal(tensors[2][0].numpy(), float_inputs[2])
+                    np.testing.assert_array_equal(base, original_base)
+                    self.assertEqual(observation, original_observation)
+
+        thermal_tz = GeographicInputTensorizer(self.scenario, base, include_thermal=True)
+        from nightjar import policy_inputs
+        original_state_masks = policy_inputs.state_masks
+        with patch("nightjar.policy_inputs.state_masks", wraps=original_state_masks) as masks_spy:
+            thermal_tz.extract_arrays(observations[-1])
+        masks_spy.assert_called_once()
 
     def test_actions_respect_mask_in_both_action_modes(self):
         inputs = self.tz.to_torch(self.obs)
