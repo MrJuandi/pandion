@@ -42,7 +42,12 @@ def transform_vector(vector: tuple[float, float], t: int) -> tuple[float, float]
 
 
 def transform_point(x: float, y: float, t: int, width_m: float, height_m: float) -> tuple[float, float]:
-    """Transform a local (east, north) point about the grid centre."""
+    """Transform a local (east, north) point about the centre of [0, width_m] x [0, height_m].
+
+    The simulator places cell (r, c) at (c, r) * cell_size and maps points to
+    cells by rounding, so the grid centre is ((cols - 1) / 2, (rows - 1) / 2) *
+    cell_size: pass width_m = (cols - 1) * cell_size, height_m = (rows - 1) * cell_size.
+    """
     cx, cy = width_m / 2.0, height_m / 2.0
     dx, dy = transform_vector((x - cx, y - cy), t)
     return cx + dx, cy + dy
@@ -76,7 +81,8 @@ def augment_scenario(scenario: dict[str, Any], t: int) -> dict[str, Any]:
     out = deepcopy(scenario)
     grid = out["grid"]
     rows, cols, size = int(grid["rows"]), int(grid["cols"]), float(grid["cell_size_m"])
-    width, height = cols * size, rows * size
+    # Span of cell centres (cell (r, c) sits at (c, r) * size), not the raster extent.
+    width, height = (cols - 1) * size, (rows - 1) * size
     x0 = float(grid.get("origin_utm_easting_m", 0.0))
     y0 = float(grid.get("origin_utm_northing_m", 0.0))
     fire = out["fire"]
