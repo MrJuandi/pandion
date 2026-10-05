@@ -7,7 +7,13 @@ from unittest.mock import patch
 import numpy as np
 
 from nightjar import cems_catalog
-from nightjar.cems_catalog import _extract_water_waypoints, scooping_point
+from nightjar.cems_catalog import (
+    ACTIVATIONS,
+    SCOOPING_SOURCES,
+    _extract_water_waypoints,
+    incidents_for_split,
+    scooping_point,
+)
 from nightjar.geodesy import utm_to_wgs84
 from nightjar.geographic_family import (
     build_synthetic_cems_fixture,
@@ -16,6 +22,10 @@ from nightjar.geographic_family import (
 )
 
 ZONE = 30
+# Incidents whose CEMS hydrography already contains an eligible body (D-70).
+CEMS_SCOOPING_SOURCE = {"EMSR592", "EMSR600", "EMSR583", "EMSR625_AOI02", "EMSR602_AOI04"}
+SOURCE_FIELDS = {"name", "utm_easting_m", "utm_northing_m", "area_ha", "extent_m", "shore_clearance_m",
+                 "source", "reference"}
 X0, Y0 = 500000.0, 4400000.0
 
 
@@ -89,6 +99,31 @@ class ScoopingSourceTests(unittest.TestCase):
             real["source_kind"] = "copernicus_cems"
             chosen = select_scooping_source(real, (402500.0, 4602500.0))
         self.assertEqual((chosen["name"], chosen["origin"]), ("Reviewed reservoir", "registered_external"))
+
+
+class RegisteredScoopingSourceTests(unittest.TestCase):
+    def test_every_split_incident_has_a_scooping_source(self):
+        for split in ("development", "validation", "reserved"):
+            for activation in incidents_for_split(split):
+                with self.subTest(activation=activation):
+                    self.assertTrue(activation in CEMS_SCOOPING_SOURCE or SCOOPING_SOURCES.get(activation))
+
+    def test_registered_sources_are_complete_and_in_the_incident_zone(self):
+        self.assertTrue(SCOOPING_SOURCES)
+        for activation, sources in SCOOPING_SOURCES.items():
+            info = ACTIVATIONS[activation]
+            west, south, east, north = info["aoi_bounds_wgs84"]
+            for source in sources:
+                with self.subTest(activation=activation, source=source.get("name")):
+                    self.assertEqual(set(source), SOURCE_FIELDS)
+                    self.assertGreaterEqual(source["area_ha"], cems_catalog.SCOOPING_MIN_AREA_HA)
+                    self.assertGreaterEqual(source["extent_m"], cems_catalog.SCOOPING_MIN_EXTENT_M)
+                    self.assertGreaterEqual(source["shore_clearance_m"], cems_catalog.SCOOPING_MIN_CLEARANCE_M)
+                    self.assertTrue(160000.0 < source["utm_easting_m"] < 840000.0)
+                    lon, lat = utm_to_wgs84(source["utm_easting_m"], source["utm_northing_m"], zone=info["utm_zone"])
+                    # Within ~30 km (0.4 degrees) of the AOI read in the incident's own UTM zone.
+                    self.assertTrue(west - 0.4 <= lon <= east + 0.4 and south - 0.4 <= lat <= north + 0.4,
+                                    (lon, lat))
 
 
 if __name__ == "__main__":

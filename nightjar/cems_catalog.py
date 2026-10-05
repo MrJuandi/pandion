@@ -388,7 +388,44 @@ NON_SCOOPABLE_TYPE_PREFIXES = ("BH090",)  # land subject to inundation (marsh, l
 # CEMS maps hydrography only inside the AOI, so the reservoirs aircraft would
 # actually use can be missing. Each entry: name, utm_easting_m, utm_northing_m
 # (a point on open water, activation UTM zone), area_ha, source and reference.
-SCOOPING_SOURCES: dict[str, list[dict[str, Any]]] = {}
+#
+# The entries below are OpenStreetMap natural=water / landuse=reservoir polygons
+# within 30 km of the tactical window centre, retrieved from the Overpass API on
+# 2026-10-05 and screened with _extract_water_waypoints (same thresholds and
+# scooping_point as CEMS hydrography); the 1-3 nearest eligible bodies are kept.
+# Data (c) OpenStreetMap contributors, available under the ODbL.
+OSM_RETRIEVED_UTC = "2026-10-05"
+
+
+def _osm_source(name: str, easting_m: float, northing_m: float, area_ha: float, extent_m: float,
+                shore_clearance_m: float, osm_id: str) -> dict[str, Any]:
+    return {"name": name, "utm_easting_m": easting_m, "utm_northing_m": northing_m, "area_ha": area_ha,
+            "extent_m": extent_m, "shore_clearance_m": shore_clearance_m, "source": "OpenStreetMap",
+            "reference": f"osm {osm_id}, retrieved {OSM_RETRIEVED_UTC}"}
+
+
+SCOOPING_SOURCES: dict[str, list[dict[str, Any]]] = {
+    "EMSR578": [
+        _osm_source("Pantà de Camarasa", 322486.15, 4643939.15, 551.08, 14160.5, 285.8, "relation/5598197"),
+        _osm_source("Pantà de Sant Llorenç de Montgai", 320647.84, 4636430.05, 126.26, 4676.4, 360.5, "relation/6004039"),
+        _osm_source("Pantà de Terradets", 325406.12, 4659203.28, 276.94, 5154.8, 410.0, "relation/5598230"),
+    ],
+    "EMSR590": [
+        _osm_source("Meandro El Melero", 239184.25, 4475301.54, 41.82, 1426.0, 125.8, "way/704298460"),
+        _osm_source("Embalse de Águeda", 205364.89, 4491741.66, 121.77, 7744.2, 148.4, "way/48120464"),
+        _osm_source("Unnamed reservoir", 199781.31, 4485847.04, 16.01, 2606.0, 53.0, "way/675416760"),
+    ],
+    "EMSR625_AOI01": [
+        _osm_source("Pantano del Regajo", 711437.29, 4418791.29, 75.01, 3210.5, 250.1, "way/30016888"),
+        _osm_source("Embalse de Arenoso", 708428.31, 4440890.81, 294.76, 6192.4, 438.9, "relation/2566648"),
+        _osm_source("Embassament d'Algar", 724426.17, 4407558.45, 13.45, 1427.7, 56.0, "way/981657125"),
+    ],
+    "EMSR602_AOI02": [
+        _osm_source("Embalse de la Fuente del Azufre", 699460.02, 4715769.74, 23.5, 2573.0, 96.5, "way/23609119"),
+        _osm_source("Embalse de Campañana", 683931.75, 4708094.96, 92.94, 1935.2, 360.4, "way/47234341"),
+        _osm_source("Encoro de Penarrubia", 679858.92, 4703635.5, 112.26, 5832.6, 190.1, "relation/18080576"),
+    ],
+}
 
 
 def _ring_area_m2(ring: np.ndarray) -> float:
