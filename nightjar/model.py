@@ -15,7 +15,7 @@ from copy import deepcopy
 import math
 from typing import Any
 
-from .aircraft import CAPACITY_L
+from .aircraft import tank_capacity_l
 from .policies import candidate_cells, _containment_target, _is_burnable_fuel
 
 try:
@@ -72,7 +72,7 @@ class ObservationTensorizer:
         Vector features (10):
           0: aircraft_norm_x (position_x / max_x)
           1: aircraft_norm_y (position_y / max_y)
-          2: water_fraction (water_l / CAPACITY_L)
+          2: water_fraction (water_l / tank capacity)
           3: is_idle (1.0 if aircraft phase is 'idle', else 0.0)
           4: is_busy (1.0 if aircraft phase is not 'idle', else 0.0)
           5: water_source_norm_x (water_source_x / max_x)
@@ -196,7 +196,7 @@ class ObservationTensorizer:
         vector = [
             float(pos[0]) / self.max_x_m,
             float(pos[1]) / self.max_y_m,
-            float(water_l) / float(CAPACITY_L),
+            float(water_l) / tank_capacity_l(aircraft),
             1.0 if phase == "idle" else 0.0,
             0.0 if phase == "idle" else 1.0,
             float(water_src[0]) / self.max_x_m,
@@ -303,7 +303,7 @@ class TacticalActionMapper:
 
         # Aircraft is idle and has water
         mask[0] = True
-        if aircraft["water_l"] < CAPACITY_L:
+        if aircraft["water_l"] < tank_capacity_l(aircraft):
             mask[1] = True
 
         candidates = candidate_cells(observation)
@@ -488,7 +488,7 @@ class ActionMapper:
             return mask
 
         mask[0] = True
-        if aircraft["water_l"] < CAPACITY_L:
+        if aircraft["water_l"] < tank_capacity_l(aircraft):
             mask[1] = True
         for r, c in candidate_cells(observation):
             if 0 <= r < self.rows and 0 <= c < self.cols:

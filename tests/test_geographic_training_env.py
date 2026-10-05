@@ -1,5 +1,6 @@
 """Unit and integration tests for GeographicTrainingEnv."""
 
+from copy import deepcopy
 import unittest
 
 from nightjar.geographic_family import (
@@ -7,7 +8,9 @@ from nightjar.geographic_family import (
     generate_geographic_scenario,
 )
 from nightjar.geographic_integrated import geographic_episode, run_geographic_integrated
-from nightjar.geographic_training_env import GeographicTrainingEnv
+from nightjar.geographic_training_env import GeographicTrainingEnv, valid_geographic_actions
+from nightjar.model import ActionMapper
+from nightjar.parametric_actions import ParametricActionMapper
 
 
 class TestGeographicTrainingEnv(unittest.TestCase):
@@ -98,6 +101,27 @@ class TestGeographicTrainingEnv(unittest.TestCase):
         with self.assertRaises(ValueError):
             episode.send(None)
 
+
+    def test_masks_use_the_scenario_aircraft_capacity(self):
+        """A full smaller tank (e.g. AT-802F, 3100 L) cannot be refilled; a drop empties it."""
+        scenario = deepcopy(self.scenario)
+        scenario["aircraft"]["tank_capacity_l"] = 3100
+        env = GeographicTrainingEnv(scenario, action_mode="tactical")
+        obs = env.reset()
+        self.assertEqual(obs["aircraft"]["capacity_l"], 3100)
+        self.assertEqual(obs["aircraft"]["water_l"], 3100)
+        self.assertNotIn({"type": "RETURN_TO_REFILL"}, valid_geographic_actions(obs))
+        size = float(scenario["grid"]["cell_size_m"])
+        rows, cols = int(scenario["grid"]["rows"]), int(scenario["grid"]["cols"])
+        for mapper in (ActionMapper(rows=rows, cols=cols, cell_size_m=size, action_mode="tactical"),
+                       ActionMapper(rows=rows, cols=cols, cell_size_m=size, action_mode="spatial"),
+                       ParametricActionMapper(size)):
+            self.assertFalse(mapper.compute_mask(obs)[1], type(mapper).__name__)
+        drop = next(a for a in valid_geographic_actions(obs) if a["type"] == "DROP")
+        obs, _, _, info = env.step(drop)
+        while obs["aircraft"]["water_l"] > 0:
+            obs, _, _, info = env.step({"type": "HOLD"})
+        self.assertEqual(info["action_mask"], [{"type": "RETURN_TO_REFILL"}])
 
 if __name__ == "__main__":
     unittest.main()

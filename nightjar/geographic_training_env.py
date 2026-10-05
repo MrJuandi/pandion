@@ -10,7 +10,7 @@ from copy import deepcopy
 import pickle
 from typing import Any
 
-from .aircraft import CAPACITY_L
+from .aircraft import tank_capacity_l
 from .geographic_integrated import geographic_episode
 from .policies import candidate_cells
 
@@ -29,7 +29,7 @@ def valid_geographic_actions(observation: dict) -> list[dict]:
     if aircraft["water_l"] <= 0:
         return [{"type": "RETURN_TO_REFILL"}]
     actions = [{"type": "HOLD"}]
-    if aircraft["water_l"] < CAPACITY_L:
+    if aircraft["water_l"] < tank_capacity_l(aircraft):
         actions.append({"type": "RETURN_TO_REFILL"})
     cell_size = float(observation["cell_size_m"])
     actions.extend(

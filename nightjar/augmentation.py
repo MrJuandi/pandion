@@ -21,6 +21,8 @@ from typing import Any
 
 import numpy as np
 
+from .geographic_family import canonical_hash
+
 NUM_TRANSFORMS = 8
 
 
@@ -119,6 +121,8 @@ def augment_scenario(scenario: dict[str, Any], t: int) -> dict[str, Any]:
         "source_scenario_hash": scenario.get("scenario_hash"),
         "note": "training-only transformed copy; UTM coordinates are virtual",
     }
+    out.pop("scenario_hash", None)
+    out["scenario_hash"] = canonical_hash(out)
     return out
 
 
