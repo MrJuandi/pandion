@@ -208,7 +208,8 @@ def best_available_pixel(layers: list[tuple[np.ndarray, np.ndarray]]) -> tuple[n
 
 def acquire_imagery(scenarios_dir: Path, output_dir: Path, *, px_per_cell: int = DEFAULT_PX_PER_CELL,
                     margin_days: int = DEFAULT_MARGIN_DAYS, window_days: int = DEFAULT_WINDOW_DAYS,
-                    ) -> dict:
+                    activations: list[str] | None = None) -> dict:
+    """Acquire imagery for every incident in the family, or only ``activations`` when given."""
     if output_dir.exists() and any(output_dir.iterdir()):
         raise ValueError("imagery output must be new or empty")
     # Only grid/CRS metadata is used, so any family layout with split folders works.
@@ -217,8 +218,13 @@ def acquire_imagery(scenarios_dir: Path, output_dir: Path, *, px_per_cell: int =
                  for path in sorted((scenarios_dir / split).glob("*.json"))]
     if not scenarios:
         raise ValueError(f"no scenario JSON files under {scenarios_dir}")
-    groups = {a: [s for s in scenarios if s["activation_id"] == a]
-              for a in sorted({s["activation_id"] for s in scenarios})}
+    present = sorted({s["activation_id"] for s in scenarios})
+    if activations is not None:
+        missing = set(activations) - set(present)
+        if missing:
+            raise ValueError("activations absent from family: " + ", ".join(sorted(missing)))
+        present = [a for a in present if a in activations]
+    groups = {a: [s for s in scenarios if s["activation_id"] == a] for a in present}
     output_dir.mkdir(parents=True, exist_ok=True)
     sources: dict[str, Any] = {}
     for activation, group in groups.items():
@@ -362,12 +368,13 @@ def main() -> None:
     parser.add_argument("--px-per-cell", type=int, default=DEFAULT_PX_PER_CELL)
     parser.add_argument("--margin-days", type=int, default=DEFAULT_MARGIN_DAYS)
     parser.add_argument("--window-days", type=int, default=DEFAULT_WINDOW_DAYS)
+    parser.add_argument("--activations", nargs="+", help="acquire only these incidents (default: all in the family)")
     args = parser.parse_args()
     if args.downsample:
         downsample_imagery(args.scenarios_dir, args.output_dir, args.downsample)
         return
     acquire_imagery(args.scenarios_dir, args.output_dir, px_per_cell=args.px_per_cell,
-                    margin_days=args.margin_days, window_days=args.window_days)
+                    margin_days=args.margin_days, window_days=args.window_days, activations=args.activations)
 
 
 if __name__ == "__main__":

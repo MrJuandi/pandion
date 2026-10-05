@@ -183,6 +183,20 @@ Small ignitions inside the CEMS burned area replace the delineation as the initi
 .venv/bin/python -m nightjar.ignition_family --scenarios-dir runs/geographic-environment-family-expanded-20261002 --output-dir runs/geographic-ignition-family-expanded-20261002 --development-ignitions 4
 ```
 
+D-73 adds fourteen more Spanish delineation products to development (EMSR365, EMSR375, EMSR457, EMSR458, EMSR522, EMSR538, EMSR545, EMSR581, EMSR597, EMSR599 AOI01/AOI02, EMSR620, EMSR623, EMSR632), giving 20 development incidents. Fetch each with `python -m nightjar.cems_catalog fetch --activation ID`, then:
+
+```sh
+.venv/bin/python -m nightjar.geographic_family --raw-dir data/raw/cems --output-dir runs/geographic-family-d71-20261006 --extra-development all
+.venv/bin/python -m nightjar.terrain_acquire --scenarios-dir runs/geographic-family-d71-20261006 --output-dir data/raw/geographic-environment-d71-new-incidents-20261006 --activations EMSR365 EMSR375 EMSR457 EMSR458 EMSR522 EMSR538 EMSR545 EMSR581 EMSR597 EMSR599_AOI01 EMSR599_AOI02 EMSR620 EMSR623 EMSR632
+# Combine with data/raw/geographic-environment-expanded-20261002 into data/raw/geographic-environment-d71-20261006, then:
+.venv/bin/python -m nightjar.environment_family --scenarios-dir runs/geographic-family-d71-20261006 --terrain-dir data/raw/geographic-environment-d71-20261006 --weather-audit runs/pilot-environment-20260930/weather.json --pilot-scenario runs/emsr578-pilot-scenario.json --output-dir runs/geographic-environment-family-d71-20261006
+.venv/bin/python -m nightjar.multi_ignition_family --scenarios-dir runs/geographic-environment-family-d71-20261006 --output-dir runs/geographic-multi-ignition-family-d71-20261006
+# Imagery for the new incidents only (--activations), merged with the earlier 8 px directory, then downsampled to 4 px:
+.venv/bin/python -m nightjar.imagery_acquire runs/geographic-multi-ignition-family-d71-20261006 runs/geographic-imagery-s2-d71-new-20261006 --activations EMSR365 ...
+```
+
+`python -m nightjar.fold_report RUN_DIR [RUN_DIR ...] --output report.json` collects the `--holdout-activation` selection reports of a cross-validation sweep (one per fold and seed, same configuration) and prints, per held-out incident and pooled over folds, the policy and baseline means and the paired policy - heuristic difference with a 95% bootstrap interval (D-73).
+
 Checks for the workspace and presentation adapters:
 
 ```sh
