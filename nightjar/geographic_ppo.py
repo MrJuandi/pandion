@@ -51,13 +51,15 @@ def make_input_tensorizer(
     focus_slots: bool = False,
 ) -> Any:
     """Tensorizer for a scenario: legacy rasters, D-49 image inputs, or the no-image
-    ablation ``cells`` (same per-cell/vector inputs, fire state as explicit channels)."""
+    ablation ``cells`` (same per-cell/vector inputs, fire state as explicit channels).
+    Fleet features are added when the scenario has more than one aircraft."""
+    fleet_features = int(scenario.get("aircraft", {}).get("fleet_size", 1)) > 1
     if input_mode == "legacy":
         return GeographicTrainingEnv(scenario).observation_tensorizer()
     if input_mode == "cells":
         from .policy_inputs import GeographicInputTensorizer
         return GeographicInputTensorizer(scenario, None, include_ros=include_ros, explicit_fire=True,
-                                         focus_slots=focus_slots)
+                                         focus_slots=focus_slots, fleet_features=fleet_features)
     if input_mode != "image":
         raise ValueError(f"Unknown input_mode: {input_mode}")
     if imagery_dir is None:
@@ -69,7 +71,8 @@ def make_input_tensorizer(
     if key not in _IMAGE_CACHE:
         _IMAGE_CACHE[key] = load_activation_image(imagery_dir, scenario)
     return GeographicInputTensorizer(scenario, _IMAGE_CACHE[key], include_ros=include_ros,
-                                     include_thermal=include_thermal, focus_slots=focus_slots)
+                                     include_thermal=include_thermal, focus_slots=focus_slots,
+                                     fleet_features=fleet_features)
 
 
 def build_policy_model(
@@ -97,11 +100,33 @@ def build_policy_model(
                                        include_ros=include_ros, include_thermal=include_thermal,
                                        focus_slots=action_mode == "parametric")
     return ImageActorCritic(cell_channels=tensorizer.num_cell_channels,
-                            vector_dim=tensorizer.NUM_VECTOR_FEATURES,
+                            vector_dim=tensorizer.num_vector_features,
                             px_per_cell=max(tensorizer.px_per_cell, 1), grid_rows=rows, grid_cols=cols,
                             action_mode=action_mode, recurrent=recurrent,
                             use_image=input_mode == "image",
                             image_channels=getattr(tensorizer, "image_channels", 3))
+
+
+def with_fleet(scenarios: list[dict[str, Any]], fleet_size: int) -> list[dict[str, Any]]:
+    """Copies of ``scenarios`` flown by ``fleet_size`` identical aircraft (rehashed).
+
+    Additional aircraft start at the water source unless the scenario lists
+    ``aircraft.fleet_initial_positions_utm``. Size 1 returns the scenarios unchanged.
+    """
+    if fleet_size == 1:
+        return scenarios
+    if fleet_size < 1:
+        raise ValueError("fleet_size must be at least 1")
+    out = []
+    for scenario in scenarios:
+        copy = deepcopy(scenario)
+        copy["aircraft"]["fleet_size"] = fleet_size
+        copy.setdefault("provenance", {})["fleet_override"] = {
+            "fleet_size": fleet_size, "original_scenario_hash": scenario.get("scenario_hash")}
+        copy.pop("scenario_hash", None)
+        copy["scenario_hash"] = canonical_hash(copy)
+        out.append(copy)
+    return out
 
 
 def resolve_device(name: str = "cpu") -> str:
@@ -596,6 +621,8 @@ def main() -> None:
     parser.add_argument("--eval-scenarios", type=int, default=None, help="Limit number of validation scenarios to evaluate")
     parser.add_argument("--checkpoint", type=Path)
     parser.add_argument("--resume", type=Path, help="Path to checkpoint to resume weights from")
+    parser.add_argument("--fleet-size", type=int, default=1,
+                        help="number of identical aircraft (D-62); extra aircraft start at the water source")
     parser.add_argument("--device", choices=("cpu", "mps", "cuda", "auto"), default="cpu",
                         help="torch device; auto picks cuda, then Apple mps, then cpu")
     parser.add_argument("--ppo-epochs", type=int, default=1, help="passes over each batch of rollouts")
@@ -618,7 +645,8 @@ def main() -> None:
     random.seed(args.seed)
     torch.manual_seed(args.seed)
 
-    dev_scenarios = load_geographic_split("development", args.scenarios_dir, synthetic=args.synthetic)
+    dev_scenarios = with_fleet(load_geographic_split("development", args.scenarios_dir, synthetic=args.synthetic),
+                               args.fleet_size)
     input_options = {"input_mode": args.input_mode, "imagery_dir": args.imagery_dir, "include_ros": args.ros,
                      "include_thermal": args.thermal}
     model_options = {"action_mode": args.action_mode, **input_options}
@@ -630,7 +658,7 @@ def main() -> None:
     config_report = {"ppo": {"epochs": args.ppo_epochs, "minibatches": args.minibatches,
                              "gae_lambda": args.gae_lambda, "reward_scaling": args.reward_scaling,
                              "target_kl": args.target_kl, "entropy_coef": args.entropy_coef,
-                             "entropy_coef_final": args.entropy_coef_final}, "input_mode": args.input_mode, "action_mode": args.action_mode, "include_ros": args.ros, "include_thermal": args.thermal,
+                             "entropy_coef_final": args.entropy_coef_final}, "input_mode": args.input_mode, "action_mode": args.action_mode, "include_ros": args.ros, "include_thermal": args.thermal, "fleet_size": args.fleet_size,
                      "imagery_dir": str(args.imagery_dir) if args.imagery_dir else None}
 
     if args.smoke or (not args.train and not args.select and not args.eval):
@@ -705,7 +733,8 @@ def main() -> None:
         return
 
     if args.select:
-        val_scenarios = load_geographic_split("validation", args.scenarios_dir, synthetic=args.synthetic)
+        val_scenarios = with_fleet(load_geographic_split("validation", args.scenarios_dir, synthetic=args.synthetic),
+                                   args.fleet_size)
         if args.eval_scenarios is not None:
             val_scenarios = val_scenarios[:args.eval_scenarios]
         print(f"Training {args.candidates} candidates on {len(dev_scenarios)} development scenarios...")
@@ -773,7 +802,8 @@ def main() -> None:
     if args.eval:
         if not args.checkpoint or not args.checkpoint.exists():
             raise FileNotFoundError(f"Checkpoint file required for --eval: {args.checkpoint}")
-        target_scenarios = load_geographic_split(args.split, args.scenarios_dir, synthetic=args.synthetic)
+        target_scenarios = with_fleet(load_geographic_split(args.split, args.scenarios_dir, synthetic=args.synthetic),
+                                      args.fleet_size)
         if args.eval_scenarios is not None:
             target_scenarios = target_scenarios[:args.eval_scenarios]
 

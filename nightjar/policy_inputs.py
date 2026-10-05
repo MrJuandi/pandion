@@ -68,10 +68,12 @@ class GeographicInputTensorizer:
     NUM_VECTOR_FEATURES = 2 + 3 + len(MOISTURE_KEYS) + 4
 
     FIRE_CHANNELS = 3  # burning, burned, time since front arrival (ablation without image)
+    FLEET_CHANNELS = 2  # distance to the nearest other aircraft, other aircraft drop targets
+    FLEET_VECTOR = 3  # share of other aircraft idle, their mean water, min time until one is free
 
     def __init__(self, scenario: dict, base_image: np.ndarray | None, *, include_ros: bool = False,
                  explicit_fire: bool = False, include_thermal: bool = False,
-                 focus_slots: bool = False) -> None:
+                 focus_slots: bool = False, fleet_features: bool = False) -> None:
         """``base_image=None`` with ``explicit_fire=True`` is the no-image ablation:
         fire state enters as per-cell channels and ``extract`` returns (cells, vector)."""
         grid = scenario["grid"]
@@ -99,7 +101,10 @@ class GeographicInputTensorizer:
         self.include_thermal = include_thermal
         self.image_channels = 4 if include_thermal else 3
         self.focus_slots = focus_slots
+        self.fleet_features = fleet_features
+        self.num_vector_features = self.NUM_VECTOR_FEATURES + (self.FLEET_VECTOR if fleet_features else 0)
         self.num_cell_channels = (self.BASE_CELL_CHANNELS + (1 if include_ros else 0)
+                                  + (self.FLEET_CHANNELS if fleet_features else 0)
                                   + (self.FIRE_CHANNELS if explicit_fire else 0)
                                   + (MAX_SLOTS if focus_slots else 0))
         self._static: np.ndarray | None = None
@@ -196,6 +201,8 @@ class GeographicInputTensorizer:
         dynamic = [treated, np.clip(distance, 0.0, 1.5).astype(np.float32)]
         if self.include_ros:
             dynamic.append(self.ros_channel(observation))
+        if self.fleet_features:
+            dynamic.extend(self.fleet_channels(observation))
         parts = [self._static_channels(observation), np.stack(dynamic)]
         if self.explicit_fire:
             parts.append(self.fire_channels(observation))
@@ -219,7 +226,37 @@ class GeographicInputTensorizer:
                    min(float(aircraft.get("refill_remaining_s", 0.0)) / max(self.horizon_s, 1.0), 1.0),
                    min(float(observation.get("time_s", 0.0)) / max(self.horizon_s, 1.0), 1.0)]
         vector_array = np.asarray(vector, dtype=np.float32)
+        if self.fleet_features:
+            vector_array = np.concatenate([vector_array, self.fleet_vector(observation)]).astype(np.float32)
         return (cells, vector_array) if rgb is None else (rgb, cells, vector_array)
+
+    def _others(self, observation: dict) -> list[dict]:
+        ego = observation.get("aircraft_index", 0)
+        return [a for a in observation.get("fleet", []) if a["index"] != ego]
+
+    def fleet_channels(self, observation: dict) -> list[np.ndarray]:
+        """Distance to the nearest other aircraft (1.5 when none) and their drop-target cells."""
+        distance = np.full((self.rows, self.cols), 1.5, dtype=np.float32)
+        targets = np.zeros((self.rows, self.cols), dtype=np.float32)
+        for other in self._others(observation):
+            ox, oy = other["position_m"]
+            d = np.hypot(self._anchors[0] - ox, self._anchors[1] - oy) / self._diagonal_m
+            distance = np.minimum(distance, np.clip(d, 0.0, 1.5).astype(np.float32))
+            if other.get("phase") == "transit_to_drop" and other.get("target_m") is not None:
+                c = int(round(other["target_m"][0] / self.cell_size_m))
+                r = int(round(other["target_m"][1] / self.cell_size_m))
+                if 0 <= r < self.rows and 0 <= c < self.cols:
+                    targets[r, c] = 1.0
+        return [distance, targets]
+
+    def fleet_vector(self, observation: dict) -> np.ndarray:
+        others = self._others(observation)
+        if not others:
+            return np.zeros(self.FLEET_VECTOR, dtype=np.float32)
+        idle = sum(a["phase"] == "idle" for a in others) / len(others)
+        water = sum(float(a["water_l"]) for a in others) / len(others) / self.capacity_l
+        free = min(float(a["busy_remaining_s"]) for a in others) / max(self.horizon_s, 1.0)
+        return np.asarray([idle, water, min(free, 1.0)], dtype=np.float32)
 
     def to_torch(self, observation: dict, device: Any = None) -> tuple[Any, ...]:
         """Batched tensors matching ``extract`` with a leading batch dimension of 1.
