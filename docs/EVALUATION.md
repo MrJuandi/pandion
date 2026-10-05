@@ -478,3 +478,19 @@ The table above predates D-69 (causal burning state, horizon scoring) and D-70 (
 | Pooled (3 folds) | **91.1** | 93.3 | 99.7 | −2.21 [−5.72, +1.82] (−2.4%) | 51 / 9 / 36 |
 
 With realistic refill distances the policy still beats containment on every fold and clearly beats the heuristic on EMSR602_AOI04, but loses on EMSR583 (the largest fire, refilling 7.4 km away) and the pooled interval includes zero. One seed and three of six folds do not support a generalisation claim; D-73 adds development incidents and the fold report for a fuller sweep.
+
+### Holdout folds with 20 development incidents (D-73, 2026-10-06)
+
+Same configuration and seed (42) on `runs/geographic-multi-ignition-family-d71-20261006` (20 development incidents, 640 scenarios; each fold trains on the other 19 incidents) with imagery `runs/geographic-imagery-s2-d71-px4-20261006`, commit `79d5a7b`, two batches of three concurrent folds (`runs/geographic-holdout-folds-d71-20261006/run.sh`). Regenerating the families re-drew foci and wind (D-73), so held-out and validation scenarios differ from the D-70 run and only policy-minus-baseline differences are comparable. Validation (EMSR590, 24 scenarios): heuristic 92.62, containment 92.50, no intervention 122.33 ha; selected weights 86.96–91.54 ha. `python -m nightjar.fold_report runs/geographic-holdout-folds-d71-20261006`:
+
+| Held-out incident | Policy | Heuristic | Containment | Policy − heuristic (95% CI) | Better / equal / worse |
+|---|---|---|---|---|---|
+| EMSR578 | **162.8** | 169.5 | 174.5 | −6.66 [−13.97, +0.44] (−3.9%) | 20 / 0 / 12 |
+| EMSR583 | 124.7 | **113.1** | 131.9 | +11.59 [+1.31, +22.81] (+10.2%) | 10 / 1 / 21 |
+| EMSR602_AOI02 | **80.2** | 86.4 | 89.0 | −6.25 [−9.78, −3.12] (−7.2%) | 19 / 2 / 11 |
+| EMSR602_AOI04 | **63.0** | 72.1 | 71.7 | −9.06 [−13.47, −5.28] (−12.6%) | 19 / 9 / 4 |
+| EMSR625_AOI01 | 76.5 | 76.3 | **74.9** | +0.19 [−2.22, +2.34] (+0.2%) | 13 / 3 / 16 |
+| EMSR625_AOI02 | **177.3** | 177.8 | 182.3 | −0.47 [−5.81, +4.62] (−0.3%) | 15 / 1 / 16 |
+| Pooled (6 folds) | **114.1** | 115.9 | 120.7 | −1.78 [−4.23, +0.74] (−1.5%) | 96 / 16 / 80 |
+
+Training on 19 instead of 5 incidents did not change the picture on the three repeated folds (EMSR602_AOI04 −10.5 → −9.1 ha, EMSR625_AOI01 −2.4 → +0.2, EMSR583 +6.3 → +11.6). The policy beats the heuristic clearly on two incidents, ties on two and loses significantly on EMSR583; pooled it is 1.8 ha (1.5%) better with an interval that includes zero. Map count is therefore not the limiting factor for these folds; the systematic EMSR583 loss needs a per-scenario diagnosis. One seed per fold; seed variation is not yet measured.
