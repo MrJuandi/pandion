@@ -101,6 +101,23 @@ class ParametricActionTests(unittest.TestCase):
         self.assertTrue(torch.allclose(empty[0], empty[1]))
         self.assertFalse(torch.allclose(logits[0, 2:2 + len(ASPECTS)], empty[0]))
 
+    @unittest.skipUnless(HAS_TORCH, "PyTorch not installed")
+    def test_slot_raw_features_see_slot_averages(self):
+        import torch
+        from nightjar.image_model import ImageActorCritic
+        torch.manual_seed(0)
+        model = ImageActorCritic(cell_channels=2 + MAX_SLOTS, vector_dim=3, px_per_cell=1, grid_rows=6,
+                                 grid_cols=6, action_mode="parametric", use_image=False, recurrent=False,
+                                 width=8, hidden_dim=16, slot_raw_features=True)
+        self.assertEqual(model.slot_actor_head[0].in_features, 8 + 16 + 1 + (2 + MAX_SLOTS) + 1)
+        cells = torch.zeros(1, 2 + MAX_SLOTS, 6, 6)
+        cells[0, 2, 1, 1] = 1.0
+        logits, _ = model(cells, torch.zeros(1, 3))
+        changed = cells.clone()
+        changed[0, 0, 1, 1] = 3.0  # raw channel value inside slot 0 only
+        changed_logits, _ = model(changed, torch.zeros(1, 3))
+        self.assertFalse(torch.allclose(logits[0, 2:6], changed_logits[0, 2:6]))
+
 
 if __name__ == "__main__":
     unittest.main()
