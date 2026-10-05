@@ -354,6 +354,25 @@ class TestGeographicPPO(unittest.TestCase):
             results.append(losses)
         self.assertEqual(results[0], results[1])
 
+    def test_periodic_selection_restores_best_weights(self):
+        import tempfile
+        torch.manual_seed(0)
+        random.seed(0)
+        history = []
+        with tempfile.TemporaryDirectory() as tmp:
+            checkpoint = f"{tmp}/model.pt"
+            model, _ = train_geographic_ppo([self.scenario], updates=3, episodes_per_update=1,
+                                            selection_scenarios=[self.scenario], eval_every=1,
+                                            history=history, checkpoint_path=checkpoint)
+            self.assertEqual([h["update"] for h in history], [1, 2, 3])
+            best = min(h["mean_final_burned_ha"] for h in history)
+            self.assertEqual(sum(h["best"] for h in history if h["mean_final_burned_ha"] == best) >= 1, True)
+            saved = torch.load(f"{checkpoint}.best")
+            for key, value in model.state_dict().items():
+                torch.testing.assert_close(value, saved[key])
+            _, metrics = rollout_geographic(model, self.scenario, deterministic=True)
+            self.assertAlmostEqual(metrics["final_burned_ha"], best, places=4)
+
     def test_entropy_schedule_decays_linearly(self):
         from unittest.mock import patch
         seen = []
