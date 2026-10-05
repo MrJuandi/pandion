@@ -78,9 +78,9 @@ class EnvironmentTests(unittest.TestCase):
 
     def test_future_weather_cannot_change_past_observation(self):
         s,a=fixture();s['grid']['cell_size_m']=100;s['environment']=build_station_environment(s,a)
-        first=run_geographic_integrated(s,'no_intervention',_stop_after_steps=25)
+        first=run_geographic_integrated(s,'no_intervention',observation_mode='scheduled',_stop_after_steps=25)
         altered=deepcopy(s);altered['environment']['forcing'][1]['midflame_wind_to_m_s']=[-2,0]
-        changed=run_geographic_integrated(altered,'no_intervention',_stop_after_steps=25)
+        changed=run_geographic_integrated(altered,'no_intervention',observation_mode='scheduled',_stop_after_steps=25)
         self.assertEqual(first['decisions'],changed['decisions'])
         self.assertEqual(first['decisions'][0]['observation']['weather_status'],'not_yet_delivered')
         self.assertEqual(first['decisions'][0]['observation']['midflame_wind_to_m_s'],[0,0])
@@ -88,5 +88,21 @@ class EnvironmentTests(unittest.TestCase):
         self.assertNotIn('forcing',first['pending_observation'])
         self.assertNotEqual(run_geographic_integrated(s,'no_intervention')['arrival_time_s'],
                             run_geographic_integrated(altered,'no_intervention')['arrival_time_s'])
+
+    def test_realtime_weather_is_current_interval_only(self):
+        s,a=fixture();s['grid']['cell_size_m']=100;s['environment']=build_station_environment(s,a)
+        forcing=s['environment']['forcing']
+        first=run_geographic_integrated(s,'no_intervention',_stop_after_steps=25)
+        obs=first['decisions'][0]['observation']
+        self.assertEqual(obs['observation_mode'],'realtime')
+        self.assertEqual(obs['weather_status'],'realtime_station_interval')
+        self.assertEqual(obs['midflame_wind_to_m_s'],forcing[0]['midflame_wind_to_m_s'])
+        self.assertEqual(obs['fuel_moisture'],forcing[0]['moisture'])
+        self.assertEqual(first['pending_observation']['environment_weather']['start_s'],forcing[1]['start_s'])
+        # The last interval has not started at the stop time, so it cannot leak.
+        altered=deepcopy(s);altered['environment']['forcing'][2]['midflame_wind_to_m_s']=[-2,0]
+        changed=run_geographic_integrated(altered,'no_intervention',_stop_after_steps=25)
+        self.assertEqual(first['decisions'],changed['decisions'])
+        self.assertEqual(first['pending_observation'],changed['pending_observation'])
 
 if __name__=='__main__':unittest.main()

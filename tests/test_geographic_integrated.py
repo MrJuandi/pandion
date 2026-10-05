@@ -105,6 +105,85 @@ class TestGeographicIntegrated(unittest.TestCase):
                     if cell is not None:
                         self.assertLessEqual(cell["observed_at_s"], obs["time_s"])
 
+    def test_realtime_observation_is_full_current_state(self):
+        result = run_geographic_integrated(self.scenario, policy="heuristic")
+        self.assertEqual(result["observation_mode"], "realtime")
+        for decision in result["decisions"]:
+            obs = decision["observation"]
+            t = obs["time_s"]
+            self.assertEqual(obs["observation_mode"], "realtime")
+            self.assertIsNotNone(obs["fuel_moisture"])
+            for r, row in enumerate(obs["fire"]["cells"]):
+                for c, cell in enumerate(row):
+                    self.assertIsNotNone(cell)
+                    self.assertEqual(cell["age_s"], 0.0)
+                    arrival = result["arrival_time_s"][r][c]
+                    reached = arrival is not None and arrival <= t + 1e-6
+                    self.assertEqual(cell["fire_detected"], reached)
+                    if not reached:
+                        self.assertEqual(cell["fire_state"], "unburned")
+                        self.assertIsNone(cell["arrival_time_s"])
+                    else:
+                        burnout = result["burnout_time_s"][r][c]
+                        expected = "burning" if burnout > t + 1e-6 else "burned"
+                        self.assertEqual(cell["fire_state"], expected)
+
+    def test_burning_cells_outlast_front_arrival_and_later_burn_out(self):
+        result = run_geographic_integrated(self.scenario, policy="no_intervention")
+        states = {cell["fire_state"]
+                  for decision in result["decisions"]
+                  for row in decision["observation"]["fire"]["cells"]
+                  for cell in row}
+        self.assertTrue({"unburned", "burning", "burned"} <= states)
+        for arrival_row, burnout_row in zip(result["arrival_time_s"], result["burnout_time_s"]):
+            for arrival, burnout in zip(arrival_row, burnout_row):
+                self.assertEqual(arrival is None, burnout is None)
+                if arrival is not None and arrival > 0:
+                    # Crossing time alone exceeds Anderson residence (seconds).
+                    self.assertGreater(burnout - arrival, 1.0)
+
+    def test_initial_perimeter_interior_is_burned_and_edge_is_burning(self):
+        result = run_geographic_integrated(self.scenario, policy="no_intervention", _stop_after_steps=1)
+        cells = result["pending_observation"]["fire"]["cells"]
+        mask = self.scenario["fire"]["burn_mask"]
+        fuel = self.scenario["fire"]["fuel_grid"]
+        rows, cols = len(mask), len(mask[0])
+
+        def burnable(code):
+            return int(code) > 0 and not 91 <= int(code) <= 99
+
+        interior = edge = 0
+        for r in range(rows):
+            for c in range(cols):
+                if not mask[r][c] or not burnable(fuel[r][c]):
+                    continue
+                on_front = any(0 <= r + dr < rows and 0 <= c + dc < cols and burnable(fuel[r + dr][c + dc])
+                               and not mask[r + dr][c + dc]
+                               for dr in (-1, 0, 1) for dc in (-1, 0, 1) if dr or dc)
+                expected = "burning" if on_front else "burned"
+                self.assertEqual(cells[r][c]["fire_state"], expected, (r, c))
+                edge += on_front
+                interior += not on_front
+        self.assertGreater(edge, 0)
+
+    def test_future_fire_cannot_change_realtime_observation(self):
+        first = run_geographic_integrated(self.scenario, policy="no_intervention", _stop_after_steps=5)
+        later = run_geographic_integrated(self.scenario, policy="no_intervention", _stop_after_steps=20)
+        self.assertEqual(first["pending_observation"], later["decisions"][5]["observation"])
+
+    def test_scheduled_mode_keeps_delayed_reports(self):
+        result = run_geographic_integrated(self.scenario, policy="no_intervention", observation_mode="scheduled")
+        self.assertEqual(result["observation_mode"], "scheduled")
+        ages = [cell["age_s"]
+                for decision in result["decisions"]
+                for row in decision["observation"]["fire"]["cells"]
+                for cell in row if cell is not None]
+        self.assertTrue(any(age > 0 for age in ages))
+
+    def test_unknown_observation_mode_rejected(self):
+        with self.assertRaises(ValueError):
+            run_geographic_integrated(self.scenario, policy="no_intervention", observation_mode="delayed")
+
 
 if __name__ == "__main__":
     unittest.main()
