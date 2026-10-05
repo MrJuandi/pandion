@@ -9,13 +9,18 @@ from nightjar.geographic_integrated import run_geographic_integrated
 from nightjar.imagery_composite import (
     BURNED_RGB,
     BURNING_RGB,
+    THERMAL_BURNED_PEAK,
     compose_view,
     state_masks,
+    thermal_view,
 )
 
 
-def observation(states, treated=()):
-    return {"fire": {"cells": [[{"fire_state": s} for s in row] for row in states]},
+def observation(states, treated=(), arrivals=None, time_s=0.0):
+    arrivals = arrivals or [[None] * len(row) for row in states]
+    return {"time_s": time_s,
+            "fire": {"cells": [[{"fire_state": s, "arrival_time_s": a} for s, a in zip(row, arow)]
+                               for row, arow in zip(states, arrivals)]},
             "known_treated_cells": [list(c) for c in treated]}
 
 
@@ -66,6 +71,27 @@ class ImageryCompositeTests(unittest.TestCase):
         expected = masks["burning"] | masks["burned"] | masks["treated"]
         np.testing.assert_array_equal(changed, expected)
         self.assertTrue(masks["treated"].any())
+
+    def test_thermal_band_burning_hot_halo_decays_burned_cools(self):
+        states = [["unburned"] * 9 for _ in range(9)]
+        states[4][4] = "burning"
+        states[0][0] = "burned"
+        arrivals = [[None] * 9 for _ in range(9)]
+        arrivals[0][0] = 0.0
+        early = thermal_view(observation(states, arrivals=arrivals, time_s=60.0), 4, 100.0)
+        late = thermal_view(observation(states, arrivals=arrivals, time_s=1800.0), 4, 100.0)
+        self.assertEqual(early.shape, (36, 36))
+        self.assertTrue((early[16:20, 16:20] == 1.0).all())
+        row = early[17, 20:]
+        self.assertTrue((np.diff(row) <= 1e-6).all())  # halo decays away from the fire
+        self.assertLess(row[-1], 0.05)
+        self.assertGreater(early[1, 1], late[1, 1])  # burned cell cools
+        self.assertLessEqual(early[1, 1], THERMAL_BURNED_PEAK + 1e-6)
+        self.assertTrue(((early >= 0) & (early <= 1)).all())
+
+    def test_thermal_band_is_cold_without_fire(self):
+        cold = thermal_view(observation([["unburned"] * 3] * 2), 2, 100.0)
+        self.assertTrue((cold == 0).all())
 
 
 if __name__ == "__main__":

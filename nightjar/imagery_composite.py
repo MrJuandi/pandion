@@ -27,6 +27,63 @@ BURNED_ALPHA = 0.80
 TREATED_ALPHA = 0.55
 
 
+# Simulated thermal (infrared) band, values in [0, 1] relative to ambient.
+# A declared rendering convention for a drone-type RGB-T sensor (D-58), not a
+# radiometric model: burning cells saturate, burned cells cool exponentially
+# from front arrival, and radiant heat around burning cells decays with distance.
+THERMAL_BURNING = 1.0
+THERMAL_BURNED_PEAK = 0.7
+THERMAL_COOLING_S = 900.0
+THERMAL_HALO_PEAK = 0.5
+THERMAL_HALO_LENGTH_M = 75.0
+
+
+def _bilinear_upsample(grid: np.ndarray, px_per_cell: int) -> np.ndarray:
+    """Smoothly resample a [rows, cols] cell-centred field to pixel resolution."""
+    def axis_weights(n: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        pos = np.clip((np.arange(n * px_per_cell) + 0.5) / px_per_cell - 0.5, 0.0, n - 1.0)
+        low = np.floor(pos).astype(int)
+        high = np.minimum(low + 1, n - 1)
+        return low, high, pos - low
+    r0, r1, wr = axis_weights(grid.shape[0])
+    c0, c1, wc = axis_weights(grid.shape[1])
+    rows = grid[r0] * (1.0 - wr)[:, None] + grid[r1] * wr[:, None]
+    return rows[:, c0] * (1.0 - wc)[None, :] + rows[:, c1] * wc[None, :]
+
+
+def thermal_view(observation: dict, px_per_cell: int, cell_size_m: float) -> np.ndarray:
+    """Float32 [rows*px, cols*px] thermal band in [0, 1], row 0 south.
+
+    Burning cells are 1. Burned cells start at 0.7 and cool as
+    exp(-(t - arrival) / 900 s). Around burning cells radiant heat adds
+    0.5 * exp(-d / 75 m), d being the distance to the nearest burning cell
+    centre. Cell values are resampled bilinearly and burning cells are then
+    drawn as sharp full-intensity blocks. Uses only the controller observation.
+    """
+    masks = state_masks(observation)
+    rows, cols = masks["burning"].shape
+    now = float(observation.get("time_s", 0.0))
+    field = np.zeros((rows, cols), dtype=np.float64)
+    for r, line in enumerate(observation["fire"]["cells"]):
+        for c, cell in enumerate(line):
+            if cell["fire_state"] == "burned" and cell.get("arrival_time_s") is not None:
+                age = max(now - float(cell["arrival_time_s"]), 0.0)
+                field[r, c] = THERMAL_BURNED_PEAK * np.exp(-age / THERMAL_COOLING_S)
+    burning = np.argwhere(masks["burning"])
+    if len(burning):
+        grid = np.argwhere(np.ones((rows, cols), dtype=bool))
+        nearest = np.full(len(grid), np.inf)
+        for start in range(0, len(burning), 512):
+            block = burning[start:start + 512]
+            d = np.hypot(grid[:, None, 0] - block[None, :, 0], grid[:, None, 1] - block[None, :, 1])
+            nearest = np.minimum(nearest, d.min(axis=1))
+        halo = THERMAL_HALO_PEAK * np.exp(-nearest.reshape(rows, cols) * cell_size_m / THERMAL_HALO_LENGTH_M)
+        field = np.maximum(field, halo)
+    image = _bilinear_upsample(field, px_per_cell)
+    image[_upsample(masks["burning"], px_per_cell)] = THERMAL_BURNING
+    return np.clip(image, 0.0, 1.0).astype(np.float32)
+
+
 def _upsample(mask: np.ndarray, px_per_cell: int) -> np.ndarray:
     return np.repeat(np.repeat(mask, px_per_cell, axis=0), px_per_cell, axis=1)
 
@@ -79,6 +136,7 @@ def main() -> None:
     parser.add_argument("imagery_dir", type=Path, help="output directory of imagery_acquire")
     parser.add_argument("output_dir", type=Path)
     parser.add_argument("--every", type=int, default=5, help="render every Nth decision")
+    parser.add_argument("--thermal", action="store_true", help="also write the thermal band as *_thermal.png")
     args = parser.parse_args()
     from PIL import Image
 
@@ -95,6 +153,10 @@ def main() -> None:
         view = compose_view(base, decision["observation"], px)
         name = f"step{index:03d}_t{int(decision['decision_time_s']):05d}s.png"
         Image.fromarray(view[::-1]).save(args.output_dir / name)
+        if args.thermal:
+            heat = thermal_view(decision["observation"], px, float(scenario["grid"]["cell_size_m"]))
+            Image.fromarray(np.rint(heat[::-1] * 255).astype(np.uint8)).save(
+                args.output_dir / name.replace(".png", "_thermal.png"))
         print(name, flush=True)
 
 

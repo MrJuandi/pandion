@@ -19,7 +19,7 @@ from typing import Any
 from .aircraft import CAPACITY_L
 from .geographic_benchmark import run_geographic_benchmark
 from .geographic_family import canonical_hash
-from .cems_catalog import ACTIVATIONS
+from .cems_catalog import ACTIVATIONS, incidents_for_split
 from .geographic_training_env import GeographicTrainingEnv
 from .model import (
     HAS_TORCH,
@@ -47,6 +47,7 @@ def make_input_tensorizer(
     input_mode: str = "legacy",
     imagery_dir: Path | str | None = None,
     include_ros: bool = False,
+    include_thermal: bool = False,
 ) -> Any:
     """Tensorizer for a scenario: legacy rasters, D-49 image inputs, or the no-image
     ablation ``cells`` (same per-cell/vector inputs, fire state as explicit channels)."""
@@ -65,7 +66,8 @@ def make_input_tensorizer(
     key = (str(imagery_dir), scenario["activation_id"])
     if key not in _IMAGE_CACHE:
         _IMAGE_CACHE[key] = load_activation_image(imagery_dir, scenario)
-    return GeographicInputTensorizer(scenario, _IMAGE_CACHE[key], include_ros=include_ros)
+    return GeographicInputTensorizer(scenario, _IMAGE_CACHE[key], include_ros=include_ros,
+                                     include_thermal=include_thermal)
 
 
 def build_policy_model(
@@ -76,6 +78,7 @@ def build_policy_model(
     recurrent: bool = True,
     imagery_dir: Path | str | None = None,
     include_ros: bool = False,
+    include_thermal: bool = False,
 ) -> Any:
     """Construct the actor-critic matching an input/action configuration."""
     _require_torch()
@@ -89,12 +92,13 @@ def build_policy_model(
     from .image_model import ImageActorCritic
 
     tensorizer = make_input_tensorizer(scenario, input_mode=input_mode, imagery_dir=imagery_dir,
-                                       include_ros=include_ros)
+                                       include_ros=include_ros, include_thermal=include_thermal)
     return ImageActorCritic(cell_channels=tensorizer.num_cell_channels,
                             vector_dim=tensorizer.NUM_VECTOR_FEATURES,
                             px_per_cell=max(tensorizer.px_per_cell, 1), grid_rows=rows, grid_cols=cols,
                             action_mode=action_mode, recurrent=recurrent,
-                            use_image=input_mode == "image")
+                            use_image=input_mode == "image",
+                            image_channels=getattr(tensorizer, "image_channels", 3))
 
 
 def resolve_device(name: str = "cpu") -> str:
@@ -149,8 +153,7 @@ def load_geographic_split(
     expected = {entry["scenario_id"]: entry for entry in split_entries}
     if len(expected) != len(split_entries):
         raise ValueError(f"Duplicate scenario IDs in manifest split '{split}': {manifest_path}")
-    designated = {"development": {"EMSR578"}, "validation": {"EMSR590"},
-                  "reserved": {"EMSR592", "EMSR600"}}[split]
+    designated = set(incidents_for_split(split))
     scenarios = []
     seen_ids = set()
     for path in paths:
@@ -294,6 +297,7 @@ def rollout_geographic(
     input_mode: str = "legacy",
     imagery_dir: Path | str | None = None,
     include_ros: bool = False,
+    include_thermal: bool = False,
     gamma: float = 0.99,
     gae_lambda: float | None = None,
     reward_scale: float = 1.0,
@@ -313,7 +317,7 @@ def rollout_geographic(
     observation = env.reset(seed=scenario.get("seed"))
     mapper = env.action_mapper()
     tensorizer = make_input_tensorizer(scenario, input_mode=input_mode, imagery_dir=imagery_dir,
-                                       include_ros=include_ros)
+                                       include_ros=include_ros, include_thermal=include_thermal)
 
     records: list[dict] = []
     rewards: list[float] = []
@@ -485,6 +489,7 @@ def train_geographic_ppo(
     action_mode: str = "tactical",
     imagery_dir: Path | str | None = None,
     include_ros: bool = False,
+    include_thermal: bool = False,
     checkpoint_path: Path | str | None = None,
     checkpoint_every: int = 0,
     ppo_epochs: int = 1,
@@ -499,7 +504,8 @@ def train_geographic_ppo(
     every that many updates, so an interrupted run can continue with ``--resume``.
     """
     _require_torch()
-    input_options = {"input_mode": input_mode, "imagery_dir": imagery_dir, "include_ros": include_ros}
+    input_options = {"input_mode": input_mode, "imagery_dir": imagery_dir, "include_ros": include_ros,
+                     "include_thermal": include_thermal}
     model = build_policy_model(dev_scenarios[0], action_mode=action_mode, recurrent=recurrent,
                                **input_options).to(device)
 
@@ -573,6 +579,8 @@ def main() -> None:
                         help="tactical macro-actions or one drop action per cell (image inputs only)")
     parser.add_argument("--imagery-dir", type=Path, help="output directory of nightjar.imagery_acquire")
     parser.add_argument("--ros", action="store_true", help="add the Rothermel ROS channel (image inputs)")
+    parser.add_argument("--thermal", action="store_true",
+                        help="add a simulated thermal band as a 4th image channel (image inputs, D-58)")
     parser.add_argument("--eval-scenarios", type=int, default=None, help="Limit number of validation scenarios to evaluate")
     parser.add_argument("--checkpoint", type=Path)
     parser.add_argument("--resume", type=Path, help="Path to checkpoint to resume weights from")
@@ -596,7 +604,8 @@ def main() -> None:
     torch.manual_seed(args.seed)
 
     dev_scenarios = load_geographic_split("development", args.scenarios_dir, synthetic=args.synthetic)
-    input_options = {"input_mode": args.input_mode, "imagery_dir": args.imagery_dir, "include_ros": args.ros}
+    input_options = {"input_mode": args.input_mode, "imagery_dir": args.imagery_dir, "include_ros": args.ros,
+                     "include_thermal": args.thermal}
     model_options = {"action_mode": args.action_mode, **input_options}
     ppo_options = {"ppo_epochs": args.ppo_epochs, "minibatches": args.minibatches, "gae_lambda": args.gae_lambda,
                    "reward_scaling": args.reward_scaling, "target_kl": args.target_kl}
@@ -604,7 +613,7 @@ def main() -> None:
                      "checkpoint_path": args.checkpoint, "checkpoint_every": args.checkpoint_every}
     config_report = {"ppo": {"epochs": args.ppo_epochs, "minibatches": args.minibatches,
                              "gae_lambda": args.gae_lambda, "reward_scaling": args.reward_scaling,
-                             "target_kl": args.target_kl}, "input_mode": args.input_mode, "action_mode": args.action_mode, "include_ros": args.ros,
+                             "target_kl": args.target_kl}, "input_mode": args.input_mode, "action_mode": args.action_mode, "include_ros": args.ros, "include_thermal": args.thermal,
                      "imagery_dir": str(args.imagery_dir) if args.imagery_dir else None}
 
     if args.smoke or (not args.train and not args.select and not args.eval):

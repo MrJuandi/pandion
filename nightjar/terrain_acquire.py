@@ -12,26 +12,34 @@ import math
 from pathlib import Path
 import subprocess
 
-from .environment_family import _assert_family_grids, _dem_url
+from .cems_catalog import ACTIVATIONS
+from .environment_family import _assert_family_grids, _dem_url, terrain_filename
 from .geographic_ppo import load_geographic_split
 from .geodesy import utm_to_wgs84
 from .pilot_terrain import _parse_ascii
 
 
-def acquire_terrain(scenarios_dir: Path, output_dir: Path) -> dict:
+def acquire_terrain(scenarios_dir: Path, output_dir: Path, activations=None) -> dict:
+    """Acquire terrain for every incident in the family, or only ``activations`` when given."""
     if output_dir.exists() and any(output_dir.iterdir()):
         raise ValueError('terrain output must be new or empty')
     scenarios=[]
     for split in ('development','validation','reserved'):
         scenarios.extend(load_geographic_split(split,scenarios_dir))
-    groups={a:[s for s in scenarios if s['activation_id']==a] for a in sorted({s['activation_id'] for s in scenarios})}
+    present=sorted({s['activation_id'] for s in scenarios})
+    if activations is not None:
+        missing=set(activations)-set(present)
+        if missing:
+            raise ValueError('activations absent from family: '+', '.join(sorted(missing)))
+        present=[a for a in present if a in activations]
+    groups={a:[s for s in scenarios if s['activation_id']==a] for a in present}
     output_dir.mkdir(parents=True,exist_ok=True)
     sources={}
     for activation, group in groups.items():
         grid=_assert_family_grids(group,activation)
         rows,cols,size,x0,y0,crs=grid
-        path=output_dir/(activation.lower()+'.asc')
-        if activation in ('EMSR578','EMSR590'):
+        path=output_dir/terrain_filename(activation)
+        if ACTIVATIONS[activation]['country']=='Spain':
             url=_dem_url(activation,grid)
             subprocess.run(['curl','--fail','--silent','--show-error','--max-time','50',url,'-o',str(path)],check=True)
             header,values=_parse_ascii(path)
@@ -84,6 +92,7 @@ def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--scenarios-dir',type=Path,required=True)
     p.add_argument('--output-dir',type=Path,required=True)
-    a=p.parse_args();acquire_terrain(a.scenarios_dir,a.output_dir)
+    p.add_argument('--activations',nargs='+',help='Acquire only these incidents (default: all in the family)')
+    a=p.parse_args();acquire_terrain(a.scenarios_dir,a.output_dir,a.activations)
 
 if __name__=='__main__':main()

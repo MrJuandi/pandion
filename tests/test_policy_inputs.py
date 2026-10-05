@@ -125,6 +125,21 @@ class PolicyInputTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             GeographicInputTensorizer(self.scenario, None)
 
+    def test_thermal_band_is_a_fourth_image_channel(self):
+        obs = self.replay["decisions"][-1]["observation"]
+        tz = GeographicInputTensorizer(self.scenario, self.base, include_thermal=True)
+        rgb, cells, vector = tz.extract(obs)
+        self.assertEqual(rgb.shape[0], 4)
+        plain = GeographicInputTensorizer(self.scenario, self.base).extract(obs)
+        np.testing.assert_array_equal(rgb[:3], plain[0])
+        np.testing.assert_array_equal(cells, plain[1])
+        burning = np.repeat(np.repeat(tz.fire_channels(obs)[0] if tz.explicit_fire else
+                                      np.array([[c["fire_state"] == "burning" for c in row]
+                                                for row in obs["fire"]["cells"]]), PX, 0), PX, 1)
+        self.assertTrue((rgb[3][burning.astype(bool)] == 1.0).all())
+        with self.assertRaises(ValueError):
+            GeographicInputTensorizer(self.scenario, None, explicit_fire=True, include_thermal=True)
+
     def test_rejects_delayed_observations_and_bad_base(self):
         delayed = run_geographic_integrated(self.scenario, policy="no_intervention",
                                             observation_mode="scheduled", _stop_after_steps=1)
@@ -204,8 +219,10 @@ class ImageModelTests(unittest.TestCase):
         from nightjar.geographic_ppo import build_policy_model, ppo_update_geographic, rollout_geographic
         with tempfile.TemporaryDirectory() as tmp:
             write_imagery(Path(tmp), self.scenario, np.full((self.rows * PX, self.rows * PX, 3), 80, np.uint8))
-            for input_mode, mode in (("image", "tactical"), ("image", "spatial"), ("cells", "tactical")):
-                options = {"input_mode": input_mode, "imagery_dir": tmp, "include_ros": False}
+            for input_mode, mode, thermal in (("image", "tactical", False), ("image", "spatial", False),
+                                              ("cells", "tactical", False), ("image", "tactical", True)):
+                options = {"input_mode": input_mode, "imagery_dir": tmp, "include_ros": False,
+                           "include_thermal": thermal}
                 model = build_policy_model(self.scenario, action_mode=mode, recurrent=True, **options)
                 records, metrics = rollout_geographic(model, self.scenario, **options)
                 self.assertGreater(len(records), 0)
