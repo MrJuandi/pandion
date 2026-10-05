@@ -2,12 +2,14 @@
 
 This module builds a versioned suite of real-incident decision scenarios ('nightjar-geographic-family-0.1')
 across disjoint splits to prevent benchmark overfitting and data leakage:
-- 'development': Scenarios derived from Copernicus EMSR578 (Artesa de Segre, Catalonia / UTM 31N)
-- 'validation': Scenarios derived from Copernicus EMSR590 (Monfragüe / Casas de Miravete, Extremadura / UTM 30N)
-- 'reserved': Scenarios derived from Copernicus EMSR592 (Sierra de Mijas) and EMSR600 (Vall d'Ebo / UTM 30N)
+- 'development': Scenarios derived from Copernicus EMSR578 (Artesa de Segre, Catalonia / UTM 31N),
+  plus optional registered development incidents (``cems_catalog.incidents_for_split``)
+- 'validation': Scenarios derived from Copernicus EMSR590 (Las Hurdes / Sierra de Francia, Extremadura / UTM 30N)
+- 'reserved': Scenarios derived from Copernicus EMSR592 (Landiras, Gironde, France / UTM 30N) and
+  EMSR600 (Massarosa, Tuscany, Italy / UTM 32N)
 
-Each scenario incorporates real Scott & Burgan 40 fuels, georeferenced water scooping sources
-(reservoirs/rivers), satellite-derived initial burn perimeters, CL-415 operational parameters,
+Each scenario incorporates real Scott & Burgan 40 fuels, the nearest water body that passes the
+CL-415 scooping screen (CEMS hydrography or a reviewed external source), satellite-derived initial burn perimeters, CL-415 operational parameters,
 and controlled environmental ensembles (wind, moisture, observation delay).
 """
 
@@ -18,6 +20,7 @@ from copy import deepcopy
 from hashlib import sha256
 import json
 import math
+from math import hypot
 from pathlib import Path
 import random
 from typing import Any, Sequence
@@ -26,6 +29,7 @@ import numpy as np
 
 from .cems_catalog import (
     ACTIVATIONS,
+    SCOOPING_SOURCES,
     build_cems_scenario,
     fetch_cems_package,
     incidents_for_split,
@@ -131,6 +135,30 @@ def slice_tactical_aoi(
     }
 
 
+def select_scooping_source(cems_scenario: dict[str, Any], centre_utm: tuple[float, float]) -> dict[str, Any]:
+    """Nearest water body a CL-415 can scoop from, measured from the tactical window centre.
+
+    Candidates are the CEMS hydrography bodies that pass the scooping screen
+    (``cems_catalog.SCOOPING_MIN_*``) and, for real CEMS incidents, the reviewed
+    external sources in ``cems_catalog.SCOOPING_SOURCES``. There is no silent
+    fallback: an incident without an eligible source is rejected.
+    """
+    activation = cems_scenario.get("activation_id", "EMSR578")
+    candidates = [dict(wp, origin="cems_hydrography") for wp in cems_scenario.get("water_scooping_waypoints", [])
+                  if wp.get("eligible_for_scooping") is True]
+    if cems_scenario.get("source_kind") != "synthetic_fixture":
+        candidates += [dict(src, origin="registered_external") for src in SCOOPING_SOURCES.get(activation, [])]
+    if not candidates:
+        raise ValueError(f"{activation}: no water body suitable for CL-415 scooping in the CEMS hydrography; "
+                         "register a reviewed source in cems_catalog.SCOOPING_SOURCES")
+    for candidate in candidates:
+        candidate["distance_km"] = round(hypot(candidate["utm_easting_m"] - centre_utm[0],
+                                               candidate["utm_northing_m"] - centre_utm[1]) / 1000.0, 3)
+    chosen = min(candidates, key=lambda c: (c["distance_km"], c.get("name", "")))
+    return {key: chosen.get(key) for key in ("name", "origin", "utm_easting_m", "utm_northing_m", "area_ha",
+                                             "extent_m", "shore_clearance_m", "distance_km", "reference")}
+
+
 def generate_geographic_scenario(
     cems_scenario: dict[str, Any],
     index: int,
@@ -173,12 +201,10 @@ def generate_geographic_scenario(
 
     # 4. Configure aircraft initial position and water sources
     waypoints = cems_scenario.get("water_scooping_waypoints", [])
-    if waypoints:
-        nearest_wp = waypoints[0]
-        refill_utm = [nearest_wp["utm_easting_m"], nearest_wp["utm_northing_m"]]
-    else:
-        # Fallback to corner of grid
-        refill_utm = [tactical["origin_utm_easting_m"], tactical["origin_utm_northing_m"]]
+    centre_utm = (tactical["origin_utm_easting_m"] + tactical["cols"] * tactical["cell_size_m"] / 2,
+                  tactical["origin_utm_northing_m"] + tactical["rows"] * tactical["cell_size_m"] / 2)
+    water_source = select_scooping_source(cems_scenario, centre_utm)
+    refill_utm = [water_source["utm_easting_m"], water_source["utm_northing_m"]]
 
     # Aircraft initial position: patrol point offset from fire
     ac_x = tactical["origin_utm_easting_m"] + (tactical["cols"] * 0.8) * tactical["cell_size_m"]
@@ -221,6 +247,7 @@ def generate_geographic_scenario(
                 "drop_targets": "discrete cell-anchor proxies at local (column * resolution, row * resolution); not measured physical drop centers",
                 "terrain_coverage": "fuel code 0 combines water, nonburnable, unmapped, and unavailable coverage; no independent source-coverage mask",
             },
+            "water_source": water_source,
             "assumptions": {"fuel_crosswalk": "inferred", "wind": "synthetic", "moisture": "synthetic",
                             "survey_schedule": "synthetic", "topography": "flat"},
         },
