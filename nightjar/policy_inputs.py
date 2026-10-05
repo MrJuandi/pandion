@@ -26,7 +26,7 @@ import numpy as np
 
 from .environment import MOISTURE_KEYS
 from .geographic_integrated import DEFAULT_CAPACITY_L
-from .imagery_composite import compose_view
+from .imagery_composite import compose_view, thermal_view
 
 # Fuel families from Scott & Burgan (2005) code ranges and Anderson (1982) 1-13.
 FUEL_FAMILIES = ("nonburnable", "grass", "grass_shrub", "shrub", "timber_understory", "timber_litter", "slash_blowdown")
@@ -69,7 +69,7 @@ class GeographicInputTensorizer:
     FIRE_CHANNELS = 3  # burning, burned, time since front arrival (ablation without image)
 
     def __init__(self, scenario: dict, base_image: np.ndarray | None, *, include_ros: bool = False,
-                 explicit_fire: bool = False) -> None:
+                 explicit_fire: bool = False, include_thermal: bool = False) -> None:
         """``base_image=None`` with ``explicit_fire=True`` is the no-image ablation:
         fire state enters as per-cell channels and ``extract`` returns (cells, vector)."""
         grid = scenario["grid"]
@@ -92,6 +92,10 @@ class GeographicInputTensorizer:
         self.base_image = base_image
         self.include_ros = include_ros
         self.explicit_fire = explicit_fire
+        if include_thermal and base_image is None:
+            raise ValueError("the thermal band is part of the image input; it needs a base image")
+        self.include_thermal = include_thermal
+        self.image_channels = 4 if include_thermal else 3
         self.num_cell_channels = (self.BASE_CELL_CHANNELS + (1 if include_ros else 0)
                                   + (self.FIRE_CHANNELS if explicit_fire else 0))
         self._static: np.ndarray | None = None
@@ -175,6 +179,9 @@ class GeographicInputTensorizer:
         if self.base_image is not None:
             view = compose_view(self.base_image, observation, self.px_per_cell)
             rgb = np.moveaxis(view, -1, 0).astype(np.float32) / 255.0
+            if self.include_thermal:
+                heat = thermal_view(observation, self.px_per_cell, self.cell_size_m)
+                rgb = np.concatenate([rgb, np.rint(heat * 255.0)[None] / 255.0]).astype(np.float32)
 
         treated = np.zeros((self.rows, self.cols), dtype=np.float32)
         for r, c in observation.get("known_treated_cells", []):
@@ -208,7 +215,14 @@ class GeographicInputTensorizer:
         return (cells, vector_array) if rgb is None else (rgb, cells, vector_array)
 
     def to_torch(self, observation: dict, device: Any = None) -> tuple[Any, ...]:
-        """Batched tensors matching ``extract`` with a leading batch dimension of 1."""
+        """Batched tensors matching ``extract`` with a leading batch dimension of 1.
+
+        The RGB view is returned as exact uint8 (the composite is uint8), a quarter
+        of the float32 memory in stored rollouts; ``ImageActorCritic`` rescales it.
+        """
         import torch
 
-        return tuple(torch.from_numpy(a).unsqueeze(0).to(device) for a in self.extract(observation))
+        arrays = list(self.extract(observation))
+        if self.base_image is not None:
+            arrays[0] = np.rint(arrays[0] * 255.0).astype(np.uint8)
+        return tuple(torch.from_numpy(a).unsqueeze(0).to(device) for a in arrays)

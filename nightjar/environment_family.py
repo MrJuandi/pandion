@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
 
+from .cems_catalog import ACTIVATIONS
 from .geographic_family import canonical_hash
 from .geographic_ppo import load_geographic_split
 from .pilot_terrain import _parse_ascii
@@ -28,8 +29,11 @@ TERRAIN_FILES = {
     "EMSR592": "emsr592.asc",
     "EMSR600": "emsr600.asc",
 }
-CRS_BY_ACTIVATION = {"EMSR578": "EPSG:25831", "EMSR590": "EPSG:25830",
-                     "EMSR592": "EPSG:25830", "EMSR600": "EPSG:25832"}
+CRS_BY_ACTIVATION = {key: info["epsg"] for key, info in ACTIVATIONS.items()}
+
+
+def terrain_filename(activation_id: str) -> str:
+    return TERRAIN_FILES.get(activation_id, activation_id.lower().replace("_", "-") + ".asc")
 ALIGNMENT_TOLERANCE_M = 0.1
 WCS_BASE = "https://servicios.idee.es/wcs-inspire/mdt"
 
@@ -253,9 +257,9 @@ def build_environment_family(
     for scenarios in split_scenarios.values():
         for scenario in scenarios:
             activation = scenario.get("activation_id")
-            if activation not in grouped:
+            if activation not in CRS_BY_ACTIVATION:
                 raise ValueError(f"Unsupported incident in input family: {activation!r}")
-            grouped[activation].append(scenario)
+            grouped.setdefault(activation, []).append(scenario)
 
     grids = {activation: _assert_family_grids(grouped[activation], activation) for activation in grouped}
     sources_path = terrain_dir / "sources.json"
@@ -264,15 +268,15 @@ def build_environment_family(
         source_manifest = json.loads(sources_path.read_text(encoding="utf-8"))
         if not isinstance(source_manifest, dict):
             raise ValueError(f"Terrain sources manifest must map activation IDs to metadata: {sources_path}")
-        missing_sources = set(TERRAIN_FILES) - source_manifest.keys()
+        missing_sources = set(grouped) - source_manifest.keys()
         if missing_sources:
             raise ValueError(f"Terrain sources manifest is missing: {', '.join(sorted(missing_sources))}")
     dem = {
         activation: _read_dem(
-            terrain_dir / filename, grids[activation], activation,
+            terrain_dir / terrain_filename(activation), grids[activation], activation,
             source_manifest[activation] if source_manifest is not None else None,
         )
-        for activation, filename in TERRAIN_FILES.items()
+        for activation in grouped
     }
     audit = None
     pilot = None
@@ -301,7 +305,7 @@ def build_environment_family(
     output_manifest["description"] = "Geographic scenarios with source-bound aligned terrain and optional EMSR578 station-derived forcing."
     output_manifest["created_at_utc"] = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
     output_manifest["environment"] = {
-        **_summarize_sources({activation: dem[activation][1] for activation in TERRAIN_FILES}),
+        **_summarize_sources({activation: dem[activation][1] for activation in grouped}),
         "weather_mode": "station_derived" if audit is not None else "constant_synthetic",
         "weather_audit_sha256": None,
         "station_wind_factor": float(station_wind_factor), "moisture_mode": moisture_mode,
