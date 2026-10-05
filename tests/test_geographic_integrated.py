@@ -180,6 +180,14 @@ class TestGeographicIntegrated(unittest.TestCase):
                 for cell in row if cell is not None]
         self.assertTrue(any(age > 0 for age in ages))
 
+    def test_training_prefix_can_skip_audit_observations(self):
+        full = run_geographic_integrated(self.scenario, policy="no_intervention", _stop_after_steps=4)
+        lean = run_geographic_integrated(self.scenario, policy="no_intervention", _stop_after_steps=4,
+                                         _record_observations=False)
+        self.assertTrue(all("observation" not in d for d in lean["decisions"]))
+        self.assertEqual(full["pending_observation"], lean["pending_observation"])
+        self.assertEqual(full["outcomes"], lean["outcomes"])
+
     def test_unknown_observation_mode_rejected(self):
         with self.assertRaises(ValueError):
             run_geographic_integrated(self.scenario, policy="no_intervention", observation_mode="delayed")
