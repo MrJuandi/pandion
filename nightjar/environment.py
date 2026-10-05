@@ -137,6 +137,29 @@ def build_station_environment(scenario: dict, audit: dict, *, station_wind_facto
     }
 
 
+def _validate_synthetic_intervals(forcing: list[dict], horizon_s: float) -> list[dict]:
+    """Synthetic piecewise-constant weather: continuous intervals covering the horizon.
+
+    No station timestamps exist; each interval is known when it starts
+    (``available_at_s == start_s``), matching the real-time observation assumption.
+    """
+    previous = 0.0
+    for segment in forcing:
+        start, end, available = (float(segment[k]) for k in ('start_s', 'end_s', 'available_at_s'))
+        if (not all(isfinite(v) for v in (start, end, available)) or abs(start - previous) > 1e-6
+                or end <= start or abs(available - start) > 1e-6):
+            raise ValueError('synthetic forcing must cover continuous intervals known at interval start')
+        wind = segment['midflame_wind_to_m_s']
+        if len(wind) != 2 or any(not isfinite(float(v)) for v in wind):
+            raise ValueError('forcing wind must contain two finite components')
+        if any(not isfinite(float(segment['moisture'][k])) or float(segment['moisture'][k]) < 0 for k in MOISTURE_KEYS):
+            raise ValueError('forcing fuel moisture must be finite and nonnegative')
+        previous = end
+    if not forcing or abs(previous - horizon_s) > 1e-6:
+        raise ValueError('forcing does not cover simulation horizon')
+    return forcing
+
+
 def validate_forcing(environment: dict | None, horizon_s: float) -> list[dict]:
     """Reject incomplete/noncausal forcing; constant legacy scenarios return []."""
     if not environment:
@@ -147,6 +170,8 @@ def validate_forcing(environment: dict | None, horizon_s: float) -> list[dict]:
         if environment.get('forcing'):
             raise ValueError('constant weather cannot include time-varying forcing')
         return []
+    if environment.get('weather_mode') == 'synthetic_intervals':
+        return _validate_synthetic_intervals(environment.get('forcing', []), horizon_s)
     if environment.get('weather_mode') != 'station_intervals':
         raise ValueError('unsupported environment weather mode')
     utc(environment['time_origin_utc'])

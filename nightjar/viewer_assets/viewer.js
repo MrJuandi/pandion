@@ -140,7 +140,7 @@
   function windAt(r, t) {
     const env = r.environment || {};
     let vector = null;
-    if (env.weather_mode === 'station_intervals') {
+    if (env.weather_mode === 'station_intervals' || env.weather_mode === 'synthetic_intervals') {
       const forcing = Array.isArray(env.forcing) ? env.forcing : [];
       const active = forcing.find((f) => Number(f.start_s) <= t && t < Number(f.end_s)) || forcing.filter((f) => Number(f.end_s) <= t).at(-1) || forcing[0];
       vector = active?.midflame_wind_to_m_s;
@@ -658,18 +658,18 @@
   // ---------------------------------------------------------------------------
   function activeForcing(r, t) {
     const env = r.environment || {}, forcing = Array.isArray(env.forcing) ? env.forcing : [];
-    if (env.weather_mode !== 'station_intervals') return null;
+    if (env.weather_mode !== 'station_intervals' && env.weather_mode !== 'synthetic_intervals') return null;
     return forcing.find((f) => Number(f.start_s) <= t && t < Number(f.end_s)) || (t >= r.horizon_s ? forcing.filter((f) => Number(f.end_s) <= t).at(-1) : null);
   }
   function updateEnvironment(r) {
     const env = r.environment || {}, stat = isStatic(r);
-    const modeName = stat ? 'Condiciones iniciales · sin episodio' : env.weather_mode === 'station_intervals' ? 'Estación · intervalos' : env.weather_mode === 'constant_synthetic' ? 'Viento sintético constante' : 'Sin datos meteorológicos';
+    const modeName = stat ? 'Condiciones iniciales · sin episodio' : env.weather_mode === 'station_intervals' ? 'Estación · intervalos' : env.weather_mode === 'constant_synthetic' ? 'Viento sintético constante' : env.weather_mode === 'synthetic_intervals' ? 'Viento sintético variable' : 'Sin datos meteorológicos';
     $('environment-mode').textContent = modeName; ui.environment.classList.toggle('is-empty', !env.weather_mode && !stat); ui.environment.classList.toggle('is-static', stat);
     const t = Math.min(now, r.horizon_s);
     const origin = env.time_origin_utc || r.time_origin_utc || r.metadata?.acquired_at_utc, date = origin ? new Date(Date.parse(origin) + (t * 1000)) : null;
     $('environment-time').textContent = `Hora UTC ${date && !Number.isNaN(date.valueOf()) ? date.toISOString().replace('.000Z', 'Z') : '—'} · t = ${fmt(t, 0)} s`;
     let active = null;
-    if (env.weather_mode === 'station_intervals') active = activeForcing(r, t);
+    if (env.weather_mode === 'station_intervals' || env.weather_mode === 'synthetic_intervals') active = activeForcing(r, t);
     else if (env.weather_mode === 'constant_synthetic') active = {midflame_wind_to_m_s: r.metadata?.wind_to_m_s || r.wind_to_m_s || null, moisture: null, station_weather: null};
     const wind = vectorValue(active?.midflame_wind_to_m_s), station = active?.station_weather || {};
     $('environment-wind').textContent = wind ? `${fmt(wind.speed, 1)} m/s · ${compass(wind.degrees)}` : '—';
