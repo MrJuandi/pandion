@@ -393,6 +393,8 @@ NON_SCOOPABLE_TYPE_PREFIXES = ("BH090",)  # land subject to inundation (marsh, l
 # within 30 km of the tactical window centre, retrieved from the Overpass API on
 # 2026-10-05 and screened with _extract_water_waypoints (same thresholds and
 # scooping_point as CEMS hydrography); the 1-3 nearest eligible bodies are kept.
+# Excluded on review: Meandro El Melero (osm way/704298460, EMSR590), a river bend
+# whose 1.4 km extent is the diagonal of a curve rather than a straight run.
 # Data (c) OpenStreetMap contributors, available under the ODbL.
 OSM_RETRIEVED_UTC = "2026-10-05"
 
@@ -411,7 +413,6 @@ SCOOPING_SOURCES: dict[str, list[dict[str, Any]]] = {
         _osm_source("Pantà de Terradets", 325406.12, 4659203.28, 276.94, 5154.8, 410.0, "relation/5598230"),
     ],
     "EMSR590": [
-        _osm_source("Meandro El Melero", 239184.25, 4475301.54, 41.82, 1426.0, 125.8, "way/704298460"),
         _osm_source("Embalse de Águeda", 205364.89, 4491741.66, 121.77, 7744.2, 148.4, "way/48120464"),
         _osm_source("Unnamed reservoir", 199781.31, 4485847.04, 16.01, 2606.0, 53.0, "way/675416760"),
     ],
