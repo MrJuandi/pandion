@@ -46,6 +46,7 @@ def run_geographic_integrated(
     observation_mode: str | None = None,
     _actions: list[dict] | None = None,
     _stop_after_steps: int | None = None,
+    _record_observations: bool = True,
 ) -> dict[str, Any]:
     """Run an event-driven decision episode on a geographic scenario.
 
@@ -58,6 +59,9 @@ def run_geographic_integrated(
       observation_schedule). Falls back to scenario['observation_mode'].
     - _actions: optional pre-scripted orders list for testing.
     - _stop_after_steps: optional step cutoff for smoke testing.
+    - _record_observations: copy each decision observation into the replay
+      audit log (default). Training prefixes disable it: the copies grow
+      quadratically with episode length and nothing in training reads them.
     """
     if policy not in {"no_intervention", "random_valid", "heuristic", "containment_heuristic"}:
         raise ValueError(f"Unknown policy: {policy}")
@@ -521,7 +525,8 @@ def run_geographic_integrated(
 
         # Audit output only: the controller still receives current_obs alone.
         decisions_log[-1]["decision_time_s"] = current_obs["time_s"]
-        decisions_log[-1]["observation"] = deepcopy(current_obs)
+        if _record_observations:
+            decisions_log[-1]["observation"] = deepcopy(current_obs)
         aircraft_track.append({"time_s": round(cur_sim_time, 2),
                                "position_m": list(aircraft_pos)})
 
