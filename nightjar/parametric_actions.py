@@ -9,11 +9,11 @@ to one default rule (D-59, D-60). Here the policy chooses *which* focus and
 - index ``2 + 4 * k + a``: drop on focus slot ``k`` (0..MAX_SLOTS-1) at aspect
   ``a`` in (head, left flank, right flank, rear), relative to the observed wind.
 
-Focus slots are 8-connected clusters of currently burning cells, ordered by
-size (largest first, ties by centroid row then column), so the order is the
-same for every aircraft. Extra clusters beyond ``MAX_SLOTS`` are not
-addressable. A slot is valid only if it has unburned, untreated burnable cells
-4-adjacent to its burning cells. Everything is computed from the controller
+Focus slots are fire fronts (D-67): the border cells, next to attackable
+cells, of 8-connected groups of fire-reached cells, ordered by front length
+(ties by centroid row then column). Extra fronts beyond ``MAX_SLOTS`` are not
+addressable. Every candidate cell borders some front, so with at most
+``MAX_SLOTS`` fronts the heuristic's targets are expressible as slot actions. Everything is computed from the controller
 observation; ``slot_masks`` gives the tensorizer the matching cell masks.
 """
 
@@ -34,36 +34,46 @@ _FOUR = ((-1, 0), (1, 0), (0, -1), (0, 1))
 
 
 def fire_slots(observation: dict, max_slots: int = MAX_SLOTS) -> list[list[tuple[int, int]]]:
-    """Burning-cell clusters (8-connected), largest first, at most ``max_slots``."""
+    """Fire-front clusters, largest first, at most ``max_slots`` (D-67).
+
+    Cells reached by fire (burning or burned) are grouped 8-connectedly; each
+    group's slot is its front: the member cells 4-adjacent to an attackable
+    candidate cell. Groups without an attackable border are dropped. Slots are
+    ordered by front length, ties by centroid row then column.
+    """
     cells = observation["fire"]["cells"]
-    burning = {(r, c) for r, line in enumerate(cells) for c, cell in enumerate(line)
-               if isinstance(cell, dict) and cell.get("fire_state") == "burning"}
+    reached = {(r, c) for r, line in enumerate(cells) for c, cell in enumerate(line)
+               if isinstance(cell, dict) and cell.get("fire_detected") is True}
+    attackable = {tuple(cand) for cand in candidate_cells(observation)}
     seen: set[tuple[int, int]] = set()
-    clusters = []
-    for start in sorted(burning):
+    fronts = []
+    for start in sorted(reached):
         if start in seen:
             continue
-        stack, cluster = [start], []
+        stack, group = [start], []
         seen.add(start)
         while stack:
             r, c = stack.pop()
-            cluster.append((r, c))
+            group.append((r, c))
             for dr in (-1, 0, 1):
                 for dc in (-1, 0, 1):
                     nxt = (r + dr, c + dc)
-                    if nxt in burning and nxt not in seen:
+                    if nxt in reached and nxt not in seen:
                         seen.add(nxt)
                         stack.append(nxt)
-        clusters.append(sorted(cluster))
+        front = sorted(cell for cell in group
+                       if any((cell[0] + dr, cell[1] + dc) in attackable for dr, dc in _FOUR))
+        if front:
+            fronts.append(front)
 
-    def key(cluster: list[tuple[int, int]]) -> tuple:
-        return (-len(cluster), sum(r for r, _ in cluster) / len(cluster), sum(c for _, c in cluster) / len(cluster))
+    def key(front: list[tuple[int, int]]) -> tuple:
+        return (-len(front), sum(r for r, _ in front) / len(front), sum(c for _, c in front) / len(front))
 
-    return sorted(clusters, key=key)[:max_slots]
+    return sorted(fronts, key=key)[:max_slots]
 
 
 def slot_masks(observation: dict, max_slots: int = MAX_SLOTS) -> list[list[list[float]]]:
-    """[max_slots][rows][cols] 1.0 on the burning cells of each slot (zeros if absent)."""
+    """[max_slots][rows][cols] 1.0 on the front cells of each slot (zeros if absent)."""
     cells = observation["fire"]["cells"]
     rows, cols = len(cells), len(cells[0])
     masks = [[[0.0] * cols for _ in range(rows)] for _ in range(max_slots)]
