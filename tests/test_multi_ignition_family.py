@@ -89,7 +89,11 @@ class MultiIgnitionFamilyTests(unittest.TestCase):
         self.assertEqual(statuses, {"realtime_synthetic_interval"})
         winds = {tuple(d["observation"]["midflame_wind_to_m_s"]) for d in replay["decisions"]}
         self.assertGreater(len(winds), 1)
-        self.assertGreater(replay["outcomes"]["final_burned_ha"], replay["outcomes"]["initial_burned_ha"])
+        # One-cell foci (D-74) in slow litter fuels need longer than the horizon to cross a
+        # 100 m cell; check spread in uniform grass.
+        child["fire"]["fuel_grid"] = [[102] * 40 for _ in range(40)]
+        spread = run_geographic_integrated(child, "no_intervention")
+        self.assertGreater(spread["outcomes"]["final_burned_ha"], spread["outcomes"]["initial_burned_ha"])
 
     def test_station_forcing_parents_keep_measured_weather(self):
         parent = parent_scenario()

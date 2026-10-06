@@ -70,6 +70,12 @@ Exact local export hashes, sampling conventions and diagnostic limits are in [PI
 - [CEMS Rapid Mapping public activations API](https://rapidmapping.emergency.copernicus.eu/backend/dashboard-api/public-activations/?code=EMSR921): products from 2023 on; their DEL packages (e.g. EMSR921 AOI01) contain areaOfInterestA, observedEventA and imageFootprintA but no naturalLandUseA or hydrography, so they cannot be built with the CEMS land-use fuel path.
 - [OpenStreetMap Overpass API](https://overpass-api.de/): `natural=water` and `landuse=reservoir` within 30 km of each tactical window, screened with the D-70 CL-415 thresholds; data © OpenStreetMap contributors, ODbL.
 
+### CL-415 drop effect and moisture scenarios, consulted 2026-10-06
+
+- McFayden, C. B. et al. (2023). [*Reference Guide to the Drop Effectiveness of Skimmer and Rotary Wing Airtankers*](https://publications.gc.ca/collections/collection_2023/rncan-nrcan/Fo123-2-35-2023-eng.pdf). Natural Resources Canada. Table 7-1 (CL-415 blended speed 158 KIAS, 3.0 min increment per cycle), Table 8-2 and A7 (effective drop dimensions by fire intensity), Table 8-3 and A8.5 (drops needed to hold 100 m of line in open grass O-1a: one up to 1,000 kW/m, three up to 3,200 kW/m, breaching above). Used for D-74.
+- Scott, J. H., Burgan, R. E. (2005). [*Standard Fire Behavior Fuel Models: A Comprehensive Set for Use with Rothermel's Surface Fire Spread Model*](https://research.fs.usda.gov/download/treesearch/9521.pdf). USDA Forest Service RMRS-GTR-153, tables 3 and 4: dead (D1–D4) and live (L1–L4) fuel moisture scenarios, the D-74 ensemble.
+- [Feux de forêt, Canadair CL-415](https://feuxdeforet.fr/en/moyens-de-lutte/avions/canadair-cl-415/): 290 km/h cruise, about 12 s and 410 m to scoop, rotation under 8 min in French doctrine; consistent with the simulated cycle.
+
 ### Rapid Mapping incidents and CORINE fuel, consulted 2026-10-06
 
 - [CEMS Rapid Mapping public activations API](https://rapidmapping.emergency.copernicus.eu/backend/dashboard-api/public-activations/?code=EMSR921): AOIs, DEL product versions, delivery times and download paths for activations from 2023 on (D-75).

@@ -5,6 +5,7 @@ import unittest
 
 from nightjar.environment import SCHEMA_VERSION as ENVIRONMENT_SCHEMA_VERSION
 from nightjar.geographic_family import (
+    MOISTURE_ENSEMBLES,
     build_synthetic_cems_fixture,
     generate_geographic_scenario,
 )
@@ -25,6 +26,44 @@ def growing_fire_scenario(horizon_s=3600.0):
     return scenario
 
 
+def with_weather(scenario, moisture, wind_to_m_s):
+    """Uniform moisture and wind for the whole episode."""
+    out = deepcopy(scenario)
+    out["fire"]["moisture"] = dict(zip(("dead_1h", "dead_10h", "dead_100h", "dead_herbaceous", "live_herbaceous",
+                                        "live_woody"), moisture))
+    out["fire"]["wind_to_m_s"] = list(wind_to_m_s)
+    out.pop("environment", None)
+    return out
+
+
+class TestDropEffect(unittest.TestCase):
+    """D-74: one treated cell per drop, holding only fronts up to the single-drop intensity limit."""
+
+    def treated_cells_reached(self, replay):
+        arrival = replay["arrival_time_s"]
+        treated = [cell for drop in replay["drops"] for cell in drop["treated_cells"]]
+        return treated, [cell for cell in treated if arrival[cell[0]][cell[1]] is not None]
+
+    def test_each_drop_treats_at_most_the_target_cell(self):
+        replay = run_geographic_integrated(growing_fire_scenario(), policy="heuristic")
+        self.assertTrue(replay["drops"])
+        self.assertTrue(all(drop["treated_cells_count"] <= 1 for drop in replay["drops"]))
+
+    def test_low_intensity_front_is_held_by_a_treated_cell(self):
+        # GR2 at 8% dead moisture and 1 m/s midflame wind: head fire about 160 kW/m.
+        scenario = with_weather(growing_fire_scenario(), (0.08, 0.09, 0.10, 0.08, 0.6, 0.9), (0.7, 0.7))
+        treated, reached = self.treated_cells_reached(run_geographic_integrated(scenario, policy="heuristic"))
+        self.assertTrue(treated)
+        self.assertEqual(reached, [])
+
+    def test_intense_front_breaches_a_treated_cell(self):
+        # GR2 at 3% dead moisture and 4 m/s midflame wind: head fire about 2,500 kW/m.
+        scenario = with_weather(growing_fire_scenario(), (0.03, 0.04, 0.05, 0.03, 0.3, 0.6), (2.83, 2.83))
+        treated, reached = self.treated_cells_reached(run_geographic_integrated(scenario, policy="heuristic"))
+        self.assertTrue(treated)
+        self.assertTrue(reached)
+
+
 class TestGeographicIntegrated(unittest.TestCase):
     def setUp(self):
         fixture = build_synthetic_cems_fixture("EMSR578", utm_zone=31, rows=40, cols=40)
@@ -36,6 +75,8 @@ class TestGeographicIntegrated(unittest.TestCase):
             window_cols=30,
             horizon_s=1800.0,
         )
+        # Very low moisture (D1L1) so the fire spreads whichever ensemble member was drawn.
+        self.scenario["fire"]["moisture"] = dict(MOISTURE_ENSEMBLES[0])
 
     def test_no_intervention_spreads_without_aircraft_activity(self):
         res = run_geographic_integrated(self.scenario, policy="no_intervention")

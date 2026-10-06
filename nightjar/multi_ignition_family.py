@@ -6,7 +6,7 @@ tactical policy can only learn one good default (D-59). This family keeps each
 parent's map, terrain, water, aircraft and imagery grid and changes the
 problem the controller faces:
 
-- 2-4 simultaneous foci (3x3 or 5x5 cells, burnable cells only), sampled
+- 2-4 simultaneous foci of one cell each (D-74; 3x3 or 5x5 cells in 0.1), sampled
   inside the CEMS mapped burned area at least ``MIN_SEPARATION_CELLS`` apart,
   so the aircraft must choose which fire to attack;
 - wind that shifts every ``WIND_SEGMENT_S``: direction follows a random walk
@@ -39,7 +39,7 @@ from .ignition_family import SPLITS, ignition_candidates
 
 SCHEMA_VERSION = "nightjar-geographic-multi-ignition-family-0.2"
 FOCI_RANGE = (2, 4)
-FOCUS_RADII_CELLS = (1, 2)
+FOCUS_RADII_CELLS = (0,)  # one 1 ha cell per focus (D-74): initial attack on a small fire
 MIN_SEPARATION_CELLS = 6
 WIND_SEGMENT_S = 900.0
 DIRECTION_STEP_DEG = 45.0

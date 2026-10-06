@@ -37,6 +37,15 @@ DEFAULT_DROP_SPEED_M_S = 55.0     # ~107 KIAS
 DEFAULT_REFILL_SERVICE_S = 180.0  # 3 min approach, scoop, climbout
 DEFAULT_CAPACITY_L = 6137
 
+# CL-415 water drop effect (D-74). One drop treats the target cell: an effective
+# CL-415 drop holds about 100 m of line (McFayden et al. 2023, Table 8-3 and
+# A8.5), one cell edge. A treated cell stops a front only if the fireline
+# intensity of the spread reaching it is at most the single-drop limit for the
+# open grass fuel type (A8.5 O-1a: one drop holds 100 m up to 1,000 kW/m; three
+# stacked drops are needed up to 3,200 kW/m and stronger fronts breach). Stacking
+# is not represented, since a treated cell is never a target again.
+DROP_HOLD_MAX_INTENSITY_KW_M = 1000.0
+
 
 POLICIES = ("no_intervention", "random_valid", "heuristic", "containment_heuristic")
 
@@ -195,20 +204,33 @@ def geographic_episode(
     # retrospective weather series is simulator state, never policy input.
     rate_cache: dict[tuple, float] = {}
 
-    def spread_rate(r: int, c: int, dr: int, dc: int, index: int = 0) -> float:
+    intensity_cache: dict[tuple, float] = {}
+
+    def directional_behavior(r: int, c: int, dr: int, dc: int, index: int) -> None:
         key = (index, r, c, dr, dc)
-        if key in rate_cache:
-            return rate_cache[key]
         behavior = behaviors(index)[r][c]
         if behavior is None:
-            return 0.0
+            rate_cache[key], intensity_cache[key] = 0.0, 0.0
+            return
         gx, gy = gradients[r][c]
         norm = hypot(dc, dr, gx * dc + gy * dr)
         direction = (dc / norm, dr / norm, (gx * dc + gy * dr) / norm)
         res = surface_fire.calc_surface_fire_behavior_in_direction(behavior, direction)
-        rate = max(0.001, float(res["spread_rate"]) / 60.0)
-        rate_cache[key] = rate
-        return rate
+        rate_cache[key] = max(0.001, float(res["spread_rate"]) / 60.0)
+        intensity_cache[key] = float(res["fireline_intensity"])
+
+    def spread_rate(r: int, c: int, dr: int, dc: int, index: int = 0) -> float:
+        key = (index, r, c, dr, dc)
+        if key not in rate_cache:
+            directional_behavior(r, c, dr, dc, index)
+        return rate_cache[key]
+
+    def fireline_intensity(r: int, c: int, dr: int, dc: int, index: int = 0) -> float:
+        """Fireline intensity (kW/m) of spread leaving (r, c) towards (dr, dc)."""
+        key = (index, r, c, dr, dc)
+        if key not in intensity_cache:
+            directional_behavior(r, c, dr, dc, index)
+        return intensity_cache[key]
 
     def segment_index(time_s: float) -> int:
         for index, segment in enumerate(physical_segments):
@@ -286,7 +308,7 @@ def geographic_episode(
     barrier = [[False] * cols for _ in range(rows)]
     barrier_time: dict[tuple[int, int], float] = {}
     best = [[float("inf")] * cols for _ in range(rows)]
-    queue: list[tuple[float, int, int]] = []
+    queue: list[tuple[float, int, int, int, int]] = []  # (time, row, col, source row, source col)
 
     # Initialize queue with initial burn perimeters
     initial_burned_count = 0
@@ -298,7 +320,7 @@ def geographic_episode(
                 best[r][c] = 0.0
                 initial_burned_count += 1
                 if is_burnable(r, c):
-                    heappush(queue, (0.0, r, c))
+                    heappush(queue, (0.0, r, c, -1, -1))
 
     def linked(r: int, c: int, dr: int, dc: int) -> bool:
         """Fuel allows spread from (r, c) to its neighbour (dr, dc); diagonals need both orthogonal cells."""
@@ -308,14 +330,56 @@ def geographic_episode(
         """Cells whose water barrier stops spread along this edge: the target and, for diagonals, both orthogonals."""
         return ((r + dr, c + dc), (r + dr, c), (r, c + dc)) if dr and dc else ((r + dr, c + dc),)
 
+    def edge_held(r: int, c: int, dr: int, dc: int) -> bool:
+        """A water barrier on this edge stops the front leaving the reached cell (r, c) (D-74).
+
+        The front's intensity is taken in the forcing interval in which (r, c)
+        was reached, so whether an edge holds never depends on later forcing.
+        """
+        if not any(barrier[br][bc] for br, bc in blockers(r, c, dr, dc)):
+            return False
+        index = segment_index(arrival[r][c] or 0.0)
+        return fireline_intensity(r, c, dr, dc, index) <= DROP_HOLD_MAX_INTENSITY_KW_M
+
     def can_spread(r: int, c: int, dr: int, dc: int) -> bool:
-        return linked(r, c, dr, dc) and not any(barrier[br][bc] for br, bc in blockers(r, c, dr, dc))
+        return linked(r, c, dr, dc) and not edge_held(r, c, dr, dc)
+
+    def relax(r: int, c: int, dr: int, dc: int) -> None:
+        """Queue the arrival at (r + dr, c + dc) through the edge from reached cell (r, c)."""
+        nr, nc = r + dr, c + dc
+        cur_time = arrival[r][c]
+        dist = hypot(dc * cell_size, dr * cell_size)
+        if forcing:
+            def speed_at(index: int) -> float:
+                source = spread_rate(r, c, dr, dc, index)
+                target = spread_rate(nr, nc, dr, dc, index)
+                return 2.0 / (1.0/source + 1.0/target) if source > 0 and target > 0 else 0.0
+            candidate_time = edge_arrival(cur_time, dist, forcing, speed_at)
+        else:
+            r_source = spread_rate(r, c, dr, dc)
+            r_target = spread_rate(nr, nc, dr, dc)
+            if r_source <= 0.0 or r_target <= 0.0:
+                return
+            candidate_time = cur_time + dist/(2.0*r_source) + dist/(2.0*r_target)
+        if candidate_time < best[nr][nc]:
+            best[nr][nc] = candidate_time
+            heappush(queue, (candidate_time, nr, nc, r, c))
 
     def advance_fire(until_s: float) -> None:
         """Advance physical Rothermel fire propagation up to until_s."""
         while queue and queue[0][0] <= until_s + 1e-9:
-            cur_time, r, c = heappop(queue)
-            if cur_time != best[r][c] or barrier[r][c] or not is_burnable(r, c):
+            cur_time, r, c, sr, sc = heappop(queue)
+            if cur_time != best[r][c] or not is_burnable(r, c):
+                continue
+            if sr >= 0 and edge_held(sr, sc, r - sr, c - sc):
+                # A drop made after this arrival was queued holds that front;
+                # the cell can still be reached through an edge that breaches.
+                best[r][c] = float("inf")
+                for dr, dc in NEIGHBORS:
+                    pr, pc = r - dr, c - dc
+                    if (0 <= pr < rows and 0 <= pc < cols and arrival[pr][pc] is not None
+                            and linked(pr, pc, dr, dc) and not edge_held(pr, pc, dr, dc)):
+                        relax(pr, pc, dr, dc)
                 continue
             arrival[r][c] = cur_time
             if init_mask[r][c] and cur_time == 0.0:
@@ -329,39 +393,18 @@ def geographic_episode(
                 burnout[r][c] = cur_time + burning_duration_s(r, c, cur_time)
 
             for dr, dc in NEIGHBORS:
-                nr, nc = r + dr, c + dc
-                if not can_spread(r, c, dr, dc):
-                    continue
-
-                dist = hypot(dc * cell_size, dr * cell_size)
-                if forcing:
-                    def speed_at(index: int) -> float:
-                        source = spread_rate(r, c, dr, dc, index)
-                        target = spread_rate(nr, nc, dr, dc, index)
-                        return 2.0 / (1.0/source + 1.0/target) if source > 0 and target > 0 else 0.0
-                    candidate_time = edge_arrival(cur_time, dist, forcing, speed_at)
-                else:
-                    r_source = spread_rate(r, c, dr, dc)
-                    r_target = spread_rate(nr, nc, dr, dc)
-                    if r_source <= 0.0 or r_target <= 0.0:
-                        continue
-                    edge_dt = dist/(2.0*r_source) + dist/(2.0*r_target)
-                    candidate_time = cur_time + edge_dt
-
-                if candidate_time < best[nr][nc]:
-                    best[nr][nc] = candidate_time
-                    heappush(queue, (candidate_time, nr, nc))
+                if can_spread(r, c, dr, dc) and arrival[r + dr][c + dc] is None:
+                    relax(r, c, dr, dc)
 
     # Water drop execution on physical landscape
     drops_log: list[dict[str, Any]] = []
 
     def apply_water_drop(drop_time: float, target_x_m: float, target_y_m: float, aircraft_index: int) -> list[list[int]]:
-        """Apply water drop to cell and immediate neighborhood, establishing a physical barrier."""
+        """Treat the target cell with one CL-415 drop; it holds fronts up to the D-74 intensity limit."""
         target_c = int(round(target_x_m / cell_size))
         target_r = int(round(target_y_m / cell_size))
         treated = []
-        # Target cell plus 4-neighbors within drop footprint
-        drop_footprint = [(0, 0), (-1, 0), (1, 0), (0, -1), (0, 1)]
+        drop_footprint = [(0, 0)]
         for dr, dc in drop_footprint:
             nr, nc = target_r + dr, target_c + dc
             if 0 <= nr < rows and 0 <= nc < cols:
@@ -727,7 +770,8 @@ def geographic_episode(
                         continue
                     nr, nc = r + dr, c + dc
                     closed = min([arrival[nr][nc] if arrival[nr][nc] is not None else float("inf")]
-                                 + [barrier_time.get(cell, float("inf")) for cell in blockers(r, c, dr, dc)])
+                                 + ([barrier_time.get(cell, float("inf")) for cell in blockers(r, c, dr, dc)]
+                                    if edge_held(r, c, dr, dc) else []))
                     if closed > arrival[r][c]:
                         end = max(end, min(closed, end_s))
                 line.append(round(end, 6))

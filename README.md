@@ -195,6 +195,8 @@ D-73 adds fourteen more Spanish delineation products to development (EMSR365, EM
 .venv/bin/python -m nightjar.imagery_acquire runs/geographic-multi-ignition-family-d71-20261006 runs/geographic-imagery-s2-d71-new-20261006 --activations EMSR365 ...
 ```
 
+D-74 changes the physics and the scenario mix: a drop treats one cell that holds only fronts up to 1,000 kW/m, fuel moisture follows the Scott and Burgan D1L1–D4L4 scenarios and multi-focus ignitions are single cells (family 0.2). Regenerate the chain above (same terrain and imagery) into `runs/geographic-family-d72-20261006`, `runs/geographic-environment-family-d72-20261006` and `runs/geographic-multi-ignition-family-d72-20261006`; results from earlier families are not comparable.
+
 D-75 adds 22 Rapid Mapping incidents (2023–2026) whose fuel comes from CORINE 2018. For each, fetch the package and the pinned land-cover extract, then regenerate the chain (terrain and imagery only for the new incidents, `--activations`):
 
 ```sh
