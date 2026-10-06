@@ -26,7 +26,7 @@ import numpy as np
 
 from .environment import MOISTURE_KEYS
 from .geographic_integrated import DEFAULT_CAPACITY_L
-from .imagery_composite import compose_view, thermal_view
+from .imagery_composite import compose_view, state_masks, thermal_view
 from .parametric_actions import MAX_SLOTS, slot_masks
 
 # Fuel families from Scott & Burgan (2005) code ranges and Anderson (1982) 1-13.
@@ -182,15 +182,31 @@ class GeographicInputTensorizer:
     def extract(self, observation: dict) -> tuple[np.ndarray, ...]:
         """Return (rgb [3, H*px, W*px], cells [C, H, W], vector [V]) as float32 arrays,
         or (cells, vector) when there is no base image (explicit-fire ablation)."""
+        return self._extract_arrays(observation, byte_image=False)
+
+    def extract_arrays(self, observation: dict) -> tuple[np.ndarray, ...]:
+        """Return NumPy policy arrays ready for tensor conversion.
+
+        Image channels remain exact uint8 RGB (and thermal, when enabled);
+        cells and vector are float32. Shapes match ``extract`` without batching.
+        """
+        return self._extract_arrays(observation, byte_image=True)
+
+    def _extract_arrays(self, observation: dict, *, byte_image: bool) -> tuple[np.ndarray, ...]:
+        """Build policy arrays, optionally retaining image channels as exact bytes."""
         if observation.get("observation_mode") != "realtime":
             raise ValueError("image inputs require real-time observations (D-49)")
         rgb = None
         if self.base_image is not None:
-            view = compose_view(self.base_image, observation, self.px_per_cell)
-            rgb = np.moveaxis(view, -1, 0).astype(np.float32) / 255.0
+            masks = state_masks(observation) if self.include_thermal else None
+            view = compose_view(self.base_image, observation, self.px_per_cell, masks=masks)
+            rgb = np.moveaxis(view, -1, 0)
             if self.include_thermal:
-                heat = thermal_view(observation, self.px_per_cell, self.cell_size_m)
-                rgb = np.concatenate([rgb, np.rint(heat * 255.0)[None] / 255.0]).astype(np.float32)
+                heat = thermal_view(observation, self.px_per_cell, self.cell_size_m, masks=masks)
+                thermal_bytes = np.rint(heat * 255.0).astype(np.uint8)
+                rgb = np.concatenate([rgb, thermal_bytes[None]])
+            if not byte_image:
+                rgb = rgb.astype(np.float32) / 255.0
 
         treated = np.zeros((self.rows, self.cols), dtype=np.float32)
         for r, c in observation.get("known_treated_cells", []):
@@ -266,7 +282,5 @@ class GeographicInputTensorizer:
         """
         import torch
 
-        arrays = list(self.extract(observation))
-        if self.base_image is not None:
-            arrays[0] = np.rint(arrays[0] * 255.0).astype(np.uint8)
+        arrays = self.extract_arrays(observation)
         return tuple(torch.from_numpy(a).unsqueeze(0).to(device) for a in arrays)
