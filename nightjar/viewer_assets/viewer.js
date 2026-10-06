@@ -676,6 +676,7 @@
       ['Escenario', m.name || r.scenario_id || '—', `Partición: ${splitNames[m.split] || m.split || '—'} · Semilla: ${m.seed ?? '—'}`],
       ['Relieve', terrain.label || 'Sin capa de elevación', terrainSummary(terrain)],
       ['Modelo de política', training.label || policyLabel(r), trainingSummary(training, m)],
+      ...(training.checkpoint_name ? [['Checkpoint', training.checkpoint_name, `Fold ${training.fold || '—'} · SHA-256 ${(training.checkpoint_sha256 || '').slice(0, 12)}`]] : []),
       ...(training.checkpoint_report_binding ? [['Procedencia del modelo', training.checkpoint_report_binding === 'verified' ? 'Pesos e informe vinculados por hash' : 'Asociación legacy indicada al cargar', (training.warnings || []).join(' ')]] : []),
       ['Ejecución', policyLabel(r), `${fmt(r.horizon_s, 0)} s · ${m.seed == null ? 'semilla —' : `semilla ${m.seed}`}`],
       ['Supuestos', typeof m.assumptions === 'string' ? m.assumptions : 'Consulta el detalle técnico', `Versión de esquema: ${r.schema_version || m.schema_version || '—'}`]

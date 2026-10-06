@@ -453,3 +453,12 @@ Same configuration as the run above, seed 42, three folds run concurrently (3 ro
 | EMSR625_AOI01 | 109.25 | 82.67 | 71.19 | 70.75 | **67.44** | −3.31 ha (−4.7%) | 18 / 5 / 9 |
 
 On all three unseen incidents the selected policy burns less than both heuristics on average and wins more scenarios than it loses. This is one seed per fold and three folds of six development incidents, so it is evidence of generalisation within this simulator and scenario family, not a validated operational result; the predeclared criteria in this document and the reserved split remain the reference for any formal claim.
+
+
+On 2026-10-06 the corrected fold workspace was checked against D-71's archived
+reports using each fold's first held-out development case, its matching `.pt`,
+D-71 imagery and explicit forced-step skipping. This checks artifact selection
+and execution; it is not a new pooled evaluation. The earlier preview's D-70
+EMSR583 checkpoint must not be used to characterize D-71 results. Regenerated
+refill metrics count completed services and actual travel within the episode;
+this correction changes those audit metrics, not the trained weights.

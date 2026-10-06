@@ -135,3 +135,34 @@ variation. Neither interval closes the physical-validation gate.
   remain unbound. A development-only preview and catalog are generated under
   ignored `runs/research-workspace-review/`; no training campaign or reserved
   evaluation was run.
+
+
+## Fold workspace correction (2026-10-06)
+
+The earlier preview used D-70 `EMSR583.pt`, not the six D-71 checkpoints.
+`workspace --folds-dir` loads each completed selection report's same-stem `.pt`
+and selects that report's held-out development cases. The training family and
+held-out scenario hashes are checked after the fleet override; validation and
+reserved scenarios are not run. It rejects missing weights, unmatched held-out
+cases and incompatible family content. `--episodes` applies per fold. Checkpoint
+name, fold and weights hash appear in the viewer and each PPO replay's metadata.
+Archived reports remain marked legacy; their original association is not
+retroactively certified. For D-71 use `--skip-forced`, as recorded in `run.sh`.
+
+The D-71 registered catalog entries are carried forward from the training
+commit `79d5a7b` so its twenty development areas pass source/partition checks.
+This adds no new acquisitions and preserves the original package hashes.
+Refill arrivals and service intervals are separate track events. Missions still
+in progress at the horizon retain their actual position and water; completion
+is not moved earlier to the episode boundary. The policy still chooses HOLD
+when its trained action distribution prefers waiting.
+
+
+Verification after correction: `OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 python3 -m
+unittest discover -s tests -v` passed 339 tests with four optional-data skips.
+`NIGHTJAR_PYTHON=... node tests/viewer_browser.cjs` passed with Chromium 151;
+the generated D-71 viewer also showed the correct checkpoint, two aircraft and
+no page errors. All six first-case PPO areas matched the archived fold rows
+(201, 74, 61, 68, 27, 215 ha); all 24 replay tracks ended within the horizon.
+The first D-71 EMSR578 case executes 17 drops, compared with four in the older
+D-70 preview. These are matched-input checks, not a claim of winning every case.

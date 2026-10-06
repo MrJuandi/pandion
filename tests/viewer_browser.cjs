@@ -6,6 +6,19 @@ const os = require('node:os');
 const path = require('node:path');
 const {pathToFileURL} = require('node:url');
 const assert = require('node:assert/strict');
+const Fleet = require('../nightjar/viewer_assets/fleet.js');
+
+// A refill service waypoint must keep positionAt fixed at the water source.
+assert.deepEqual(Fleet.positionAt([
+  {t: 0, p: [0, 0]}, {t: 60, p: [600, 0]}, {t: 240, p: [600, 0]},
+], 150), [600, 0]);
+const refillReplay = {aircraft_initial_state: [{index: 0, position_m: [0, 0], water_l: 0, capacity_l: 6137}],
+  aircraft_track: [{time_s: 0, position_m: [0, 0]}, {time_s: 60, position_m: [600, 0]}, {time_s: 100, position_m: [600, 0]}],
+  decisions: [{time_s: 240, decision_time_s: 0, completed_at_s: 240, aircraft_water_l: 6137,
+    order: {type: 'RETURN_TO_REFILL'}}]};
+const refillAtHorizon = Fleet.at(Fleet.derive(refillReplay)[0], 100);
+assert.equal(refillAtHorizon.water, 0);
+assert.equal(refillAtHorizon.phase, 'Hacia recarga / recargando');
 
 // Advance the render loop deterministically (camera transitions, damping) and return a snapshot.
 const settle = (page) => page.evaluate(() => {

@@ -15,7 +15,7 @@ from nightjar.geographic_ppo import HAS_TORCH, _dataset_report, build_policy_mod
 from nightjar.identity import audit_independence, content_hash, partition_holdout, scenario_entry
 from nightjar.multi_ignition_family import derive_scenario
 from nightjar.policy_artifact import load_policy_artifact, write_report
-from nightjar.workspace import policy_replay
+from nightjar.workspace import policy_replay, build_fold_workspace
 
 
 def scenario(rows=12, horizon=180):
@@ -134,6 +134,62 @@ class PolicyArtifactTests(unittest.TestCase):
             checkpoint.unlink()
             experiment = next(e for e in scan_catalog([root])["entries"] if e["kind"] == "experiment")
             self.assertEqual(experiment["binding"], "missing_checkpoint")
+
+
+class FoldWorkspaceTests(unittest.TestCase):
+    def _fixture(self, root):
+        family = root / "family"; family.mkdir()
+        (family / "manifest.json").write_text("{}")
+        folds = root / "D-71"; folds.mkdir()
+        cases = []
+        for fold in ("EMSR578", "EMSR583"):
+            case = scenario(horizon=60)
+            case.update(scenario_id=fold + "-case", activation_id=fold, name=fold)
+            case["scenario_hash"] = canonical_hash(case)
+            cases.append(case)
+            (folds / (fold + ".pt")).write_bytes(fold.encode())
+            report = {"schema_version": "nightjar-geographic-ppo-selection-0.1",
+                      "holdout_activation": fold, "fleet_size": 2,
+                      "holdout": {"rows": [{"scenario_id": case["scenario_id"]}]},
+                      "dataset": {"splits": {"holdout": [{"scenario_id": case["scenario_id"],
+                                  "scenario_hash": with_fleet([case], 2)[0]["scenario_hash"]}]}}}
+            (folds / (fold + ".json")).write_text(json.dumps(report))
+        return family, folds, cases
+
+    def test_each_case_uses_its_fold_checkpoint_and_matched_baseline(self):
+        from nightjar.geographic_integrated import run_geographic_integrated
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp); family, folds, cases = self._fixture(root)
+            def load(checkpoint, report, scenarios, **options):
+                self.assertEqual(checkpoint.stem, report.stem)
+                return checkpoint.stem, {"inference": {"fleet_size": 2}}
+            def replay(model, case):
+                self.assertEqual(model, case["activation_id"])
+                result = run_geographic_integrated(with_fleet([case], 2)[0], "no_intervention")
+                result["policy"] = "PPO geográfico"
+                return result
+            with patch("nightjar.workspace.load_geographic_split", return_value=cases), \
+                 patch("nightjar.workspace.load_policy", side_effect=load) as loader, \
+                 patch("nightjar.workspace.policy_replay", side_effect=replay):
+                manifest = build_fold_workspace(family, folds, root / "out", episodes=1, skip_forced=True)
+            self.assertEqual(loader.call_count, 2)
+            self.assertEqual(manifest["replay_count"], 8)
+            self.assertEqual(manifest["episode_splits"], ["development"])
+            self.assertEqual([t["checkpoint_name"] for t in manifest["training_runs"]], ["EMSR578.pt", "EMSR583.pt"])
+            replays = [json.loads(p.read_text()) for p in (root / "out").glob("EMSR*.json")]
+            self.assertTrue(all(len(r["aircraft_initial_state"]) == 2 for r in replays))
+
+    def test_mismatched_holdout_is_rejected_before_loading_weights(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp); family, folds, cases = self._fixture(root)
+            report = folds / "EMSR578.json"; value = json.loads(report.read_text())
+            value["dataset"]["splits"]["holdout"][0]["scenario_hash"] = "wrong"
+            report.write_text(json.dumps(value))
+            with patch("nightjar.workspace.load_geographic_split", return_value=cases), \
+                 patch("nightjar.workspace.load_policy") as loader:
+                with self.assertRaisesRegex(ValueError, "hash mismatch"):
+                    build_fold_workspace(family, folds, root / "out")
+                loader.assert_not_called()
 
 
 if __name__ == "__main__":

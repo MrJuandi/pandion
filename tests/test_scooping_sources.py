@@ -23,7 +23,8 @@ from nightjar.geographic_family import (
 
 ZONE = 30
 # Incidents whose CEMS hydrography already contains an eligible body (D-70).
-CEMS_SCOOPING_SOURCE = {"EMSR592", "EMSR600", "EMSR583", "EMSR625_AOI02", "EMSR602_AOI04"}
+CEMS_SCOOPING_SOURCE = {"EMSR592", "EMSR600", "EMSR583", "EMSR625_AOI02", "EMSR602_AOI04", "EMSR365", "EMSR457",
+                        "EMSR522", "EMSR545", "EMSR581", "EMSR599_AOI01", "EMSR599_AOI02", "EMSR632"}
 SOURCE_FIELDS = {"name", "utm_easting_m", "utm_northing_m", "area_ha", "extent_m", "shore_clearance_m",
                  "source", "reference"}
 X0, Y0 = 500000.0, 4400000.0

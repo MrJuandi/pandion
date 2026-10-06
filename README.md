@@ -299,3 +299,19 @@ Nightjar is a research environment. Early scenarios will use a mixture of observ
 ## License and citation
 
 The project license, data redistribution rules, and citation metadata will be chosen by the project owner before public release. Until then, no license is asserted for this new project or for materials in the earlier FireLab-RL prototype.
+
+
+To inspect completed leave-one-incident-out folds with their own checkpoints,
+use `--folds-dir` instead of a single `--checkpoint`. This selects held-out
+cases from the development family and shows the fold/checkpoint in the viewer:
+
+```sh
+python3 -m nightjar.workspace --scenarios-dir runs/geographic-multi-ignition-family-d71-20261006 --folds-dir runs/geographic-holdout-folds-d71-20261006 --output-dir runs/workspace-d71 --episodes 1 --skip-forced
+```
+
+`--episodes` is per fold. D-71's archived reports omitted `skip_forced`; the
+explicit flag reproduces their recorded launch configuration. Existing output
+directories are never overwritten. Water sources can lie outside the tactical
+map; aircraft remain at the source when the policy issues HOLD after refilling.
+Refill tracks distinguish arrival from service, and unfinished missions at the
+episode horizon do not teleport or complete a refill.

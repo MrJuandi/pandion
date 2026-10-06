@@ -58,7 +58,7 @@
       if (length > 1e-6 && (a.t <= time || i === 1)) heading = delta.map(v => v / length);
       if (a.t <= time && b.t >= time) break;
     }
-    const issued = unit.decisions.filter(d => Number(d.time_s) <= time).at(-1);
+    const issued = unit.decisions.filter(d => Number(d.decision_time_s ?? d.time_s) <= time).at(-1);
     const completed = unit.decisions.filter(d => Number(d.completed_at_s ?? d.time_s) <= time).at(-1);
     const active = issued && time < Number(issued.completed_at_s ?? issued.time_s);
     const type = issued && orderType(issued);

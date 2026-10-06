@@ -91,3 +91,10 @@ The offline workspace reuses the existing source-audited 24-case family (four in
 An optional terrain artifact must pass the existing pilot scenario hash, CRS, shape, orientation, timestamp, unit and validity checks. EMSR578 tactical windows sample that already aligned DEM by metric offsets; origin rounding differences up to 0.1 m are accepted, while other offsets, CRS/resolution mismatches and out-of-bounds crops fail. This legacy display-overlay path applies no DEM to EMSR590/592/600; the new derived environment family supplies all four incidents with sourced heights. The IGN/CNIG source, raw hash, unknown acquisition epoch and source footprint remain visible in display provenance. This reuse introduces no new geographic source or physical-validation claim; see [PILOT_ENVIRONMENT.md](PILOT_ENVIRONMENT.md) for the acquisition audit.
 
 For PPO/baseline replays the DEM is explicitly a visual overlay on flat-terrain dynamics, never a change to the training dataset or controller inputs. The separate environment family now implements terrain-backed physics and observations; its development experiment is documented in [ENVIRONMENT_INTEGRATION.md](ENVIRONMENT_INTEGRATION.md). The workspace saves scenario hashes, family/terrain/checkpoint/report hashes, UTC creation time, units and CRS inventory under ignored `runs/` paths. The supplied geographic checkpoint/report pair is caller-associated; weights have no embedded provenance, optimizer or random-state identity.
+
+
+The workspace now accepts the D-71 development catalog (twenty areas) using
+the pinned registrations from training commit `79d5a7b`, including the fourteen
+additional development areas and existing OSM refill-source registrations.
+No acquisition was performed for this correction; archived family payloads and
+hashes are checked as stored. Fixed validation/reserved membership is unchanged.

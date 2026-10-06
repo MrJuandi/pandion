@@ -106,3 +106,11 @@ reusing decision numbers already assigned on concurrent branches.
 | O-18 | How should environmental assumptions be calibrated? | Obtain landscape wind/fuel-moisture/active-front evidence, bracket station-to-midflame factors and moisture models, evaluate heterogeneous resolution, and calibrate rain wetting and suppression before operational claims. |
 
 Open questions are tracked here so they are resolved deliberately rather than embedded as undocumented defaults.
+
+
+2026-10-06 workspace correction: a k-fold preview uses the corresponding model
+for each held-out development case, never a single older fold for all cases.
+Checkpoint/fold identity is visible and persisted. Mission completion retains
+its physical event time even when it exceeds the episode horizon; replay tracks
+separate flight arrival from refill service. Archived training artifacts are
+preserved and remain explicitly legacy when their historical binding is absent.
