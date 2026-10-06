@@ -70,6 +70,11 @@ Exact local export hashes, sampling conventions and diagnostic limits are in [PI
 - [CEMS Rapid Mapping public activations API](https://rapidmapping.emergency.copernicus.eu/backend/dashboard-api/public-activations/?code=EMSR921): products from 2023 on; their DEL packages (e.g. EMSR921 AOI01) contain areaOfInterestA, observedEventA and imageFootprintA but no naturalLandUseA or hydrography, so they cannot be built with the CEMS land-use fuel path.
 - [OpenStreetMap Overpass API](https://overpass-api.de/): `natural=water` and `landuse=reservoir` within 30 km of each tactical window, screened with the D-70 CL-415 thresholds; data © OpenStreetMap contributors, ODbL.
 
+### Rapid Mapping incidents and CORINE fuel, consulted 2026-10-06
+
+- [CEMS Rapid Mapping public activations API](https://rapidmapping.emergency.copernicus.eu/backend/dashboard-api/public-activations/?code=EMSR921): AOIs, DEL product versions, delivery times and download paths for activations from 2023 on (D-75).
+- [EEA CORINE Land Cover 2018 vector service](https://image.discomap.eea.europa.eu/arcgis/rest/services/Corine/CLC2018_WM/MapServer/0): `Code_18` polygons queried per incident by `cems_catalog fetch-landcover`; © European Union, Copernicus Land Monitoring Service, European Environment Agency.
+
 ## Research interface references
 
 The 2026-10-01 layout review used the [Fire2a QGIS simulator parameter groups](https://fire2a.github.io/docs/qgis-toolbox/algo_simulator.html) and [IFTDSS Map Studio task separation](https://iftdss.firenet.gov/firenetHelp/help/pageHelp/content/10-mapstudio/mapstudioabout.htm). These sources inform UI workflow choices; they do not validate Nightjar physics or policy outcomes.

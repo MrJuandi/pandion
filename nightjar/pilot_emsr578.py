@@ -294,29 +294,35 @@ def _points_in_polygon(points: np.ndarray, poly_pts: np.ndarray) -> np.ndarray:
     """Vectorized ray-casting point-in-polygon test using NumPy.
 
     Determines if points (N, 2) are inside polygon (M, 2) by testing horizontal
-    ray intersections across all edges.
+    ray intersections across all edges. Points sharing a y coordinate (grid
+    rows) share their edge crossings, so crossings are computed once per
+    distinct y and counted with a sorted search; the comparisons and the
+    crossing formula are those of the per-point test, so results are identical.
     """
     if len(poly_pts) < 3 or len(points) == 0:
         return np.zeros(len(points), dtype=bool)
 
     x = points[:, 0]
-    y = points[:, 1]
+    ys, row_of = np.unique(points[:, 1], return_inverse=True)
     inside = np.zeros(len(points), dtype=bool)
 
-    p1 = poly_pts
+    x1, y1 = poly_pts[:, 0], poly_pts[:, 1]
     p2 = np.roll(poly_pts, -1, axis=0)
-
-    for i in range(len(poly_pts)):
-        x1, y1 = p1[i]
-        x2, y2 = p2[i]
-        cond = (y1 > y) != (y2 > y)
-        if not np.any(cond):
+    x2, y2 = p2[:, 0], p2[:, 1]
+    dy = y2 - y1
+    keep = dy != 0.0
+    x1, y1, x2, y2, dy = x1[keep], y1[keep], x2[keep], y2[keep], dy[keep]
+    order = np.argsort(row_of, kind="stable")
+    bounds = np.searchsorted(row_of[order], np.arange(len(ys) + 1))
+    for k, y in enumerate(ys):
+        crossing = (y1 > y) != (y2 > y)
+        if not np.any(crossing):
             continue
-        dy = y2 - y1
-        if dy == 0.0:
-            continue
-        x_intersect = x1 + (x2 - x1) * (y[cond] - y1) / dy
-        inside[cond] ^= (x[cond] < x_intersect)
+        x_intersect = np.sort(x1[crossing] + (x2[crossing] - x1[crossing]) * (y - y1[crossing]) / dy[crossing])
+        idx = order[bounds[k]:bounds[k + 1]]
+        # Number of crossings strictly right of each point; odd means inside.
+        right = len(x_intersect) - np.searchsorted(x_intersect, x[idx], side="right")
+        inside[idx] = (right % 2) == 1
 
     return inside
 

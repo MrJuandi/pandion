@@ -12,8 +12,17 @@ from nightjar.cems_catalog import (
     UNIVERSAL_CORINE_CROSSWALK,
     build_cems_scenario,
     cems_product_url,
+    landcover_bytes,
+    landcover_filename,
     universal_clc_to_scott_burgan,
 )
+
+RAPID_MAPPING_INCIDENTS = {
+    "EMSR656", "EMSR704", "EMSR719", "EMSR837_AOI03",
+    "EMSR837_AOI05", "EMSR837_AOI06", "EMSR837_AOI07", "EMSR837_AOI08", "EMSR837_AOI14", "EMSR837_AOI15",
+    "EMSR837_AOI16", "EMSR837_AOI17", "EMSR881", "EMSR887", "EMSR888", "EMSR892", "EMSR896", "EMSR898_AOI01",
+    "EMSR900_AOI01", "EMSR900_AOI02", "EMSR900_AOI03", "EMSR913", "EMSR921",
+}
 
 
 class TestCemsCatalog(unittest.TestCase):
@@ -58,7 +67,8 @@ class TestCemsCatalog(unittest.TestCase):
                                                 "EMSR602_AOI02", "EMSR602_AOI04",
                                                 "EMSR365", "EMSR375", "EMSR457", "EMSR458", "EMSR522",
                                                 "EMSR538", "EMSR545", "EMSR581", "EMSR597", "EMSR599_AOI01",
-                                                "EMSR599_AOI02", "EMSR620", "EMSR623", "EMSR632"})
+                                                "EMSR599_AOI02", "EMSR620", "EMSR623", "EMSR632"}
+                         | RAPID_MAPPING_INCIDENTS)
         self.assertEqual(incidents_for_split("validation"), ("EMSR590",))
         self.assertEqual(incidents_for_split("reserved"), ("EMSR592", "EMSR600"))
         self.assertEqual(raw_package_name("EMSR578"), "emsr578_del.zip")
@@ -107,6 +117,45 @@ class TestCemsCatalog(unittest.TestCase):
             with patch.dict(ACTIVATIONS["EMSR590"]["products"]["del"], {"sha256": digest}):
                 with self.assertRaisesRegex(ValueError, "outside registered WGS84 bounds"):
                     build_cems_scenario("EMSR590", zip_path)
+
+    def test_rapid_mapping_package_takes_fuel_and_water_from_a_verified_corine_extract(self):
+        """D-75: packages without naturalLandUseA use the pinned CORINE 2018 extract."""
+        from hashlib import sha256
+        self.assertTrue(cems_product_url("EMSR921").startswith("https://rapidmapping.emergency.copernicus.eu/backend/"))
+        self.assertEqual(landcover_filename("EMSR837_AOI05"), "emsr837-aoi05_clc2018.geojson")
+
+        def polygon(w, s, e, n):
+            return {"type": "Polygon", "coordinates": [[[w, s], [e, s], [e, n], [w, n], [w, s]]]}
+
+        aoi = {"type": "FeatureCollection", "features": [{"type": "Feature", "properties": {},
+                                                         "geometry": polygon(-0.80, 42.40, -0.60, 42.50)}]}
+        burnt = {"type": "FeatureCollection", "features": [{"type": "Feature", "properties": {"area": 300.0},
+                                                           "geometry": polygon(-0.72, 42.43, -0.68, 42.46)}]}
+        land = [{"type": "Feature", "properties": {"OBJECTID": 1, "Code_18": "322"},
+                 "geometry": polygon(-0.80, 42.40, -0.60, 42.50)}]
+        # About 2.5 km by 0.45 km of open water: passes the D-70 scooping screen.
+        water = [{"type": "Feature", "properties": {"OBJECTID": 2, "Code_18": "512"},
+                  "geometry": polygon(-0.58, 42.40, -0.55, 42.404)}]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            zip_path, extract = Path(tmpdir) / "emsr921_del.zip", Path(tmpdir) / landcover_filename("EMSR921")
+            with ZipFile(zip_path, "w") as zf:
+                zf.writestr("EMSR921_AOI01_DEL_PRODUCT_areaOfInterestA_v1.json", json.dumps(aoi))
+                zf.writestr("EMSR921_AOI01_DEL_PRODUCT_observedEventA_v1.json", json.dumps(burnt))
+            extract.write_bytes(landcover_bytes(land, water))
+            hashes = {"sha256": sha256(zip_path.read_bytes()).hexdigest(),
+                      "landcover_sha256": sha256(extract.read_bytes()).hexdigest()}
+            with patch.dict(ACTIVATIONS["EMSR921"]["products"]["del"], hashes):
+                with self.assertRaises(FileNotFoundError):
+                    build_cems_scenario("EMSR921", zip_path, cell_size_m=200.0)
+                scenario = build_cems_scenario("EMSR921", zip_path, cell_size_m=200.0, landcover_path=extract)
+            with patch.dict(ACTIVATIONS["EMSR921"]["products"]["del"], {**hashes, "landcover_sha256": "0" * 64}):
+                with self.assertRaisesRegex(ValueError, "CORINE extract SHA-256"):
+                    build_cems_scenario("EMSR921", zip_path, cell_size_m=200.0, landcover_path=extract)
+        self.assertTrue(any(146 in row for row in scenario["fuel_grid"]))  # CORINE 322 -> SH6
+        self.assertGreater(scenario["initial_perimeter"]["burned_cells_count"], 0)
+        self.assertEqual(scenario["provenance"]["fuel_source"]["extract_sha256"], hashes["landcover_sha256"])
+        eligible = [w for w in scenario["water_scooping_waypoints"] if w["eligible_for_scooping"]]
+        self.assertEqual([w["name"] for w in eligible], ["CORINE 512 water body"])
 
     def test_build_cems_scenario_with_mock_zip_zone30(self):
         """Test building a scenario for Zone 30N (EMSR590) with synthetic GeoJSON."""

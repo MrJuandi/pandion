@@ -195,6 +195,13 @@ D-73 adds fourteen more Spanish delineation products to development (EMSR365, EM
 .venv/bin/python -m nightjar.imagery_acquire runs/geographic-multi-ignition-family-d71-20261006 runs/geographic-imagery-s2-d71-new-20261006 --activations EMSR365 ...
 ```
 
+D-75 adds 23 Rapid Mapping incidents (2023–2026) whose fuel comes from CORINE 2018. For each, fetch the package and the pinned land-cover extract, then regenerate the chain (terrain and imagery only for the new incidents, `--activations`):
+
+```sh
+.venv/bin/python -m nightjar.cems_catalog fetch --activation EMSR921
+.venv/bin/python -m nightjar.cems_catalog fetch-landcover --activation EMSR921
+```
+
 `python -m nightjar.fold_report RUN_DIR [RUN_DIR ...] --output report.json` collects the `--holdout-activation` selection reports of a cross-validation sweep (one per fold and seed, same configuration) and prints, per held-out incident and pooled over folds, the policy and baseline means and the paired policy - heuristic difference with a 95% bootstrap interval (D-73).
 
 Checks for the workspace and presentation adapters:
