@@ -1,5 +1,12 @@
 # Data, provenance, physical calibration, and observation validity
 
+Environment/ignition family 0.2 separates generation clocks from scenario
+content and records explicit experimental seeds. Existing complete-payload
+hash verification is retained for archived families. New report entries add
+content identity, source products, grid/CRS and parent lineage; no new external
+sources are introduced. See [RESEARCH_WORKFLOWS.md](RESEARCH_WORKFLOWS.md) for
+the migration and reproducibility contract.
+
 **Status:** design checklist. Candidate sources below have different scales and licenses; inclusion requires a source-specific review.
 
 The [2026-09-30 EMSR578 environmental inventory](PILOT_ENVIRONMENT.md) adds a separate source-bound numeric terrain artifact and a historical Baldomar weather audit. IGN/CNIG 25 m terrain is requested at the pilot's 100 m grid in EPSG:25831; its acquisition epoch and unadvertised source footprint remain unknown. Meteocat supplies complete valid half-hour coverage for five station variables over the observation window, with forward-interval timestamp semantics. This is station evidence, not landscape-wide midflame wind or fuel moisture, and the original inventory is an audit artifact. The derived 2026-10-01 environment family now consumes dry station intervals under explicit assumptions; the original base family remains flat/synthetic. See [ENVIRONMENT_INTEGRATION.md](ENVIRONMENT_INTEGRATION.md). Daily cumulative maps support growth diagnostics at actual elapsed times, not inferred hourly trajectories or independent validation; source hashes, commands and limits are recorded in the inventory.

@@ -36,6 +36,20 @@ class ReplayViewTests(unittest.TestCase):
         self.assertFalse(out["water_mask"][0][1])  # nonburnable is not evidence of water
         self.assertEqual(self.replay, original)
 
+    def test_aircraft_identity_survives_normalization_and_invalid_indices_fail(self):
+        replay = copy.deepcopy(self.replay)
+        replay["aircraft_track"] = [{"time_s": 0, "position_m": [0, 0], "aircraft_index": 0},
+                                    {"time_s": 0, "position_m": [300, 0], "aircraft_index": 1}]
+        replay["decisions"][0]["aircraft_index"] = 1
+        replay["drops"][0]["aircraft_index"] = 1
+        out = normalize_replay(replay)
+        self.assertEqual([p["aircraft_index"] for p in out["aircraft_track"]], [0, 1])
+        self.assertEqual(out["decisions"][0]["aircraft_index"], 1)
+        self.assertEqual(out["drops"][0]["aircraft_index"], 1)
+        replay["aircraft_track"][1]["aircraft_index"] = True
+        with self.assertRaisesRegex(ValueError, "nonnegative integer"):
+            normalize_replay(replay)
+
     def test_missing_resolution_and_arrival_are_rejected(self):
         for missing in ("grid", "arrival_time_s"):
             replay = copy.deepcopy(self.replay)

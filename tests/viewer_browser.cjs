@@ -51,7 +51,15 @@ long = {**base,'policy':'Heurística de prueba','horizon_s':600,'environment':di
 static = {**base,'scenario_id':'static','policy':'Cartografía · sin episodio','horizon_s':0,'affected_area_ha':None,'decisions':[],'drops':[],'aircraft_track':[],'environment':None}
 high = {**base,'scenario_id':'high','elevation_m':[[1300,1310,1320],[1320,1330,1340]]}
 third = {**base,'policy':'Tercera política','horizon_s':900,'affected_area_ha':9}
-write_viewer_html([base,long,third,static,high],Path(sys.argv[1]))
+fleet = {**base,'scenario_id':'fleet','aircraft_metrics':dict(total_water_dropped_l=12274),
+    'aircraft_initial_state':[dict(index=i,position_m=[50 if i == 0 else 250,50],water_l=6137,capacity_l=6137) for i in range(2)],
+    'aircraft_track':[dict(time_s=0,position_m=[50,50],aircraft_index=0),dict(time_s=90,position_m=[200,100],aircraft_index=0),
+                      dict(time_s=0,position_m=[250,50],aircraft_index=1),dict(time_s=120,position_m=[50,100],aircraft_index=1)],
+    'decisions':[dict(time_s=90,decision_time_s=0,aircraft_index=0,aircraft_water_l=0,order=dict(type='DROP',target_m=[200,100])),
+                 dict(time_s=120,decision_time_s=0,aircraft_index=1,aircraft_water_l=0,order=dict(type='DROP',target_m=[50,100]))],
+    'drops':[dict(time_s=90,aircraft_index=0,water_l=6137,position_m=[200,100],treated_cells=[[1,2]]),
+             dict(time_s=120,aircraft_index=1,water_l=6137,position_m=[50,100],treated_cells=[[1,0]])]}
+write_viewer_html([base,long,third,static,high,fleet],Path(sys.argv[1]))
 `;
   execFileSync(process.env.NIGHTJAR_PYTHON || 'python3', ['-c', fixture, target], {cwd: path.resolve(__dirname, '..')});
   const launch = (args = []) => chromium.launch({headless: true, args, ...(process.env.NIGHTJAR_CHROMIUM_EXECUTABLE ? {executablePath: process.env.NIGHTJAR_CHROMIUM_EXECUTABLE} : {})});
@@ -90,7 +98,7 @@ write_viewer_html([base,long,third,static,high],Path(sys.argv[1]))
 
     // Scenario/policy boundaries, final metrics and causal environment values.
     await slider.fill('0');
-    assert.equal(await page.locator('#scenario-select option').count(), 3);
+    assert.equal(await page.locator('#scenario-select option').count(), 4);
     assert.equal(await slider.getAttribute('max'), '180');
     assert.match(await page.locator('#m-water').textContent(), /6137|6.137/);
     assert.match(await page.locator('#m-flight').textContent(), /1,5/);
@@ -122,6 +130,32 @@ write_viewer_html([base,long,third,static,high],Path(sys.argv[1]))
     assert.equal(await page.locator('#live-water').textContent(), '6137');
     assert.match(await page.locator('#live-tank').textContent(), /0 \/ 6137 L/);
     assert.equal(await page.evaluate(() => NightjarViewer.views[0].renderer.aircraft.visible), true);
+
+    // Independent aircraft tracks, water accounting and selected chase target.
+    await page.selectOption('#scenario-select', 'fleet');
+    await slider.fill('45');
+    assert.equal(await page.locator('#fleet-count').textContent(), '2 unidades');
+    assert.equal(await page.locator('#fleet-body tr').count(), 2);
+    assert.equal(await page.locator('#live-water').textContent(), '0');
+    const planes = await page.evaluate(() => {
+      const renderer = NightjarViewer.views[0].renderer;
+      return [...renderer.aircraftVisuals.values()].map(v => ({visible: v.aircraft.visible, position: v.aircraft.position.toArray()}));
+    });
+    assert.equal(planes.filter(p => p.visible).length, 2);
+    assert.notDeepEqual(planes[0].position, planes[1].position);
+    await slider.fill('90');
+    assert.equal(await page.locator('#live-water').textContent(), '6137');
+    assert.match(await page.locator('#fleet-body tr[data-aircraft-index="1"]').textContent(), /6137/);
+    await slider.fill('120');
+    assert.equal((await page.locator('#live-water').textContent()).replace(/[., ]/g, ''), '12274');
+    await page.selectOption('#fleet-select', '1');
+    assert.equal(await page.evaluate(() => {
+      const r = NightjarViewer.views[0].renderer; return r.aircraft === r.aircraftVisuals.get(1).aircraft;
+    }), true);
+    assert.match(await page.locator('.decision-item').first().textContent(), /NJ-01/);
+    assert.match(await page.locator('.decision-item').nth(1).textContent(), /NJ-02/);
+    await page.selectOption('#scenario-select', 'rectangular');
+    await slider.fill('150');
 
     // Terrain geometry is relative to the minimum height: an absolute datum shift changes nothing.
     const heights = () => page.evaluate(() => Array.from(NightjarViewer.views[0].renderer.terrain.heights).map(v => Math.round(v * 100)).join(','));

@@ -1,5 +1,13 @@
 # Evaluation protocol
 
+The [research workflow](RESEARCH_WORKFLOWS.md) adds content/source/runtime
+comparability audits and groups AOIs of the same CEMS activation for future
+holdout exclusion. Historical AOI-specific scores are not reinterpreted as
+group-excluded results. `fold_report` exposes missing legacy provenance,
+scenario-conditional intervals, separate incident-group intervals and
+descriptive seed variation. Workspace/evaluation inference share execution;
+these changes do not supply new policy-quality evidence or open reserved tests.
+
 **Status:** physical-evaluation protocol to freeze before model selection on geographic incidents. Synthetic controller experiments may precede it under the separate limits below.
 
 ## Geographic PPO technical check (2026-09-30)
