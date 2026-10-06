@@ -520,3 +520,11 @@ No training. `runs/geographic-multi-ignition-family-d72-20261006`, 640 developme
 | All | 664 | 3.0 | 69.5 | 62.9 | 63.2 | 37 % | 41 % |
 
 Per incident the heuristic prevents from 3 % (EMSR538, Navalacruz) to 80 % (EMSR365) of the growth. Aircraft now matter most on moderate days and little on extreme ones, and both heuristics waste many drops on fronts too intense to hold, since they rank targets by downwind position and not by whether a drop can hold there. Policy results before D-74 are not comparable with these numbers.
+
+### With the D-75 incidents (2026-10-06)
+
+Same benchmark on `runs/geographic-multi-ignition-family-d73-20261006` (43 development incidents, 1,376 scenarios, plus 24 validation; reserved unopened). All: no intervention 59.1 ha, heuristic 51.9 ha, 45 % of the unmitigated growth prevented, 31 % of treated cells breached. The 23 CORINE-fuel incidents: 52.8 / 44.8 ha, 54 % prevented, 21 % breached; the 20 earlier ones: 66.1 / 59.9 ha, 36 %, 40 %. Per new incident prevention ranges from 16 % (EMSR892, Los Gallardos) and 18 % (EMSR837 AOI07, Plasencia) to 99 % (EMSR900 AOI02, Villa del Prado).
+
+### Reference policy under D-74 (2026-10-06)
+
+One training run, same configuration as the D-73 sweep (two aircraft, parametric actions, thermal image with ROS, slot features, augmentation, 1,000 updates, seed 42), on `runs/geographic-multi-ignition-family-d72-20261006` (20 development incidents) with EMSR597 (Moros, never inspected) held out; `runs/geographic-reference-d72-20261006`, commit `173c794`. Validation (EMSR590, 24 scenarios): selected weights 23.08 ha against heuristic 23.2 and containment 23.5 (no intervention 26.0). Held-out EMSR597, 32 scenarios: policy 109.1 ha, heuristic 104.9, containment 105.5, no intervention 117.4; policy − heuristic +4.16 ha [+0.72, +9.06] (+4.0 %), better / equal / worse 8 / 7 / 17. Under the sourced drop effect the learned policy ties the heuristic on validation and is worse on the unseen incident; it has not learned to prefer targets where a drop can hold. One seed and one fold.
