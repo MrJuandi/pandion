@@ -98,6 +98,47 @@ class TestGeographicIntegrated(unittest.TestCase):
         self.assertEqual(res["decisions"][0]["order"]["type"], "HOLD")
         self.assertEqual(res["decisions"][1]["order"]["type"], "HOLD")
 
+    def test_refill_beyond_horizon_is_not_completed_or_applied(self):
+        scenario = deepcopy(self.scenario)
+        scenario["fire"]["horizon_s"] = 100.0
+        scenario["aircraft"]["initial_position_utm"] = [
+            scenario["grid"]["origin_utm_easting_m"] + 6000.0,
+            scenario["grid"]["origin_utm_northing_m"],
+        ]
+        initial = [6000.0, 0.0]
+        result = run_geographic_integrated(scenario, policy="no_intervention", _actions=[
+            {"type": "DROP", "target_m": initial}, {"type": "RETURN_TO_REFILL"}])
+        self.assertEqual(result["decisions"][0]["order"]["type"], "DROP")
+        decision = result["decisions"][1]
+        self.assertGreater(decision["time_s"], result["horizon_s"])
+        self.assertEqual(result["aircraft_metrics"]["refills_count"], 0)
+        self.assertEqual(decision["observation"]["aircraft"]["water_l"], 0)
+        self.assertGreater(decision["completed_at_s"], result["horizon_s"])
+        arrival = decision["refill_transit_s"]
+        self.assertLess(arrival, result["horizon_s"])
+        arrival_point = next(point for point in result["aircraft_track"] if point["time_s"] == arrival)
+        self.assertEqual(arrival_point["position_m"], result["aircraft_track"][-1]["position_m"])
+        self.assertEqual(result["aircraft_track"][-1]["time_s"], result["horizon_s"])
+        from math import dist
+        outbound_m = dist(result["aircraft_track"][0]["position_m"], arrival_point["position_m"])
+        self.assertAlmostEqual(result["aircraft_metrics"]["total_flight_distance_km"], outbound_m / 1000, places=3)
+
+    def test_refill_transit_track_ends_at_horizon_without_future_waypoints(self):
+        scenario = deepcopy(self.scenario)
+        scenario["fire"]["horizon_s"] = 50.0
+        start = [12000.0, 0.0]
+        scenario["aircraft"]["initial_position_utm"] = [
+            scenario["grid"]["origin_utm_easting_m"] + start[0],
+            scenario["grid"]["origin_utm_northing_m"] + start[1],
+        ]
+        result = run_geographic_integrated(
+            scenario, policy="no_intervention", _actions=[{"type": "RETURN_TO_REFILL"}])
+        self.assertGreater(result["decisions"][0]["refill_transit_s"], result["horizon_s"])
+        self.assertTrue(all(point["time_s"] <= result["horizon_s"] for point in result["aircraft_track"]))
+        terminal = result["aircraft_track"][-1]
+        self.assertEqual(terminal["time_s"], result["horizon_s"])
+        self.assertNotEqual(terminal["position_m"], start)
+
     def test_replay_records_true_arrivals_and_delivered_observations_separately(self):
         result = run_geographic_integrated(self.scenario, policy="heuristic")
         self.assertEqual(result["grid"]["cell_size_m"], self.scenario["grid"]["cell_size_m"])

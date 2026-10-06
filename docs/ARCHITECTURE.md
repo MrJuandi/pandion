@@ -178,3 +178,11 @@ The optional IGN/CNIG pilot DEM is bound to its original pilot through `load_ter
 For station intervals the solver caches directional cell behavior for each forcing interval and integrates edge travel distance across changes using the harmonic mean of source/target directional speeds. The time-dependent FIFO arrival graph has access to retrospective forcing; action generation and baselines receive only completed interval reports with availability no earlier than interval end. Before the first report, the controller wind vector is an explicit unknown-zero placeholder (`weather_status=not_yet_delivered`), not an observed calm condition. A final partial forcing interval can drive physical spread while its aggregate remains unavailable within the episode. Since D-49 this delayed delivery applies only to `observation_mode="scheduled"`; the default real-time mode exposes the interval containing the decision time (never a later one), every cell's current `unburned`/`burning`/`burned` state at age 0, and the current fuel moisture. `nightjar-geographic-replay-0.4` adds `observation_mode` and a `burnout_time_s` raster.
 
 Constant-weather scenarios retain the existing rate path. The resource interface and reward remain unchanged; permanent five-cell water barriers are provisional. Heights are orthometric; French/Italian GLO-30 heights are a surface-model proxy that includes vegetation/buildings. See [ENVIRONMENT_INTEGRATION.md](ENVIRONMENT_INTEGRATION.md) for assumptions and checks.
+
+
+Fold workspaces bind each held-out development replay to its own fold's
+checkpoint and verify scenario hashes after fleet overrides. Refill tracks
+record arrival separately from service completion. An episode ending during a
+mission preserves the in-progress position and tank contents instead of
+completing the mission at the horizon. Sources outside the tactical grid remain
+valid destinations; HOLD at those sources is a policy decision.
