@@ -494,3 +494,14 @@ Same configuration and seed (42) on `runs/geographic-multi-ignition-family-d71-2
 | Pooled (6 folds) | **114.1** | 115.9 | 120.7 | −1.78 [−4.23, +0.74] (−1.5%) | 96 / 16 / 80 |
 
 Training on 19 instead of 5 incidents did not change the picture on the three repeated folds (EMSR602_AOI04 −10.5 → −9.1 ha, EMSR625_AOI01 −2.4 → +0.2, EMSR583 +6.3 → +11.6). The policy beats the heuristic clearly on two incidents, ties on two and loses significantly on EMSR583; pooled it is 1.8 ha (1.5%) better with an interval that includes zero. Map count is therefore not the limiting factor for these folds; the systematic EMSR583 loss needs a per-scenario diagnosis. One seed per fold; seed variation is not yet measured.
+
+#### Why the policy loses on EMSR583 (2026-10-06)
+
+Diagnostic replays of the D-73 fold checkpoints (deterministic) and the heuristic on the 32 held-out scenarios of EMSR583 and, for contrast, EMSR602_AOI04. Each drop is assigned to the nearest focus centre; a focus's danger is its unmitigated burned area at the horizon.
+
+- Drop counts, empty drops and drops on cells the unmitigated fire never reaches are similar for policy and heuristic (EMSR583: 20.4 vs 20.7 drops; 38% vs 32% of treated cells unreached). The policy's first drop comes about 10 s later in both incidents.
+- The policy triages: it leaves about one focus per scenario unattended for the first 20 minutes (EMSR583 1.06, EMSR602_AOI04 1.31) where the heuristic leaves 0.47 and 0.22. In 15 of the 16 EMSR583 scenarios it loses by more than 5 ha, the extra burned area comes from one focus that the policy reached late (often after 1,000–3,400 s) or never, with 5.5 drops on it against the heuristic's 9.5; in 10 of the 15 it is the focus with the largest unmitigated growth.
+- Outcome follows whether the first focus attacked is the most dangerous one. EMSR602_AOI04, policy wins: policy 87%, heuristic 7%. EMSR583, policy loses: policy 25%, heuristic 75%; policy wins: 89% vs 44%.
+- The most dangerous focus is harder to anticipate on EMSR583: the focus that is largest after 900 s (first wind segment) is the final largest in 50% of scenarios, against 78% on EMSR602_AOI04 (78% and 84% after 1,800 s). Mean wind speed and shift size are similar (2.4 vs 2.3 m/s, 32° vs 39° per 900 s), and EMSR583's fuels all occur in at least five other incidents, so the difference comes from how its fuel layout responds to the D-60 wind shifts.
+
+Interpretation: the learned policy commits early to the focus it judges most dangerous. That beats the greedy downwind heuristic where danger is predictable from the first minutes and loses where later wind shifts change which focus runs; the heuristic re-ranks every drop by the current wind. Scripts were run ad hoc from this analysis and are not part of the package.
