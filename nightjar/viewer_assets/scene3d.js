@@ -358,6 +358,8 @@
       this.trail.frustumCulled = false; scene.add(this.trail);
       this.groundTrack = new T.Line(trailGeometry.clone(), new T.LineDashedMaterial({color: 0xbfe9ff, dashSize: 30, gapSize: 24, transparent: true, opacity: 0.35, depthWrite: false}));
       this.groundTrack.frustumCulled = false; scene.add(this.groundTrack);
+      this.aircraftVisuals = new Map([[0, {aircraft: this.aircraft, label: this.label, leader: this.leader,
+        nadir: this.nadir, trail: this.trail, groundTrack: this.groundTrack}]]);
       this.dropGroup = new T.Group(); scene.add(this.dropGroup);
       this.markerGroup = new T.Group(); scene.add(this.markerGroup);
       this.water = makeParticles(420, 0xd8f3ff, 0.9); scene.add(this.water);
@@ -552,31 +554,60 @@
       this.updateMarkers(state);
     }
 
+    createAircraftVisual() {
+      const first = this.aircraftVisuals.values().next().value;
+      const visual = {aircraft: buildAmphibian(), label: makeLabel(),
+        leader: new T.Line(first.leader.geometry.clone(), first.leader.material.clone()),
+        nadir: new T.Mesh(first.nadir.geometry.clone(), first.nadir.material.clone()),
+        trail: new T.Line(first.trail.geometry.clone(), first.trail.material.clone()),
+        groundTrack: new T.Line(first.groundTrack.geometry.clone(), first.groundTrack.material.clone())};
+      visual.nadir.rotation.x = -Math.PI / 2;
+      visual.trail.frustumCulled = visual.groundTrack.frustumCulled = false;
+      for (const object of [visual.aircraft, visual.label.sprite, visual.leader, visual.nadir, visual.trail, visual.groundTrack]) this.scene.add(object);
+      return visual;
+    }
     updateAircraft(state) {
+      const fleet = state.fleet || (state.aircraft ? [state.aircraft] : []);
+      const indices = new Set(fleet.map(a => a.index ?? 0));
+      for (const [index, visual] of this.aircraftVisuals) if (!indices.has(index)) this.updateAircraftUnit({...state, aircraft: null, trail: []}, visual);
+      for (const craft of fleet) {
+        const index = craft.index ?? 0;
+        if (!this.aircraftVisuals.has(index)) this.aircraftVisuals.set(index, this.createAircraftVisual());
+        this.updateAircraftUnit({...state, aircraft: craft, trail: craft.trail || state.trail}, this.aircraftVisuals.get(index));
+      }
+      const selected = this.aircraftVisuals.get(state.aircraft?.index ?? 0);
+      if (selected) Object.assign(this, selected); // camera follows the selected unit
+    }
+
+    updateAircraftUnit(state, visual) {
       const a = state.aircraft, show = !!a && state.layers.track;
-      for (const o of [this.aircraft, this.label.sprite, this.leader, this.nadir]) o.visible = show;
+      for (const o of [visual.aircraft, visual.label.sprite, visual.leader, visual.nadir]) o.visible = show;
       const S = this.symbol;
+      visual.aircraft.scale.setScalar(S); visual.nadir.scale.setScalar(S * 0.32);
+      visual.trail.material.color.set(a?.accent || '#7dd3fc');
+      visual.groundTrack.material.dashSize = S * 0.25; visual.groundTrack.material.gapSize = S * 0.2;
+      visual.leader.material.dashSize = S * 0.09; visual.leader.material.gapSize = S * 0.06;
       const agl = S * 1.35;
       const trail = show ? state.trail : [];
-      const pos = this.trail.geometry.attributes.position, gpos = this.groundTrack.geometry.attributes.position;
+      const pos = visual.trail.geometry.attributes.position, gpos = visual.groundTrack.geometry.attributes.position;
       const n = Math.min(this.trailMax, trail.length);
       for (let i = 0; i < n; i++) {
         const [x, y] = trail[trail.length - n + i], g = this.heightAt(x, y) ?? this.baseY;
         pos.setXYZ(i, x - this.W / 2, g + agl, this.H / 2 - y); gpos.setXYZ(i, x - this.W / 2, g + S * 0.04, this.H / 2 - y);
       }
-      this.trail.geometry.setDrawRange(0, n); this.groundTrack.geometry.setDrawRange(0, n);
-      pos.needsUpdate = true; gpos.needsUpdate = true; this.groundTrack.computeLineDistances();
+      visual.trail.geometry.setDrawRange(0, n); visual.groundTrack.geometry.setDrawRange(0, n);
+      pos.needsUpdate = true; gpos.needsUpdate = true; visual.groundTrack.computeLineDistances();
       if (!show) return;
       const ground = this.world(a.position[0], a.position[1]);
       const p = ground.clone(); p.y += agl;
-      this.aircraft.position.copy(p);
+      visual.aircraft.position.copy(p);
       // heading is [east, north]; the model nose (+X) maps to world (east, -north).
-      this.aircraft.rotation.set(0, Math.atan2(a.heading[1], a.heading[0]), 0);
-      this.nadir.position.set(ground.x, ground.y + S * 0.05, ground.z);
-      this.leader.geometry.setFromPoints([p.clone().add(new T.Vector3(0, -S * 0.08, 0)), ground.clone().add(new T.Vector3(0, S * 0.05, 0))]);
-      this.leader.computeLineDistances();
-      this.label.sprite.position.set(p.x, p.y + S * 0.42, p.z);
-      this.label.set(a.labelLines, a.accent || '#7dd3fc');
+      visual.aircraft.rotation.set(0, Math.atan2(a.heading[1], a.heading[0]), 0);
+      visual.nadir.position.set(ground.x, ground.y + S * 0.05, ground.z);
+      visual.leader.geometry.setFromPoints([p.clone().add(new T.Vector3(0, -S * 0.08, 0)), ground.clone().add(new T.Vector3(0, S * 0.05, 0))]);
+      visual.leader.computeLineDistances();
+      visual.label.sprite.position.set(p.x, p.y + S * 0.42, p.z);
+      visual.label.set(a.labelLines, a.accent || '#7dd3fc');
     }
 
     updateDrops(state) {
@@ -593,7 +624,7 @@
       }
       // Water curtain for 45 s of simulation time after each recorded drop (display effect).
       const active = drops.find(d => state.now >= d.time_s && state.now - d.time_s < 45 && Array.isArray(d.position_m));
-      this.activeDrop = active ? {drop: active, age: state.now - active.time_s, heading: state.aircraft?.heading || [1, 0]} : null;
+      this.activeDrop = active ? {drop: active, age: state.now - active.time_s, heading: state.fleet?.find(a => a.index === (active.aircraft_index ?? 0))?.heading || state.aircraft?.heading || [1, 0]} : null;
     }
 
     updateMarkers(state) {
@@ -727,7 +758,7 @@
         this.onCameraChange?.(this);
       }
       this.controls.update();
-      for (const rotor of this.aircraft.userData.rotors) rotor.rotation.x += 0.9;
+      for (const visual of this.aircraftVisuals.values()) for (const rotor of visual.aircraft.userData.rotors) rotor.rotation.x += 0.9;
       const flicker = 0.92 + 0.08 * Math.sin(wall * 0.011) + 0.05 * Math.sin(wall * 0.027 + 1.3);
       if (this.terrain) this.terrain.mesh.material.emissiveIntensity = flicker * 0.95;
       this.fireLight.intensity = (this.fireLight.userData.base || 0) * flicker;
@@ -829,17 +860,19 @@
       ctx.drawImage(this.painter.glow, L.x0, L.y0, this.r.grid.cols * L.scale, this.r.grid.rows * L.scale);
       ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
       const s = this.state; if (!s) return;
-      if (s.layers.track && s.trail?.length > 1) {
-        ctx.beginPath(); s.trail.forEach((p, i) => { const q = this.toScreen(L, p[0], p[1]); i ? ctx.lineTo(...q) : ctx.moveTo(...q); });
-        ctx.strokeStyle = '#7dd3fc'; ctx.lineWidth = 2 * L.dpr; ctx.stroke();
+      if (s.layers.track) for (const craft of s.fleet || (s.aircraft ? [s.aircraft] : [])) {
+        const trail = craft.trail || s.trail || [];
+        if (trail.length < 2) continue;
+        ctx.beginPath(); trail.forEach((p, i) => { const q = this.toScreen(L, p[0], p[1]); i ? ctx.lineTo(...q) : ctx.moveTo(...q); });
+        ctx.strokeStyle = craft.accent || '#7dd3fc'; ctx.lineWidth = 2 * L.dpr; ctx.stroke();
       }
       if (s.layers.drops) for (const d of s.drops || []) {
         if (!Array.isArray(d.position_m)) continue; const [x, y] = this.toScreen(L, d.position_m[0], d.position_m[1]);
         ctx.beginPath(); ctx.arc(x, y, 5 * L.dpr, 0, Math.PI * 2); ctx.strokeStyle = '#38bdf8'; ctx.lineWidth = 2 * L.dpr; ctx.stroke();
       }
-      if (s.layers.track && s.aircraft) {
-        const [x, y] = this.toScreen(L, s.aircraft.position[0], s.aircraft.position[1]);
-        ctx.beginPath(); ctx.arc(x, y, 6 * L.dpr, 0, Math.PI * 2); ctx.fillStyle = '#f2c12e'; ctx.fill(); ctx.strokeStyle = '#0b1220'; ctx.lineWidth = 2 * L.dpr; ctx.stroke();
+      if (s.layers.track) for (const craft of s.fleet || (s.aircraft ? [s.aircraft] : [])) {
+        const [x, y] = this.toScreen(L, craft.position[0], craft.position[1]);
+        ctx.beginPath(); ctx.arc(x, y, 6 * L.dpr, 0, Math.PI * 2); ctx.fillStyle = craft.accent || '#f2c12e'; ctx.fill(); ctx.strokeStyle = '#0b1220'; ctx.lineWidth = 2 * L.dpr; ctx.stroke();
       }
     }
     dispose() { this.canvas.remove(); }

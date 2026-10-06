@@ -154,6 +154,15 @@ Simulation, controller, benchmark, and replay must run headlessly. A browser int
 
 ### Offline research workspace
 
+The [reproducible research workflow](RESEARCH_WORKFLOWS.md) loads legacy,
+image/cell and parametric checkpoints through the same model factory and rollout
+executor as evaluation. Model configuration, forced-step behavior and fleet
+size come from the supplied report; newly emitted reports bind checkpoint
+bytes and imagery content. Workspace baselines receive the same fleet override.
+Per-aircraft initial state and executed-drop index/litres are audit fields only;
+they do not alter controller observations or resource dynamics. The 3D and 2D
+renderers maintain independent tracks, tanks and follow-camera selection.
+
 `nightjar.workspace` reads a manifest-verified geographic family and emits the offline Spanish 3D viewer (`nightjar.viewer`), individual audit artifacts, and `nightjar-workspace-0.1` metadata. Only the requested first development scenarios run episodes; validation and reserved entries contain initial static cartography, no actions and no outcome metric. Static variants are environmental cases, not 24 independent incidents. Optional PPO inference uses a caller-supplied weights/report pair, records both file hashes, and checks report membership against development scenario hashes. Raw weights have no embedded report identity; matching membership and architecture do not prove which report produced a file.
 
 `nightjar-geographic-replay-0.2` adds true arrival times, fuel/water/elevation rasters, CRS and metric origin, scenario seed/hash and image time origin. It stores each delivered controller observation separately, records `decision_time_s` at issuance while retaining `time_s` at execution completion, and samples aircraft positions at execution endpoints. The flight line connects samples for inspection; it is not a measured continuous trajectory. These fields are audit output only and do not enter action generation or controller observations. Existing outcomes and simulator physics are unchanged.

@@ -51,6 +51,7 @@ These are research gates, not claims that any stage is complete. The detailed pl
 
 ## Documentation
 
+- [RESEARCH_WORKFLOWS.md](docs/RESEARCH_WORKFLOWS.md) — reproducible scenario seeds, current checkpoint inference, multi-aircraft replay, searchable artifact catalog and incident-group report audits.
 - [ARCHITECTURE.md](docs/ARCHITECTURE.md) — state, observation, actions, reward, policy, and growth to multiple resources.
 - [PHYSICAL_MODEL_V0.md](docs/PHYSICAL_MODEL_V0.md) — sourced surface-fire and CL-415 references, implemented FM1 subset, and remaining validation limits.
 - [STANDARD_FUEL_PATH.md](docs/STANDARD_FUEL_PATH.md) — standard-fuel scenario, reproduction command, boundaries, and ordered steps toward real maps.

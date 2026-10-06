@@ -30,6 +30,7 @@
   let now = 0, playing = false, speed = Number(ui.speed.value) || 30, lastFrame = 0;
   let camMode = '3d', rendererFailed = false, syncing = false, hudTimer = 0;
   let activeView = ['mapa', 'condiciones', 'comparacion', 'datos'].includes(location.hash.slice(1)) ? location.hash.slice(1) : 'mapa';
+  let selectedAircraftIndex = 0;
   let views = [];
   const cache = new WeakMap();
 
@@ -50,26 +51,15 @@
     const elev = r.elevation_m.flat().filter(finite);
     const arrivals = r.arrival_time_s.flat().filter(finite).sort((a, b) => a - b);
     const decisions = Array.isArray(r.decisions) ? r.decisions : [];
-    let track = Array.isArray(r.aircraft_track) && r.aircraft_track.length
-      ? r.aircraft_track.filter((p) => Array.isArray(p.position_m) && finite(Number(p.time_s))).map((p) => ({t: Number(p.time_s), p: [Number(p.position_m[0]), Number(p.position_m[1])]}))
-      : decisions.filter((d) => Array.isArray(d.observation?.aircraft?.position_m)).map((d) => ({t: Number(d.time_s), p: d.observation.aircraft.position_m.map(Number)}));
-    track = track.filter((s) => s.p.every(finite)).sort((a, b) => a.t - b.t);
-    // Water released per recorded drop: tank level before minus after the completed DROP order.
-    const metrics = r.aircraft_metrics || {}, totalWater = metrics.water_dropped_l ?? metrics.water_dropped_liters ?? metrics.total_water_dropped_l;
-    const capacity = Math.max(0, ...decisions.map((d) => Number(d.aircraft_water_l)).filter(finite)) || null;
-    const releases = [];
-    let previous = capacity;
-    for (const d of decisions) {
-      const water = Number(d.aircraft_water_l), type = orderType(d);
-      if (type === 'DROP' && finite(water) && finite(previous)) releases.push({t: Number(d.completed_at_s ?? d.time_s), litres: Math.max(0, previous - water)});
-      if (finite(water)) previous = water;
-    }
-    const drops = (r.drops || []).filter((d) => finite(Number(d.time_s))).map((d) => ({...d, time_s: Number(d.time_s), cells: d.newly_blocked_cells || d.treated_cells || []}));
-    if (!releases.length && finite(totalWater) && drops.length) for (const d of drops) releases.push({t: d.time_s, litres: totalWater / drops.length});
+    const fleet = NightjarFleet.derive(r);
+    const track = fleet[0]?.track || [], capacity = fleet[0]?.capacity ?? null;
+    const releases = fleet.flatMap(u => u.releases);
+    const drops = (r.drops || []).filter(d => finite(Number(d.time_s))).map(d => ({...d, time_s: Number(d.time_s), cells: d.newly_blocked_cells || d.treated_cells || []}));
     const refills = [], seen = new Set();
     for (const d of decisions) {
       if (orderType(d) !== 'RETURN_TO_REFILL') continue;
-      const p = samplePosition(track, Number(d.completed_at_s ?? d.time_s));
+      const ownTrack = fleet.find(u => u.index === (d.aircraft_index ?? 0))?.track || [];
+      const p = samplePosition(ownTrack, Number(d.completed_at_s ?? d.time_s));
       if (!p) continue;
       const key = `${Math.round(p[0] / 25)},${Math.round(p[1] / 25)}`;
       if (!seen.has(key)) { seen.add(key); refills.push(p); }
@@ -83,7 +73,7 @@
       waterLabel = [(best[1] + 0.5) * size, (best[0] + 0.5) * size];
     }
     const f = {rows, cols, size, cellHa: size * size / 1e4, minElev: elev.length ? Math.min(...elev) : null, maxElev: elev.length ? Math.max(...elev) : null,
-      arrivals, track, capacity, releases, drops, refills, waterLabel};
+      arrivals, track, fleet, capacity, releases, drops, refills, waterLabel};
     cache.set(r, f); return f;
   }
   function orderType(d) { const o = d.order || d.action || {}; return o.type || o.action || o.kind || null; }
@@ -99,44 +89,14 @@
   function areaAt(r, t) { const a = facts(r).arrivals; let lo = 0, hi = a.length; while (lo < hi) { const m = (lo + hi) >> 1; if (a[m] <= t) lo = m + 1; else hi = m; } return lo * facts(r).cellHa; }
   function episodeTime(r) { return Math.min(now, Number(r.horizon_s) || 0); }
 
+  function fleetAt(r, t) {
+    return isStatic(r) ? [] : facts(r).fleet.map(u => NightjarFleet.at(u, t)).filter(Boolean);
+  }
   function aircraftAt(r, t) {
-    const f = facts(r);
-    if (isStatic(r) || !f.track.length) return null;
-    const position = samplePosition(f.track, t);
-    // Heading from the active track segment; keep the last movement when stationary.
-    let heading = null;
-    for (let i = 1; i < f.track.length; i++) {
-      const a = f.track[i - 1], b = f.track[i], dx = b.p[0] - a.p[0], dy = b.p[1] - a.p[1];
-      if (Math.hypot(dx, dy) < 1e-6) continue;
-      if (a.t <= t || !heading) heading = [dx, dy];
-      if (b.t >= t && a.t <= t) break;
-    }
-    heading = heading || [1, 0];
-    const len = Math.hypot(...heading) || 1;
-    const decisions = r.decisions || [];
-    let issued = null, completed = null;
-    for (const d of decisions) {
-      if (Number(d.time_s) <= t) issued = d;
-      if (Number(d.completed_at_s ?? d.time_s) <= t && finite(Number(d.aircraft_water_l))) completed = d;
-    }
-    const type = issued ? orderType(issued) : null, inProgress = issued && t < Number(issued.completed_at_s ?? issued.time_s);
-    const phase = !issued ? 'En espera' : type === 'DROP' ? (inProgress ? 'Hacia descarga' : 'Descarga') : type === 'RETURN_TO_REFILL' ? (inProgress ? 'Hacia recarga' : 'Recargando') : type === 'HOLD' ? 'En espera' : String(type || 'Orden');
-    const water = completed ? Number(completed.aircraft_water_l) : f.capacity;
-    const accent = type === 'DROP' ? '#38bdf8' : type === 'RETURN_TO_REFILL' ? '#a78bfa' : '#fbbf24';
-    return {position, heading: [heading[0] / len, heading[1] / len], phase, water, capacity: f.capacity, accent,
-      labelLines: ['NJ-01 · CL-415 ref.', `${phase}${finite(water) ? ` · ${fmt(water, 0)} L` : ''}`]};
+    const fleet = fleetAt(r, t);
+    return fleet.find(a => a.index === selectedAircraftIndex) || fleet[0] || null;
   }
-  function trailAt(r, t) {
-    const f = facts(r); if (isStatic(r) || !f.track.length) return [];
-    const out = [];
-    for (let i = 0; i < f.track.length && f.track[i].t <= t; i++) {
-      const s = f.track[i]; out.push(s.p);
-      const next = f.track[i + 1];
-      if (next && next.t > t) break;
-    }
-    const p = samplePosition(f.track, t); if (p) out.push(p);
-    return out;
-  }
+  function trailAt(r, t) { return aircraftAt(r, t)?.trail || []; }
   function windAt(r, t) {
     const env = r.environment || {};
     let vector = null;
@@ -320,6 +280,7 @@
     ui.slider.disabled = stat; ui.play.disabled = stat; $('btn-reset').disabled = stat;
     $('compare-card').hidden = episodeGroup().length < 2 && activeView !== 'comparacion';
     if (!document.querySelector('.workspace').hidden) rebuildPanels(displayGroup());
+    updateFleetSelector(r);
     updateHeading(r); updateFinalMetrics(r); updateDecisionList(r); updateProvenance(r); updateTicks();
     updateComparisonResults();
     updateTime();
@@ -354,7 +315,7 @@
       track: checked('layer-flight'), contours: checked('layer-contours'), labels: checked('layer-labels'), grid: checked('layer-grid'), smoke: checked('layer-smoke')};
     view.renderer.setState({now: t, mode: isStatic(r) ? 'historical' : ui.state.value, style: ui.style.value, layers,
       reports: obs?.fire_reports || [], reportsTime: latestDecision(r, t)?.time_s, drops: f.drops.filter((d) => d.time_s <= t), allDrops: f.drops,
-      aircraft: aircraftAt(r, t), trail: trailAt(r, t), refills: f.refills, waterLabel: f.waterLabel, wind: windAt(r, t)}, fire);
+      fleet: fleetAt(r, t), aircraft: aircraftAt(r, t), trail: trailAt(r, t), refills: f.refills, waterLabel: f.waterLabel, wind: windAt(r, t)}, fire);
     view.fire = fire;
   }
 
@@ -485,16 +446,26 @@
     $('live-phase').textContent = a ? a.phase : '—';
     $('live-tank').textContent = a && finite(a.water) ? `${fmt(a.water, 0)}${a.capacity ? ` / ${fmt(a.capacity, 0)}` : ''} L` : '—';
     const body = $('fleet-body'); body.replaceChildren();
-    $('fleet-count').textContent = a ? '1 unidad' : '0 unidades';
-    if (a) {
-      const tr = document.createElement('tr');
-      const cells = [['callsign', 'NJ-01'], [null, 'CL-415 ref.'], [null, a.phase]];
-      for (const [cls, text] of cells) { const td = document.createElement('td'); if (cls) { const s = document.createElement('span'); s.className = cls; s.textContent = text; td.append(s); } else td.textContent = text; tr.append(td); }
-      const td = document.createElement('td'); td.textContent = finite(a.water) ? `${fmt(a.water, 0)} L` : '—';
-      if (a.capacity && finite(a.water)) { const tank = document.createElement('span'); tank.className = 'tank'; const fill = document.createElement('i'); fill.style.width = `${clampNum(a.water / a.capacity * 100, 0, 100)}%`; tank.append(fill); td.append(tank); }
-      tr.append(td); body.append(tr);
+    const fleet = fleetAt(r, t);
+    $('fleet-count').textContent = `${fleet.length} ${fleet.length === 1 ? 'unidad' : 'unidades'}`;
+    for (const craft of fleet) {
+      const tr = document.createElement('tr'); tr.dataset.aircraftIndex = craft.index;
+      for (const text of [craft.callsign, 'CL-415 ref.', craft.phase, finite(craft.water) ? `${fmt(craft.water, 0)}${craft.capacity ? ` / ${fmt(craft.capacity, 0)}` : ''} L` : '—']) {
+        const td = document.createElement('td'); td.textContent = text; tr.append(td);
+      }
+      body.append(tr);
     }
   }
+  function updateFleetSelector(r) {
+    const select = $('fleet-select'), indices = facts(r).fleet.map(u => u.index);
+    if (!indices.includes(selectedAircraftIndex)) selectedAircraftIndex = indices[0] ?? 0;
+    select.replaceChildren();
+    for (const i of indices) {
+      const option = document.createElement('option'); option.value = i; option.textContent = `NJ-${String(i + 1).padStart(2, '0')}`; select.append(option);
+    }
+    select.value = selectedAircraftIndex; select.disabled = indices.length < 2;
+  }
+
   function updateDecisionList(r) {
     const list = Array.isArray(r.decisions) ? r.decisions : [];
     ui.decisions.replaceChildren(); $('decision-count').textContent = `${list.length} ${list.length === 1 ? 'registro' : 'registros'}`;
@@ -503,7 +474,7 @@
       const item = document.createElement('button'); item.type = 'button'; item.className = 'decision-item'; item.dataset.time = String(d.time_s ?? 0);
       const type = orderType(d); if (type === 'DROP') item.classList.add('drop'); if (type === 'RETURN_TO_REFILL') item.classList.add('refill');
       const time = document.createElement('div'); time.className = 'decision-time'; time.textContent = clock(Number(d.time_s) || 0);
-      const desc = document.createElement('div'); desc.className = 'decision-desc'; desc.textContent = decisionLabel(d);
+      const desc = document.createElement('div'); desc.className = 'decision-desc'; desc.textContent = `NJ-${String((d.aircraft_index ?? 0) + 1).padStart(2, '0')} · ${decisionLabel(d)}`;
       item.append(time, desc); item.addEventListener('click', () => { now = clampNum(Number(d.time_s) || 0, 0, horizon()); updateTime(); });
       ui.decisions.append(item);
     }
@@ -705,12 +676,13 @@
       ['Escenario', m.name || r.scenario_id || '—', `Partición: ${splitNames[m.split] || m.split || '—'} · Semilla: ${m.seed ?? '—'}`],
       ['Relieve', terrain.label || 'Sin capa de elevación', terrainSummary(terrain)],
       ['Modelo de política', training.label || policyLabel(r), trainingSummary(training, m)],
+      ...(training.checkpoint_report_binding ? [['Procedencia del modelo', training.checkpoint_report_binding === 'verified' ? 'Pesos e informe vinculados por hash' : 'Asociación legacy indicada al cargar', (training.warnings || []).join(' ')]] : []),
       ['Ejecución', policyLabel(r), `${fmt(r.horizon_s, 0)} s · ${m.seed == null ? 'semilla —' : `semilla ${m.seed}`}`],
       ['Supuestos', typeof m.assumptions === 'string' ? m.assumptions : 'Consulta el detalle técnico', `Versión de esquema: ${r.schema_version || m.schema_version || '—'}`]
     ];
     const box = $('provenance'); box.replaceChildren();
     items.forEach(([label, value, detail]) => { const c = document.createElement('article'); c.className = 'provenance-card'; const a = document.createElement('small'); a.textContent = label; const b = document.createElement('b'); b.textContent = esc(value); const p = document.createElement('p'); p.textContent = esc(detail); c.append(a, b, p); box.append(c); });
-    const technical = {source: m.source || null, source_kind: m.source_kind || null, terrain_source: terrain.source || null, terrain_attribution: typeof terrain.source?.attribution === 'string' ? `${terrain.source.attribution.startsWith('produced using') ? '' : 'produced using Copernicus WorldDEM-30 '}${terrain.source.attribution}` : null, training_dataset: training.dataset || null, scenario_hash: m.scenario_hash || null, checkpoint_sha256: training.checkpoint_sha256 || null, assumptions: m.assumptions || null};
+    const technical = {source: m.source || null, source_kind: m.source_kind || null, terrain_source: terrain.source || null, terrain_attribution: typeof terrain.source?.attribution === 'string' ? `${terrain.source.attribution.startsWith('produced using') ? '' : 'produced using Copernicus WorldDEM-30 '}${terrain.source.attribution}` : null, training_dataset: training.dataset || null, scenario_hash: m.scenario_hash || null, checkpoint_sha256: training.checkpoint_sha256 || null, report_sha256: training.report_sha256 || null, inference: training.inference || null, execution: training.execution || null, assumptions: m.assumptions || null};
     $('technical-provenance').textContent = JSON.stringify(technical, null, 2);
   }
   function sourceSummary(m) { const source = m.source; if (source && typeof source === 'object') { const n = [source.provider || source.name || source.collection || null, source.dataset || source.product || null].filter(Boolean); return n.join(' · ') || 'Fuente documentada'; } return ({copernicus_cems: 'Cartografía Copernicus', synthetic_fixture: 'Mapa sintético'})[m.source_kind] || source || m.source_kind || 'No indicada'; }
@@ -719,5 +691,6 @@
 
   // Read-only inspection handle for browser regression checks.
   window.NightjarViewer = {get views() { return views; }, get now() { return now; }, get cameraMode() { return camMode; }};
+  $('fleet-select').addEventListener('change', e => { selectedAircraftIndex = Number(e.target.value); updateTime(); });
   init();
 })();

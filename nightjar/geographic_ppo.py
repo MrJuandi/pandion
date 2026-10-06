@@ -16,6 +16,8 @@ import random
 import time
 from typing import Any
 
+from .identity import scenario_entry, partition_holdout, content_hash
+from .policy_artifact import write_report
 from .aircraft import CAPACITY_L
 from .geographic_benchmark import run_geographic_benchmark
 from .geographic_family import canonical_hash
@@ -241,9 +243,7 @@ def _dataset_report(scenarios_dir: Path | str, splits: dict[str, list[dict]]) ->
     return {
         "scenarios_dir": str(Path(scenarios_dir)),
         "splits": {
-            split: [{"scenario_id": scenario["scenario_id"],
-                     "scenario_hash": canonical_hash({k: v for k, v in scenario.items() if k != "scenario_hash"}),
-                     "source_kind": scenario["source_kind"]} for scenario in scenarios]
+            split: [scenario_entry(scenario) for scenario in scenarios]
             for split, scenarios in splits.items()
         },
     }
@@ -338,6 +338,8 @@ def rollout_geographic(
     reward_scale: float = 1.0,
     normalize_advantages: bool = True,
     skip_forced: bool = False,
+    inference_only: bool = False,
+    replay_out: list[dict] | None = None,
 ) -> tuple[list[dict], dict[str, Any]]:
     """Execute a single rollout of the CL-415 in a geographic scenario.
 
@@ -398,28 +400,32 @@ def rollout_geographic(
 
         next_obs, reward, done, _ = env.step_discrete(int(action.item()))
 
-        records.append({
-            "inputs": tuple(t.squeeze(0) for t in inputs),
-            "mask": mask.squeeze(0),
-            "action": action.squeeze(0),
-            "log_prob": log_prob.squeeze(0),
-        })
+        if not inference_only:
+            records.append({
+                "inputs": tuple(t.squeeze(0) for t in inputs),
+                "mask": mask.squeeze(0),
+                "action": action.squeeze(0),
+                "log_prob": log_prob.squeeze(0),
+            })
         rewards.append(reward + carried)
         carried = 0.0
         total_reward += reward
         values.append(float(value.item()))
         observation = next_obs
 
-    returns, advantages = returns_and_advantages([r * reward_scale for r in rewards], values, gamma,
-                                                 gae_lambda=gae_lambda, normalize=normalize_advantages)
-    for record, ret, adv, reward in zip(records, returns, advantages, rewards):
-        record["return"] = ret.to(device)
-        record["advantage"] = adv.to(device)
-        record["reward"] = reward
-    for record, value in zip(records, values):
-        record["value"] = value
+    if not inference_only:
+        returns, advantages = returns_and_advantages([r * reward_scale for r in rewards], values, gamma,
+                                                     gae_lambda=gae_lambda, normalize=normalize_advantages)
+        for record, ret, adv, reward in zip(records, returns, advantages, rewards):
+            record["return"] = ret.to(device)
+            record["advantage"] = adv.to(device)
+            record["reward"] = reward
+        for record, value in zip(records, values):
+            record["value"] = value
 
     replay = env.replay
+    if replay_out is not None:
+        replay_out.append(replay)
     metrics = {
         "scenario_id": scenario.get("scenario_id", "geo-scenario"),
         "initial_burned_ha": replay["outcomes"]["initial_burned_ha"],
@@ -528,7 +534,7 @@ def holdout_evaluation(
     rows = []
     for scenario, metrics in zip(scenarios, policy):
         bench = run_geographic_benchmark(scenario, random_seeds=(42, 43))["policies"]
-        rows.append({"scenario_id": scenario["scenario_id"], "policy_ha": metrics["final_burned_ha"],
+        rows.append({**scenario_entry(scenario), "policy_ha": metrics["final_burned_ha"],
                      **{f"{name}_ha": bench[name]["final_burned_ha"] for name in names}})
     count = max(len(rows), 1)
     return {
@@ -555,7 +561,7 @@ def evaluate_geographic_policy(
     results = []
     with torch.no_grad():
         for sc in scenarios:
-            _, metrics = rollout_geographic(model, sc, device=device, deterministic=True, **input_options)
+            _, metrics = rollout_geographic(model, sc, device=device, deterministic=True, inference_only=True, **input_options)
             results.append(metrics)
     model.train()
     return results
@@ -779,6 +785,7 @@ def main() -> None:
                         help="add a simulated thermal band as a 4th image channel (image inputs, D-58)")
     parser.add_argument("--eval-scenarios", type=int, default=None, help="Limit number of validation scenarios to evaluate")
     parser.add_argument("--checkpoint", type=Path)
+    parser.add_argument("--training-report", type=Path, help="Load evaluation architecture and verified weights binding from this report")
     parser.add_argument("--resume", type=Path, help="Path to checkpoint to resume weights from")
     parser.add_argument("--fleet-size", type=int, default=1,
                         help="number of identical aircraft (D-62); extra aircraft start at the water source")
@@ -829,10 +836,7 @@ def main() -> None:
     model_options = {"action_mode": args.action_mode, "slot_features": args.slot_features, **input_options}
     holdout_scenarios = []
     if args.holdout_activation:
-        holdout_scenarios = [s for s in dev_scenarios if s["activation_id"] == args.holdout_activation]
-        dev_scenarios = [s for s in dev_scenarios if s["activation_id"] != args.holdout_activation]
-        if not holdout_scenarios or not dev_scenarios:
-            raise ValueError(f"holdout activation {args.holdout_activation} must split the development set")
+        dev_scenarios, holdout_scenarios = partition_holdout(dev_scenarios, args.holdout_activation)
     rollout_options = {**input_options, "skip_forced": args.skip_forced}
     ppo_options = {"ppo_epochs": args.ppo_epochs, "minibatches": args.minibatches, "gae_lambda": args.gae_lambda,
                    "reward_scaling": args.reward_scaling, "target_kl": args.target_kl,
@@ -847,7 +851,13 @@ def main() -> None:
                              "gae_lambda": args.gae_lambda, "reward_scaling": args.reward_scaling,
                              "target_kl": args.target_kl, "entropy_coef": args.entropy_coef,
                              "entropy_coef_final": args.entropy_coef_final}, "input_mode": args.input_mode, "action_mode": args.action_mode, "include_ros": args.ros, "include_thermal": args.thermal, "fleet_size": args.fleet_size, "holdout_activation": args.holdout_activation,
-                     "imagery_dir": str(args.imagery_dir) if args.imagery_dir else None}
+                     "imagery_dir": str(args.imagery_dir) if args.imagery_dir else None,
+                     "slot_features": args.slot_features, "skip_forced": args.skip_forced,
+                     "updates": args.updates, "episodes_per_update": args.episodes_per_update,
+                     "training_settings": {"learning_rate": args.lr, "augment": args.augment,
+                         "drop_bonus_per_cell": args.drop_bonus, "eval_every": args.eval_every,
+                         "image_checkpoint_chunk": args.image_checkpoint_chunk,
+                         "resume_checkpoint_sha256": hashlib.sha256(args.resume.read_bytes()).hexdigest() if args.resume else None}}
 
     if args.smoke or (not args.train and not args.select and not args.eval):
         print(f"Running Geographic PPO smoke test (recurrent={recurrent})...")
@@ -873,13 +883,14 @@ def main() -> None:
             "seed": args.seed,
             "recurrent": recurrent,
             **config_report, "device": str(device),
+            "updates": 1, "episodes_per_update": 1,
             "loss": losses[0],
             "evaluation_metrics": metrics,
         }
         rendered = json.dumps(report, indent=2)
         if args.output:
             args.output.parent.mkdir(parents=True, exist_ok=True)
-            args.output.write_text(rendered)
+            write_report(report, args.output, args.checkpoint)
             print(f"Wrote smoke artifact -> {args.output}")
         else:
             print(rendered)
@@ -916,7 +927,7 @@ def main() -> None:
         }
         if args.output:
             args.output.parent.mkdir(parents=True, exist_ok=True)
-            args.output.write_text(json.dumps(report, indent=2))
+            write_report(report, args.output, args.checkpoint)
             print(f"Wrote training report -> {args.output}")
         return
 
@@ -928,6 +939,7 @@ def main() -> None:
         print(f"Training {args.candidates} candidates on {len(dev_scenarios)} development scenarios...")
         best_candidate = None
         best_mean_burned = float("inf")
+        selected_seed = None
         candidate_reports = []
 
         for c_idx in range(args.candidates):
@@ -969,6 +981,7 @@ def main() -> None:
             if mean_burned < best_mean_burned:
                 best_mean_burned = mean_burned
                 best_candidate = cand_model
+                selected_seed = c_seed
 
         if args.checkpoint and best_candidate is not None:
             args.checkpoint.parent.mkdir(parents=True, exist_ok=True)
@@ -991,13 +1004,13 @@ def main() -> None:
             "seed": args.seed,
             "recurrent": recurrent,
             **config_report, "device": str(device),
-            "candidates_count": args.candidates,
+            "candidates_count": args.candidates, "selected_seed": selected_seed,
             "best_mean_burned_ha": round(best_mean_burned, 2),
             "candidates": candidate_reports,
         }
         if args.output:
             args.output.parent.mkdir(parents=True, exist_ok=True)
-            args.output.write_text(json.dumps(report, indent=2))
+            write_report(report, args.output, args.checkpoint)
             print(f"Wrote selection report -> {args.output}")
         return
 
@@ -1009,15 +1022,30 @@ def main() -> None:
         if args.eval_scenarios is not None:
             target_scenarios = target_scenarios[:args.eval_scenarios]
 
-        model = build_policy_model(target_scenarios[0], recurrent=recurrent, **model_options).to(device)
-        model.load_state_dict(torch.load(args.checkpoint, map_location=device))
-        model.eval()
+        if args.training_report:
+            from .policy_artifact import load_policy_artifact
+            model, artifact_info = load_policy_artifact(args.checkpoint, args.training_report,
+                load_geographic_split("development", args.scenarios_dir, synthetic=args.synthetic),
+                imagery_dir=args.imagery_dir, device=str(device), skip_forced=True if args.skip_forced else None)
+            config = model._nightjar_inference
+            target_scenarios = with_fleet(load_geographic_split(args.split, args.scenarios_dir, synthetic=args.synthetic), config["fleet_size"])
+            if args.eval_scenarios is not None:
+                target_scenarios = target_scenarios[:args.eval_scenarios]
+            rollout_options = {key: config[key] for key in ("input_mode", "imagery_dir", "include_ros", "include_thermal", "skip_forced")}
+            config_report.update({key: config[key] for key in ("input_mode", "action_mode", "recurrent", "include_ros", "include_thermal", "fleet_size", "slot_features", "skip_forced")})
+            config_report["imagery_dir"] = str(config["imagery_dir"]) if config["imagery_dir"] else None
+            config_report["device"] = str(device)
+            config_report["training_artifact"] = artifact_info
+        else:
+            model = build_policy_model(target_scenarios[0], recurrent=recurrent, **model_options).to(device)
+            model.load_state_dict(torch.load(args.checkpoint, weights_only=True, map_location=device))
+            model.eval()
 
         print(f"Evaluating {args.checkpoint} against baselines on split '{args.split}' ({len(target_scenarios)} scenarios)...")
         eval_reports = []
         for sc in target_scenarios:
             bm = run_geographic_benchmark(sc, random_seeds=(42, 43))
-            _, rl_metrics = rollout_geographic(model, sc, device=device, deterministic=True, **rollout_options)
+            _, rl_metrics = rollout_geographic(model, sc, device=device, deterministic=True, inference_only=True, **rollout_options)
             no_int_ha = bm["policies"]["no_intervention"]["final_burned_ha"]
             heur_ha = bm["policies"]["heuristic"]["final_burned_ha"]
             cont_ha = bm["policies"]["containment_heuristic"]["final_burned_ha"]
@@ -1045,9 +1073,9 @@ def main() -> None:
 
         if args.output:
             args.output.parent.mkdir(parents=True, exist_ok=True)
-            args.output.write_text(json.dumps({"schema_version": EVAL_SCHEMA_VERSION, **config_report,
-                                               "dataset": _dataset_report(args.scenarios_dir, {args.split: target_scenarios}),
-                                               "reports": eval_reports}, indent=2))
+            write_report({"schema_version": EVAL_SCHEMA_VERSION, "recurrent": recurrent, **config_report,
+                          "dataset": _dataset_report(args.scenarios_dir, {args.split: target_scenarios}),
+                          "reports": eval_reports}, args.output, args.checkpoint, attach_sidecar=False)
             print(f"Wrote evaluation report -> {args.output}")
         return
 

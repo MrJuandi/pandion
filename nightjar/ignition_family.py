@@ -25,10 +25,11 @@ from pathlib import Path
 import random
 from typing import Any
 
+from .identity import content_hash, without_generation_times
 from .geographic_family import canonical_hash
 from .geographic_ppo import load_geographic_split
 
-SCHEMA_VERSION = "nightjar-geographic-ignition-family-0.1"
+SCHEMA_VERSION = "nightjar-geographic-ignition-family-0.2"
 SPLITS = ("development", "validation", "reserved")
 IGNITION_RADII_CELLS = (2, 3)
 EDGE_MARGIN_CELLS = 8
@@ -49,7 +50,7 @@ def ignition_candidates(fire: dict[str, Any], margin: int = EDGE_MARGIN_CELLS) -
 
 def ignite(parent: dict[str, Any], index: int, centre: tuple[int, int], radius: int) -> dict[str, Any]:
     """Return a child scenario whose initial burn is a square ignition around ``centre``."""
-    child = deepcopy(parent)
+    child = without_generation_times(parent)
     fire = child["fire"]
     fuel = fire["fuel_grid"]
     r0, c0 = centre
@@ -76,15 +77,20 @@ def ignite(parent: dict[str, Any], index: int, centre: tuple[int, int], radius: 
     return child
 
 
-def derive_split(parents: list[dict[str, Any]], ignitions_per_parent: int) -> list[dict[str, Any]]:
+def derive_split(parents: list[dict[str, Any]], ignitions_per_parent: int, *, seed: int = 0) -> list[dict[str, Any]]:
     children = []
     for parent in parents:
         candidates = ignition_candidates(parent["fire"])
         if len(candidates) < ignitions_per_parent:
             raise ValueError(f"{parent['scenario_id']}: only {len(candidates)} ignition candidates")
-        rng = random.Random(f"{parent['scenario_hash']}:ignitions")
+        rng = random.Random(f"{content_hash(parent)}:ignitions:{seed}")
         for index, centre in enumerate(rng.sample(candidates, ignitions_per_parent)):
-            children.append(ignite(parent, index, centre, rng.choice(IGNITION_RADII_CELLS)))
+            child = ignite(parent, index, centre, rng.choice(IGNITION_RADII_CELLS))
+            child["provenance"]["experimental_seed"] = seed
+            child["provenance"]["parent_content_sha256"] = content_hash(parent)
+            child.pop("scenario_hash")
+            child["scenario_hash"] = canonical_hash(child)
+            children.append(child)
     return children
 
 
@@ -94,6 +100,7 @@ def build_ignition_family(
     ignitions: dict[str, int] | None = None,
     *,
     synthetic: bool = False,
+    seed: int = 0,
 ) -> dict[str, Any]:
     """Derive and save the ignition family from a manifest-verified geographic family."""
     scenarios_dir, output_dir = Path(scenarios_dir), Path(output_dir)
@@ -104,17 +111,17 @@ def build_ignition_family(
         raise ValueError("ignitions per parent must be positive for every split")
 
     parent_manifest = json.loads((scenarios_dir / "manifest.json").read_text(encoding="utf-8"))
-    derived = {split: derive_split(load_geographic_split(split, scenarios_dir, synthetic=synthetic), counts[split]) for split in SPLITS}
+    derived = {split: derive_split(load_geographic_split(split, scenarios_dir, synthetic=synthetic), counts[split], seed=seed) for split in SPLITS}
 
     manifest = deepcopy(parent_manifest)
     manifest.update({
         "schema_version": SCHEMA_VERSION,
-        "family_id": "geographic-ignition-family-0.1",
+        "family_id": "geographic-ignition-family-0.2",
         "description": "Initial-attack scenarios: small ignitions inside CEMS burned areas on the parent family's maps.",
         "created_at_utc": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
         "parent_family": {"scenarios_dir": str(scenarios_dir), "schema_version": parent_manifest.get("schema_version"),
                           "manifest_sha256": canonical_hash(parent_manifest)},
-        "ignition": {"radii_cells": list(IGNITION_RADII_CELLS), "edge_margin_cells": EDGE_MARGIN_CELLS,
+        "ignition": {"experimental_seed": seed, "radii_cells": list(IGNITION_RADII_CELLS), "edge_margin_cells": EDGE_MARGIN_CELLS,
                      "ignitions_per_parent": counts},
         "counts": {**{split: len(items) for split, items in derived.items()},
                    "total": sum(len(items) for items in derived.values())},
@@ -143,10 +150,11 @@ def main() -> None:
     for split in SPLITS:
         parser.add_argument(f"--{split}-ignitions", type=int, default=DEFAULT_IGNITIONS[split],
                             help=f"Ignitions per {split} parent scenario")
+    parser.add_argument("--seed", type=int, default=0, help="Explicit experimental seed")
     parser.add_argument("--synthetic", action="store_true", help="Parent is an explicitly generated synthetic family")
     args = parser.parse_args()
     result = build_ignition_family(args.scenarios_dir, args.output_dir,
-                                   {split: getattr(args, f"{split}_ignitions") for split in SPLITS}, synthetic=args.synthetic)
+                                   {split: getattr(args, f"{split}_ignitions") for split in SPLITS}, synthetic=args.synthetic, seed=args.seed)
     print(json.dumps(result["manifest"]["counts"]))
 
 

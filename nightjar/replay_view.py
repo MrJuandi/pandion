@@ -54,6 +54,13 @@ def normalize_replay(replay: dict) -> dict:
     out["origin_m"] = list(out.get("origin_m", out.get("origin_utm", [0, 0])))
     if len(out["origin_m"]) != 2 or any(not isinstance(v, (int, float)) or not math.isfinite(v) for v in out["origin_m"]):
         raise ValueError("origin_m must contain two finite metre coordinates")
+    # An explicit malformed identity must never silently merge two trajectories.
+    for field in ("aircraft_track", "decisions", "drops", "aircraft_initial_state"):
+        for record in out.get(field, []):
+            key = "index" if field == "aircraft_initial_state" else "aircraft_index"
+            index = record.get(key, 0)
+            if isinstance(index, bool) or not isinstance(index, int) or index < 0:
+                raise ValueError(f"{field}: {key} must be a nonnegative integer")
     for decision in out.get("decisions", []):
         decision["completed_at_s"] = decision["time_s"]
         decision["time_s"] = decision.get("decision_time_s", decision["time_s"])

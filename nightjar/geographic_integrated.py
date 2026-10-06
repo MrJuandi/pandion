@@ -355,7 +355,7 @@ def geographic_episode(
     # Water drop execution on physical landscape
     drops_log: list[dict[str, Any]] = []
 
-    def apply_water_drop(drop_time: float, target_x_m: float, target_y_m: float) -> list[list[int]]:
+    def apply_water_drop(drop_time: float, target_x_m: float, target_y_m: float, aircraft_index: int) -> list[list[int]]:
         """Apply water drop to cell and immediate neighborhood, establishing a physical barrier."""
         target_c = int(round(target_x_m / cell_size))
         target_r = int(round(target_y_m / cell_size))
@@ -371,6 +371,7 @@ def geographic_episode(
                     treated.append([nr, nc])
         drops_log.append({
             "time_s": round(drop_time, 2),
+            "aircraft_index": aircraft_index, "water_l": capacity_l,
             "target_local_m": [round(target_x_m, 2), round(target_y_m, 2)],
             "target_utm_m": [round(target_x_m + origin_x, 2), round(target_y_m + origin_y, 2)],
             "treated_cells_count": len(treated),
@@ -435,7 +436,7 @@ def geographic_episode(
             advance_fire(effect_time)
             craft = fleet[index]
             if kind == "drop":
-                treated = apply_water_drop(effect_time, payload[0], payload[1])
+                treated = apply_water_drop(effect_time, payload[0], payload[1], index)
                 known_treated_cells.extend(treated)
                 craft["pos"] = [payload[0], payload[1]]
                 craft["water"] = max(0, craft["water"] - capacity_l)
@@ -732,6 +733,8 @@ def geographic_episode(
         "water_mask": deepcopy(fire_dict.get("water_mask", [[False] * cols for _ in range(rows)])),
         "elevation_m": deepcopy(elevation),
         "aircraft_track": aircraft_track,
+        "aircraft_initial_state": [{"index": i, "position_m": list(pos), "water_l": capacity_l,
+                                    "capacity_l": capacity_l} for i, pos in enumerate(starts)],
         "horizon_s": horizon_s,
         "grid": {
             "rows": rows,

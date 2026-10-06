@@ -1,5 +1,12 @@
 # Design decisions and open questions
 
+The 2026-10-06 [research-workspace contract](RESEARCH_WORKFLOWS.md) settles
+generation clocks outside new scenario identities, explicit derivation seeds,
+hash-bound model reports, shared inference, per-aircraft replay and CEMS
+activation groups as future holdout independence units. Archived hashes and
+historical experiment meanings remain intact. This named contract avoids
+reusing decision numbers already assigned on concurrent branches.
+
 ## Agreed direction
 
 | ID | Decision | Rationale |

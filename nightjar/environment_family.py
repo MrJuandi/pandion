@@ -16,12 +16,13 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
 
+from .identity import IDENTITY_VERSION, without_generation_times
 from .cems_catalog import ACTIVATIONS
 from .geographic_family import canonical_hash
 from .geographic_ppo import load_geographic_split
 from .pilot_terrain import _parse_ascii
 
-SCHEMA_VERSION = "nightjar-geographic-environment-family-0.1"
+SCHEMA_VERSION = "nightjar-geographic-environment-family-0.2"
 SCENARIO_SCHEMA_VERSION = "nightjar-geographic-scenario-0.2"
 TERRAIN_FILES = {
     "EMSR578": "emsr578.asc",
@@ -204,7 +205,8 @@ def _enrich_scenario(scenario: dict[str, Any], elevation: list[list[float]], sou
         result, terrain, audit=audit, pilot_scenario=pilot_scenario,
         station_wind_factor=station_wind_factor, moisture_mode=moisture_mode,
     )
-    result["environment"]["created_at_utc"] = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+    result = without_generation_times(result)
+    result["provenance"]["identity_version"] = IDENTITY_VERSION
     result.pop("scenario_hash", None)
     result["scenario_hash"] = canonical_hash(result)
     return result
