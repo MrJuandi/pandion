@@ -166,3 +166,7 @@ no page errors. All six first-case PPO areas matched the archived fold rows
 (201, 74, 61, 68, 27, 215 ha); all 24 replay tracks ended within the horizon.
 The first D-71 EMSR578 case executes 17 drops, compared with four in the older
 D-70 preview. These are matched-input checks, not a claim of winning every case.
+
+After integrating the current training-batching main, the complete suite passed
+353 tests with four optional-data skips. The six first-case D-71 areas were
+checked again and still matched; all 24 tracks remained within the horizon.
