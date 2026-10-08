@@ -9,6 +9,11 @@ to one default rule (D-59, D-60). Here the policy chooses *which* focus and
 - index ``2 + 4 * k + a``: drop on focus slot ``k`` (0..MAX_SLOTS-1) at aspect
   ``a`` in (head, left flank, right flank, rear), relative to the observed wind.
 
+With drop distances (D-79) each slot and aspect is repeated per distance ``d``
+in cells: index ``2 + (4 * k + a) * D + j`` aims ``distances[j]`` cells beyond the
+chosen front cell, away from the fire, so a drop can lead a fast front or land
+on fuel ahead. The default ``(0,)`` is the D-61 action set.
+
 Focus slots are fire fronts (D-67): the border cells, next to attackable
 cells, of 8-connected groups of fire-reached cells, ordered by front length
 (ties by centroid row then column). Extra fronts beyond ``MAX_SLOTS`` are not
@@ -23,13 +28,33 @@ import math
 from typing import Any
 
 from .aircraft import tank_capacity_l
-from .policies import candidate_cells
+from .policies import _is_burnable_fuel, candidate_cells, claimed_cells
 
 MAX_SLOTS = 4
 ASPECTS = ("HEAD", "FLANK_LEFT", "FLANK_RIGHT", "REAR")
 NUM_ACTIONS = 2 + MAX_SLOTS * len(ASPECTS)
 ACTION_NAMES = ("HOLD", "RETURN_TO_REFILL") + tuple(
     f"ATTACK_F{k}_{aspect}" for k in range(MAX_SLOTS) for aspect in ASPECTS)
+
+
+def validate_distances(distances_cells: Any) -> tuple[int, ...]:
+    """Distinct non-negative drop distances in cells, in the given order."""
+    distances = tuple(int(d) for d in distances_cells)
+    if not distances or len(set(distances)) != len(distances) or min(distances) < 0:
+        raise ValueError(f"drop distances must be distinct non-negative cell counts, got {distances_cells}")
+    return distances
+
+
+def num_actions(distances_cells: Any = (0,)) -> int:
+    return 2 + MAX_SLOTS * len(ASPECTS) * len(validate_distances(distances_cells))
+
+
+def action_names(distances_cells: Any = (0,)) -> tuple[str, ...]:
+    distances = validate_distances(distances_cells)
+    if distances == (0,):
+        return ACTION_NAMES
+    return ("HOLD", "RETURN_TO_REFILL") + tuple(
+        f"ATTACK_F{k}_{aspect}_D{d}" for k in range(MAX_SLOTS) for aspect in ASPECTS for d in distances)
 _FOUR = ((-1, 0), (1, 0), (0, -1), (0, 1))
 
 
@@ -89,14 +114,73 @@ def _slot_candidates(cluster: list[tuple[int, int]], candidates: list[list[int]]
 
 
 class ParametricActionMapper:
-    """Maps the 18 parameterised actions to simulator orders, with masking."""
+    """Maps parameterised actions (slot x aspect x drop distance) to simulator orders, with masking."""
 
     action_mode = "parametric"
-    action_names = ACTION_NAMES
-    num_actions = NUM_ACTIONS
 
-    def __init__(self, cell_size_m: float) -> None:
+    def __init__(self, cell_size_m: float, distances_cells: Any = (0,)) -> None:
         self.cell_size_m = float(cell_size_m)
+        self.distances = validate_distances(distances_cells)
+        self.action_names = action_names(self.distances)
+        self.num_actions = num_actions(self.distances)
+
+    def targets(self, observation: dict) -> dict[int, tuple[int, int]]:
+        """Target cell of every currently valid drop action, keyed by action index.
+
+        Distance 0 is the D-61 front cell for the slot and aspect. A positive
+        distance steps that many cells from it away from the fire, along the
+        edge joining it to the front; the cell must be in the grid, burnable,
+        observed unburned, untreated and not claimed by another aircraft.
+        """
+        clusters = fire_slots(observation)
+        candidates = candidate_cells(observation)
+        cells = observation["fire"]["cells"]
+        fuel = observation["fuel_model"]
+        rows, cols = len(cells), len(cells[0]) if cells else 0
+        blocked = {tuple(cell) for cell in observation.get("known_treated_cells", [])} | claimed_cells(observation)
+        east, north = observation.get("midflame_wind_to_m_s", [0.0, 0.0])
+        w_len = math.hypot(east, north)
+        pos_x, pos_y = observation["aircraft"]["position_m"]
+        per_slot = len(ASPECTS) * len(self.distances)
+        out: dict[int, tuple[int, int]] = {}
+        for k, cluster_cells in enumerate(clusters):
+            cluster = set(cluster_cells)
+            slot_targets = _slot_candidates(cluster_cells, candidates)
+            if not slot_targets:
+                continue
+
+            def geometry(cand: list[int]) -> tuple[float, float, float, tuple[int, int]]:
+                r, c = cand
+                proj, cross, outward = [], [], []
+                for dr, dc in _FOUR:
+                    if (r + dr, c + dc) in cluster:
+                        dx, dy = -dc * self.cell_size_m, -dr * self.cell_size_m  # outward from the fire
+                        proj.append((dx * east + dy * north) / w_len if w_len > 1e-6 else 0.0)
+                        cross.append((east * dy - north * dx) / w_len if w_len > 1e-6 else 0.0)
+                        outward.append((-dr, -dc))
+                best = max(range(len(proj)), key=proj.__getitem__)
+                distance = math.hypot(c * self.cell_size_m - pos_x, r * self.cell_size_m - pos_y)
+                return proj[best], cross[best], distance, outward[best]
+
+            scored = [(geometry(cand), cand) for cand in slot_targets]
+            for a, name in enumerate(ASPECTS):
+                if name == "HEAD":
+                    chosen = max(scored, key=lambda x: (x[0][0], -x[0][2], -x[1][0], -x[1][1]))
+                elif name == "REAR":
+                    chosen = min(scored, key=lambda x: (x[0][0], x[0][2], x[1][0], x[1][1]))
+                elif name == "FLANK_LEFT":
+                    chosen = max(scored, key=lambda x: (x[0][1], -x[0][2], -x[1][0], -x[1][1]))
+                else:
+                    chosen = min(scored, key=lambda x: (x[0][1], x[0][2], x[1][0], x[1][1]))
+                (r0, c0), (orow, ocol) = chosen[1], chosen[0][3]
+                for j, d in enumerate(self.distances):
+                    r, c = r0 + d * orow, c0 + d * ocol
+                    if d and not (0 <= r < rows and 0 <= c < cols and _is_burnable_fuel(fuel[r][c])
+                                  and isinstance(cells[r][c], dict) and cells[r][c].get("fire_detected") is False
+                                  and (r, c) not in blocked):
+                        continue
+                    out[2 + k * per_slot + a * len(self.distances) + j] = (int(r), int(c))
+        return out
 
     def compute_mask(self, observation: dict) -> list[bool]:
         mask = [False] * self.num_actions
@@ -110,11 +194,8 @@ class ParametricActionMapper:
         mask[0] = True
         if aircraft["water_l"] < tank_capacity_l(aircraft):
             mask[1] = True
-        candidates = candidate_cells(observation)
-        for k, cluster in enumerate(fire_slots(observation)):
-            if _slot_candidates(cluster, candidates):
-                for a in range(len(ASPECTS)):
-                    mask[2 + k * len(ASPECTS) + a] = True
+        for index in self.targets(observation):
+            mask[index] = True
         return mask
 
     def to_mask_torch(self, observation: dict, device: Any = None) -> Any:
@@ -123,42 +204,14 @@ class ParametricActionMapper:
         return torch.tensor(self.compute_mask(observation), dtype=torch.bool, device=device).unsqueeze(0)
 
     def target_cell(self, action_index: int, observation: dict) -> tuple[int, int]:
-        """Row/column the drop action aims at; raises if the slot has no target."""
-        slot, aspect = divmod(action_index - 2, len(ASPECTS))
-        clusters = fire_slots(observation)
-        if not (0 <= slot < len(clusters)):
+        """Row/column the drop action aims at; raises if the action has no valid target."""
+        slot = (action_index - 2) // (len(ASPECTS) * len(self.distances))
+        if not (0 <= slot < len(fire_slots(observation))):
             raise ValueError(f"focus slot {slot} does not exist")
-        cluster = set(clusters[slot])
-        targets = _slot_candidates(clusters[slot], candidate_cells(observation))
-        if not targets:
-            raise ValueError(f"focus slot {slot} has no attackable perimeter cell")
-        east, north = observation.get("midflame_wind_to_m_s", [0.0, 0.0])
-        w_len = math.hypot(east, north)
-        pos_x, pos_y = observation["aircraft"]["position_m"]
-
-        def geometry(cand: list[int]) -> tuple[float, float, float]:
-            r, c = cand
-            proj, cross = [], []
-            for dr, dc in _FOUR:
-                if (r + dr, c + dc) in cluster:
-                    dx, dy = -dc * self.cell_size_m, -dr * self.cell_size_m  # outward from the fire
-                    proj.append((dx * east + dy * north) / w_len if w_len > 1e-6 else 0.0)
-                    cross.append((east * dy - north * dx) / w_len if w_len > 1e-6 else 0.0)
-            best = max(range(len(proj)), key=proj.__getitem__)
-            distance = math.hypot(c * self.cell_size_m - pos_x, r * self.cell_size_m - pos_y)
-            return proj[best], cross[best], distance
-
-        scored = [(geometry(cand), cand) for cand in targets]
-        name = ASPECTS[aspect]
-        if name == "HEAD":
-            chosen = max(scored, key=lambda x: (x[0][0], -x[0][2], -x[1][0], -x[1][1]))
-        elif name == "REAR":
-            chosen = min(scored, key=lambda x: (x[0][0], x[0][2], x[1][0], x[1][1]))
-        elif name == "FLANK_LEFT":
-            chosen = max(scored, key=lambda x: (x[0][1], -x[0][2], -x[1][0], -x[1][1]))
-        else:
-            chosen = min(scored, key=lambda x: (x[0][1], x[0][2], x[1][0], x[1][1]))
-        return int(chosen[1][0]), int(chosen[1][1])
+        targets = self.targets(observation)
+        if action_index not in targets:
+            raise ValueError(f"action {action_index} has no valid target cell")
+        return targets[action_index]
 
     def to_order(self, action_index: int, observation: dict | None = None) -> dict:
         if action_index == 0:
