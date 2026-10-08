@@ -28,7 +28,7 @@ import math
 from typing import Any
 
 from .aircraft import tank_capacity_l
-from .policies import _is_burnable_fuel, candidate_cells, claimed_cells
+from .policies import _is_burnable_fuel, candidate_cells, claimed_cells, full_cells
 
 MAX_SLOTS = 4
 ASPECTS = ("HEAD", "FLANK_LEFT", "FLANK_RIGHT", "REAR")
@@ -130,14 +130,15 @@ class ParametricActionMapper:
         Distance 0 is the D-61 front cell for the slot and aspect. A positive
         distance steps that many cells from it away from the fire, along the
         edge joining it to the front; the cell must be in the grid, burnable,
-        observed unburned, untreated and not claimed by another aircraft.
+        observed unburned, not already holding the maximum stacked drops (D-76)
+        and not claimed by another aircraft.
         """
         clusters = fire_slots(observation)
         candidates = candidate_cells(observation)
         cells = observation["fire"]["cells"]
         fuel = observation["fuel_model"]
         rows, cols = len(cells), len(cells[0]) if cells else 0
-        blocked = {tuple(cell) for cell in observation.get("known_treated_cells", [])} | claimed_cells(observation)
+        blocked = full_cells(observation) | claimed_cells(observation)
         east, north = observation.get("midflame_wind_to_m_s", [0.0, 0.0])
         w_len = math.hypot(east, north)
         pos_x, pos_y = observation["aircraft"]["position_m"]

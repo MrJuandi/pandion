@@ -28,6 +28,7 @@ from .environment import MOISTURE_KEYS
 from .geographic_integrated import DEFAULT_CAPACITY_L
 from .imagery_composite import compose_view, state_masks, thermal_view
 from .parametric_actions import MAX_SLOTS, slot_masks
+from .policies import stack_limit
 
 # Fuel families from Scott & Burgan (2005) code ranges and Anderson (1982) 1-13.
 FUEL_FAMILIES = ("nonburnable", "grass", "grass_shrub", "shrub", "timber_understory", "timber_litter", "slash_blowdown")
@@ -209,8 +210,9 @@ class GeographicInputTensorizer:
                 rgb = rgb.astype(np.float32) / 255.0
 
         treated = np.zeros((self.rows, self.cols), dtype=np.float32)
-        for r, c in observation.get("known_treated_cells", []):
-            treated[r, c] = 1.0
+        limit = stack_limit(observation)
+        for r, c in observation.get("known_treated_cells", []):  # one entry per stacked drop (D-76)
+            treated[r, c] = min(treated[r, c] + 1.0 / limit, 1.0)
         aircraft = observation["aircraft"]
         ax, ay = (float(v) for v in aircraft.get("position_m", [0.0, 0.0]))
         distance = np.hypot(self._anchors[0] - ax, self._anchors[1] - ay) / self._diagonal_m
