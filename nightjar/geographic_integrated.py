@@ -23,7 +23,7 @@ from pyretechnics import fuel_models, surface_fire
 
 from .environment import MOISTURE_KEYS, delivered_weather, edge_arrival, validate_forcing
 from .observation import build_reports, observe
-from .policies import candidate_cells, choose_order
+from .policies import MAX_STACKED_DROPS, candidate_cells, choose_order
 
 REPLAY_SCHEMA_VERSION = "nightjar-geographic-replay-0.4"
 OBSERVATION_MODES = ("realtime", "scheduled")
@@ -37,14 +37,23 @@ DEFAULT_DROP_SPEED_M_S = 55.0     # ~107 KIAS
 DEFAULT_REFILL_SERVICE_S = 180.0  # 3 min approach, scoop, climbout
 DEFAULT_CAPACITY_L = 6137
 
-# CL-415 water drop effect (D-74). One drop treats the target cell: an effective
-# CL-415 drop holds about 100 m of line (McFayden et al. 2023, Table 8-3 and
-# A8.5), one cell edge. A treated cell stops a front only if the fireline
-# intensity of the spread reaching it is at most the single-drop limit for the
-# open grass fuel type (A8.5 O-1a: one drop holds 100 m up to 1,000 kW/m; three
-# stacked drops are needed up to 3,200 kW/m and stronger fronts breach). Stacking
-# is not represented, since a treated cell is never a target again.
-DROP_HOLD_MAX_INTENSITY_KW_M = 1000.0
+# CL-415 water drop effect (D-74, D-76). One drop treats the target cell: an
+# effective CL-415 drop holds about 100 m of line (McFayden et al. 2023, Table 8-3
+# and A8.5), one cell edge. A treated cell stops a front only if the fireline
+# intensity of the spread reaching it is within what its stacked drops hold in the
+# open grass fuel type (A8.5 O-1a): one drop up to 1,000 kW/m, three up to
+# 3,200 kW/m; stronger fronts breach whatever the water. Up to MAX_STACKED_DROPS
+# drops can be stacked on a cell.
+DROP_HOLD_LIMITS_KW_M = ((1, 1000.0), (3, 3200.0))  # (drops needed, intensity held)
+DROP_HOLD_MAX_INTENSITY_KW_M = DROP_HOLD_LIMITS_KW_M[0][1]
+
+
+def drops_needed(intensity_kw_m: float) -> float:
+    """Stacked drops needed to hold a front of this intensity; inf when none can."""
+    for drops, limit in DROP_HOLD_LIMITS_KW_M:
+        if intensity_kw_m <= limit:
+            return drops
+    return float("inf")
 
 
 POLICIES = ("no_intervention", "random_valid", "heuristic", "containment_heuristic")
@@ -305,8 +314,7 @@ def geographic_episode(
     # State containers
     arrival: list[list[float | None]] = [[None] * cols for _ in range(rows)]
     burnout: list[list[float | None]] = [[None] * cols for _ in range(rows)]
-    barrier = [[False] * cols for _ in range(rows)]
-    barrier_time: dict[tuple[int, int], float] = {}
+    drop_times: dict[tuple[int, int], list[float]] = {}  # times of the drops stacked on each treated cell
     best = [[float("inf")] * cols for _ in range(rows)]
     queue: list[tuple[float, int, int, int, int]] = []  # (time, row, col, source row, source col)
 
@@ -330,16 +338,25 @@ def geographic_episode(
         """Cells whose water barrier stops spread along this edge: the target and, for diagonals, both orthogonals."""
         return ((r + dr, c + dc), (r + dr, c), (r, c + dc)) if dr and dc else ((r + dr, c + dc),)
 
-    def edge_held(r: int, c: int, dr: int, dc: int) -> bool:
-        """A water barrier on this edge stops the front leaving the reached cell (r, c) (D-74).
+    def edge_needed_drops(r: int, c: int, dr: int, dc: int) -> float:
+        """Drops a blocker of this edge needs to stop the front leaving reached cell (r, c).
 
         The front's intensity is taken in the forcing interval in which (r, c)
         was reached, so whether an edge holds never depends on later forcing.
         """
-        if not any(barrier[br][bc] for br, bc in blockers(r, c, dr, dc)):
-            return False
         index = segment_index(arrival[r][c] or 0.0)
-        return fireline_intensity(r, c, dr, dc, index) <= DROP_HOLD_MAX_INTENSITY_KW_M
+        return drops_needed(fireline_intensity(r, c, dr, dc, index))
+
+    def edge_closed_at(r: int, c: int, dr: int, dc: int) -> float:
+        """Time water on this edge started holding the front from (r, c); inf if it does not (D-74, D-76)."""
+        stacked = [drop_times[cell] for cell in blockers(r, c, dr, dc) if cell in drop_times]
+        if not stacked:
+            return float("inf")
+        needed = edge_needed_drops(r, c, dr, dc)
+        return min((times[int(needed) - 1] for times in stacked if len(times) >= needed), default=float("inf"))
+
+    def edge_held(r: int, c: int, dr: int, dc: int) -> bool:
+        return edge_closed_at(r, c, dr, dc) < float("inf")
 
     def can_spread(r: int, c: int, dr: int, dc: int) -> bool:
         return linked(r, c, dr, dc) and not edge_held(r, c, dr, dc)
@@ -400,7 +417,7 @@ def geographic_episode(
     drops_log: list[dict[str, Any]] = []
 
     def apply_water_drop(drop_time: float, target_x_m: float, target_y_m: float, aircraft_index: int) -> list[list[int]]:
-        """Treat the target cell with one CL-415 drop; it holds fronts up to the D-74 intensity limit."""
+        """Add one CL-415 drop to the target cell (D-74, D-76); it may stack on earlier drops."""
         target_c = int(round(target_x_m / cell_size))
         target_r = int(round(target_y_m / cell_size))
         treated = []
@@ -408,9 +425,9 @@ def geographic_episode(
         for dr, dc in drop_footprint:
             nr, nc = target_r + dr, target_c + dc
             if 0 <= nr < rows and 0 <= nc < cols:
-                if is_burnable(nr, nc) and arrival[nr][nc] is None and not barrier[nr][nc]:
-                    barrier[nr][nc] = True
-                    barrier_time[(nr, nc)] = drop_time
+                times = drop_times.setdefault((nr, nc), []) if is_burnable(nr, nc) and arrival[nr][nc] is None else None
+                if times is not None and len(times) < MAX_STACKED_DROPS:
+                    times.append(drop_time)
                     treated.append([nr, nc])
         drops_log.append({
             "time_s": round(drop_time, 2),
@@ -621,6 +638,7 @@ def geographic_episode(
             "cell_size_m": cell_size,
             "elevation_m": deepcopy(elevation_input) if elevation_input is not None else deepcopy(scenario.get("elevation_m", [[0.0] * cols for _ in range(rows)])),
             "known_treated_cells": known_treated_cells,
+            "max_stacked_drops": MAX_STACKED_DROPS,
         }
         if fleet_size > 1:
             current_obs["aircraft_index"] = ego
@@ -770,8 +788,7 @@ def geographic_episode(
                         continue
                     nr, nc = r + dr, c + dc
                     closed = min([arrival[nr][nc] if arrival[nr][nc] is not None else float("inf")]
-                                 + ([barrier_time.get(cell, float("inf")) for cell in blockers(r, c, dr, dc)]
-                                    if edge_held(r, c, dr, dc) else []))
+                                 + [edge_closed_at(r, c, dr, dc)])
                     if closed > arrival[r][c]:
                         end = max(end, min(closed, end_s))
                 line.append(round(end, 6))

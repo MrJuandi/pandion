@@ -73,9 +73,11 @@ class PolicyInputTests(unittest.TestCase):
         fuel_one_hot = cells[3:3 + len(FUEL_FAMILIES)]
         np.testing.assert_allclose(fuel_one_hot.sum(axis=0), 1.0)
         treated = cells[3 + len(FUEL_FAMILIES)]
+        # One entry per drop, scaled by the observation's stack limit (D-76).
+        limit = obs.get("max_stacked_drops", 1)
         for r, c in obs["known_treated_cells"]:
-            self.assertEqual(treated[r, c], 1.0)
-        self.assertEqual(treated.sum(), len(obs["known_treated_cells"]))
+            self.assertAlmostEqual(float(treated[r, c]), obs["known_treated_cells"].count([r, c]) / limit, places=6)
+        self.assertAlmostEqual(float(treated.sum()), len(obs["known_treated_cells"]) / limit, places=5)
         distance = cells[4 + len(FUEL_FAMILIES)]
         x, y = obs["aircraft"]["position_m"]
         size = self.scenario["grid"]["cell_size_m"]

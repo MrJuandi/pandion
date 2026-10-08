@@ -64,6 +64,32 @@ class TestDropEffect(unittest.TestCase):
         self.assertTrue(reached)
 
 
+class TestStackedDrops(unittest.TestCase):
+    """D-76: up to three drops stack on a cell; three hold fronts up to 3,200 kW/m."""
+
+    def stacked(self, wind):
+        from collections import Counter
+        scenario = with_weather(growing_fire_scenario(), (0.03, 0.04, 0.05, 0.03, 0.3, 0.6), wind)
+        replay = run_geographic_integrated(scenario, policy="heuristic")
+        arrival = replay["arrival_time_s"]
+        counts = Counter(tuple(c) for d in replay["drops"] for c in d["treated_cells"])
+        reached = {cell: n for cell, n in counts.items() if arrival[cell[0]][cell[1]] is not None}
+        return counts, reached
+
+    def test_three_stacked_drops_hold_a_front_one_drop_cannot(self):
+        # GR2, 3 % dead moisture, 4 m/s midflame wind: head fire about 2,500 kW/m.
+        counts, reached = self.stacked((2.83, 2.83))
+        self.assertLessEqual(max(counts.values()), 3)
+        self.assertIn(3, counts.values())
+        self.assertNotIn(3, reached.values())
+        self.assertIn(1, reached.values())
+
+    def test_a_front_above_the_stacked_limit_breaches_three_drops(self):
+        # Same fuel at 6.5 m/s: head fire about 4,000 kW/m, beyond what three drops hold.
+        counts, reached = self.stacked((4.6, 4.6))
+        self.assertIn(3, reached.values())
+
+
 class TestGeographicIntegrated(unittest.TestCase):
     def setUp(self):
         fixture = build_synthetic_cems_fixture("EMSR578", utm_zone=31, rows=40, cols=40)
