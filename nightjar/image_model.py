@@ -22,7 +22,7 @@ from __future__ import annotations
 from typing import Any
 
 from .model import TACTICAL_ACTION_NAMES
-from .parametric_actions import ASPECTS, MAX_SLOTS, NUM_ACTIONS as PARAMETRIC_ACTIONS
+from .parametric_actions import ASPECTS, MAX_SLOTS, num_actions as parametric_actions, validate_distances
 
 try:
     import torch
@@ -74,6 +74,7 @@ if HAS_TORCH:
             use_image: bool = True,
             image_channels: int = 3,
             slot_raw_features: bool = False,
+            drop_distances: tuple[int, ...] = (0,),
         ) -> None:
             super().__init__()
             if action_mode not in ("tactical", "spatial", "parametric"):
@@ -85,7 +86,10 @@ if HAS_TORCH:
             self.use_image = use_image
             self.recurrent = recurrent
             self.lstm_hidden_dim = lstm_hidden_dim
-            self.action_dim = {"tactical": len(TACTICAL_ACTION_NAMES), "parametric": PARAMETRIC_ACTIONS}.get(
+            # D-79: parametric drops may aim several cells beyond the front.
+            self.drop_distances = validate_distances(drop_distances)
+            self.action_dim = {"tactical": len(TACTICAL_ACTION_NAMES),
+                               "parametric": parametric_actions(self.drop_distances)}.get(
                 action_mode, 2 + grid_rows * grid_cols)
             # Parametric mode: the last MAX_SLOTS cell channels are focus-slot masks.
             self.slot_channels = MAX_SLOTS if action_mode == "parametric" else 0
@@ -118,7 +122,7 @@ if HAS_TORCH:
                 self.global_actor_head = nn.Linear(head_dim, 2)
                 extra = (cell_channels + 1) if slot_raw_features else 0
                 self.slot_actor_head = nn.Sequential(
-                    nn.Linear(width + head_dim + 1 + extra, 64), nn.LeakyReLU(0.01), nn.Linear(64, len(ASPECTS)))
+                    nn.Linear(width + head_dim + 1 + extra, 64), nn.LeakyReLU(0.01), nn.Linear(64, len(ASPECTS) * len(self.drop_distances)))
             else:
                 self.global_actor_head = nn.Linear(head_dim, 2)
                 self.cell_condition = nn.Linear(head_dim, width)
