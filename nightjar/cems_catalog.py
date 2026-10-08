@@ -376,8 +376,9 @@ def _rapid_mapping_incident(key: str, cems_activation: str, aoi: str, name: str,
 # separate fires so the tactical window centred on the burnt area contains none of
 # it, EMSR837 AOI02 (Odollo), whose window overlaps EMSR602 AOI02 (the same area
 # burnt in 2022), EMSR905 (Artana; 295 ha in over a thousand small polygons, too
-# little burnt area in the window for two separated foci) and the Canary Islands
-# activations.
+# little burnt area in the window for two separated foci), EMSR887 (Congosto; the
+# AOI is 3.3 km tall, less than the 4 km square tactical window that augmentation
+# needs) and the Canary Islands activations.
 ACTIVATIONS.update({
     "EMSR656": _rapid_mapping_incident(
         "EMSR656", "EMSR656", "AOI01", "Villanueva de Viver", "Castellón", "Comunitat Valenciana", 30,
@@ -444,11 +445,6 @@ ACTIVATIONS.update({
         (-7.3, 37.3, -6.8, 37.7), "2026-06-10T22:00:16Z",
         "4055ce768927148f1a57a8b7ff320a9270c786849f78f42b2a011eea888acb01", 3783.2,
         landcover_sha256="3bea93f76637b47e84e04175d8c9b1ae30b4d45d60dccfdb7af4401891d69b19"),
-    "EMSR887": _rapid_mapping_incident(
-        "EMSR887", "EMSR887", "AOI01", "Congosto", "León", "Castilla y León", 29,
-        (-6.6, 42.5, -6.4, 42.8), "2026-07-03T18:21:07Z",
-        "266c577f44b205bdc1f0499bcc86f83dfced55ba6f6a6d5fd5d91ed0b39f38d5", 372.2,
-        landcover_sha256="2a6db1dac8a83d0c5037b95b07f385d5ee8f0676df1718b0a03cbcce9c6a2556"),
     "EMSR888": _rapid_mapping_incident(
         "EMSR888", "EMSR888", "AOI01", "Santa Cristina d'Aro", "Girona", "Catalonia", 31,
         (2.9, 41.7, 3.2, 42.0), "2026-07-04T20:22:02Z",

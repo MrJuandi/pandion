@@ -195,7 +195,7 @@ D-73 adds fourteen more Spanish delineation products to development (EMSR365, EM
 .venv/bin/python -m nightjar.imagery_acquire runs/geographic-multi-ignition-family-d71-20261006 runs/geographic-imagery-s2-d71-new-20261006 --activations EMSR365 ...
 ```
 
-D-75 adds 23 Rapid Mapping incidents (2023–2026) whose fuel comes from CORINE 2018. For each, fetch the package and the pinned land-cover extract, then regenerate the chain (terrain and imagery only for the new incidents, `--activations`):
+D-75 adds 22 Rapid Mapping incidents (2023–2026) whose fuel comes from CORINE 2018. For each, fetch the package and the pinned land-cover extract, then regenerate the chain (terrain and imagery only for the new incidents, `--activations`):
 
 ```sh
 .venv/bin/python -m nightjar.cems_catalog fetch --activation EMSR921
