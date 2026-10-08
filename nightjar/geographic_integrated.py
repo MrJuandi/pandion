@@ -45,6 +45,12 @@ DEFAULT_CAPACITY_L = 6137
 # 3,200 kW/m; stronger fronts breach whatever the water. Up to MAX_STACKED_DROPS
 # drops can be stacked on a cell.
 DROP_HOLD_LIMITS_KW_M = ((1, 1000.0), (3, 3200.0))  # (drops needed, intensity held)
+# A front that breaches a treated cell is delayed by the time it needs to heat the
+# cell's water to boiling and evaporate it (D-78): delay = water mass x energy per kg
+# / (fireline intensity x cell width). All the water is assumed to reach the fuel, so
+# this is an upper bound on the slowing; no further empirical factor is applied.
+WATER_HEATING_KJ_KG = 4.186 * (100.0 - 20.0)  # liquid water from 20 C to boiling
+WATER_EVAPORATION_KJ_KG = 2257.0
 DROP_HOLD_MAX_INTENSITY_KW_M = DROP_HOLD_LIMITS_KW_M[0][1]
 
 
@@ -361,8 +367,17 @@ def geographic_episode(
     def can_spread(r: int, c: int, dr: int, dc: int) -> bool:
         return linked(r, c, dr, dc) and not edge_held(r, c, dr, dc)
 
-    def relax(r: int, c: int, dr: int, dc: int) -> None:
-        """Queue the arrival at (r + dr, c + dc) through the edge from reached cell (r, c)."""
+    def water_delay_s(r: int, c: int, dr: int, dc: int) -> float:
+        """Time a breaching front from (r, c) needs to boil off the target cell's water (D-78)."""
+        times = drop_times.get((r + dr, c + dc))
+        if not times:
+            return 0.0
+        intensity = fireline_intensity(r, c, dr, dc, segment_index(arrival[r][c] or 0.0))
+        energy_kj = len(times) * capacity_l * (WATER_HEATING_KJ_KG + WATER_EVAPORATION_KJ_KG)
+        return energy_kj / (max(intensity, 1e-6) * cell_size)
+
+    def edge_time(r: int, c: int, dr: int, dc: int) -> float | None:
+        """Arrival at (r + dr, c + dc) through the edge from reached cell (r, c); None if it cannot spread."""
         nr, nc = r + dr, c + dc
         cur_time = arrival[r][c]
         dist = hypot(dc * cell_size, dr * cell_size)
@@ -376,8 +391,16 @@ def geographic_episode(
             r_source = spread_rate(r, c, dr, dc)
             r_target = spread_rate(nr, nc, dr, dc)
             if r_source <= 0.0 or r_target <= 0.0:
-                return
+                return None
             candidate_time = cur_time + dist/(2.0*r_source) + dist/(2.0*r_target)
+        return candidate_time + water_delay_s(r, c, dr, dc)
+
+    def relax(r: int, c: int, dr: int, dc: int) -> None:
+        """Queue the arrival at (r + dr, c + dc) through the edge from reached cell (r, c)."""
+        nr, nc = r + dr, c + dc
+        candidate_time = edge_time(r, c, dr, dc)
+        if candidate_time is None:
+            return
         if candidate_time < best[nr][nc]:
             best[nr][nc] = candidate_time
             heappush(queue, (candidate_time, nr, nc, r, c))
@@ -388,9 +411,11 @@ def geographic_episode(
             cur_time, r, c, sr, sc = heappop(queue)
             if cur_time != best[r][c] or not is_burnable(r, c):
                 continue
-            if sr >= 0 and edge_held(sr, sc, r - sr, c - sc):
-                # A drop made after this arrival was queued holds that front;
-                # the cell can still be reached through an edge that breaches.
+            if sr >= 0 and (edge_held(sr, sc, r - sr, c - sc) or (
+                    (r, c) in drop_times
+                    and (edge_time(sr, sc, r - sr, c - sc) or float("inf")) > cur_time + 1e-6)):
+                # Water added after this arrival was queued holds or delays that
+                # front (D-76, D-78); re-evaluate every edge into the cell.
                 best[r][c] = float("inf")
                 for dr, dc in NEIGHBORS:
                     pr, pc = r - dr, c - dc
