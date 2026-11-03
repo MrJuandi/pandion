@@ -466,3 +466,42 @@ and execution; it is not a new pooled evaluation. The earlier preview's D-70
 EMSR583 checkpoint must not be used to characterize D-71 results. Regenerated
 refill metrics count completed services and actual travel within the episode;
 this correction changes those audit metrics, not the trained weights.
+### Holdout folds after D-69 and D-70 (2026-10-05)
+
+The table above predates D-69 (causal burning state, horizon scoring) and D-70 (scoopable refill points 7–22 km away instead of nearby ponds), so its numbers are superseded. The same configuration was re-run on `runs/geographic-multi-ignition-family-d70-20261005` (all families regenerated with the D-70 refill points; imagery reused because grids are unchanged), seed 42, commit `99160c1`, 3 concurrent folds. Selection on validation (EMSR590, 24 scenarios): heuristic 112.62, containment 115.42, no intervention 144.33 ha; selected weights 105.54 / 105.12 / 103.75 ha. Summary from `python -m nightjar.fold_report runs/geographic-holdout-folds-d70-20261005` (95% bootstrap interval, 10,000 resamples):
+
+| Held-out incident | Policy | Heuristic | Containment | Policy − heuristic (95% CI) | Better / equal / worse |
+|---|---|---|---|---|---|
+| EMSR583 | 134.5 | **128.2** | 148.0 | +6.31 [−3.03, +17.25] (+4.9%) | 14 / 2 / 16 |
+| EMSR602_AOI04 | **62.5** | 73.0 | 71.8 | −10.53 [−14.69, −6.47] (−14.4%) | 23 / 4 / 5 |
+| EMSR625_AOI01 | **76.3** | 78.7 | 79.2 | −2.41 [−5.34, +0.34] (−3.1%) | 14 / 3 / 15 |
+| Pooled (3 folds) | **91.1** | 93.3 | 99.7 | −2.21 [−5.72, +1.82] (−2.4%) | 51 / 9 / 36 |
+
+With realistic refill distances the policy still beats containment on every fold and clearly beats the heuristic on EMSR602_AOI04, but loses on EMSR583 (the largest fire, refilling 7.4 km away) and the pooled interval includes zero. One seed and three of six folds do not support a generalisation claim; D-73 adds development incidents and the fold report for a fuller sweep.
+
+### Holdout folds with 20 development incidents (D-73, 2026-10-06)
+
+Same configuration and seed (42) on `runs/geographic-multi-ignition-family-d71-20261006` (20 development incidents, 640 scenarios; each fold trains on the other 19 incidents) with imagery `runs/geographic-imagery-s2-d71-px4-20261006`, commit `79d5a7b`, two batches of three concurrent folds (`runs/geographic-holdout-folds-d71-20261006/run.sh`). Regenerating the families re-drew foci and wind (D-73), so held-out and validation scenarios differ from the D-70 run and only policy-minus-baseline differences are comparable. Validation (EMSR590, 24 scenarios): heuristic 92.62, containment 92.50, no intervention 122.33 ha; selected weights 86.96–91.54 ha. `python -m nightjar.fold_report runs/geographic-holdout-folds-d71-20261006`:
+
+| Held-out incident | Policy | Heuristic | Containment | Policy − heuristic (95% CI) | Better / equal / worse |
+|---|---|---|---|---|---|
+| EMSR578 | **162.8** | 169.5 | 174.5 | −6.66 [−13.97, +0.44] (−3.9%) | 20 / 0 / 12 |
+| EMSR583 | 124.7 | **113.1** | 131.9 | +11.59 [+1.31, +22.81] (+10.2%) | 10 / 1 / 21 |
+| EMSR602_AOI02 | **80.2** | 86.4 | 89.0 | −6.25 [−9.78, −3.12] (−7.2%) | 19 / 2 / 11 |
+| EMSR602_AOI04 | **63.0** | 72.1 | 71.7 | −9.06 [−13.47, −5.28] (−12.6%) | 19 / 9 / 4 |
+| EMSR625_AOI01 | 76.5 | 76.3 | **74.9** | +0.19 [−2.22, +2.34] (+0.2%) | 13 / 3 / 16 |
+| EMSR625_AOI02 | **177.3** | 177.8 | 182.3 | −0.47 [−5.81, +4.62] (−0.3%) | 15 / 1 / 16 |
+| Pooled (6 folds) | **114.1** | 115.9 | 120.7 | −1.78 [−4.23, +0.74] (−1.5%) | 96 / 16 / 80 |
+
+Training on 19 instead of 5 incidents did not change the picture on the three repeated folds (EMSR602_AOI04 −10.5 → −9.1 ha, EMSR625_AOI01 −2.4 → +0.2, EMSR583 +6.3 → +11.6). The policy beats the heuristic clearly on two incidents, ties on two and loses significantly on EMSR583; pooled it is 1.8 ha (1.5%) better with an interval that includes zero. Map count is therefore not the limiting factor for these folds; the systematic EMSR583 loss needs a per-scenario diagnosis. One seed per fold; seed variation is not yet measured.
+
+#### Why the policy loses on EMSR583 (2026-10-06)
+
+Diagnostic replays of the D-73 fold checkpoints (deterministic) and the heuristic on the 32 held-out scenarios of EMSR583 and, for contrast, EMSR602_AOI04. Each drop is assigned to the nearest focus centre; a focus's danger is its unmitigated burned area at the horizon.
+
+- Drop counts, empty drops and drops on cells the unmitigated fire never reaches are similar for policy and heuristic (EMSR583: 20.4 vs 20.7 drops; 38% vs 32% of treated cells unreached). The policy's first drop comes about 10 s later in both incidents.
+- The policy triages: it leaves about one focus per scenario unattended for the first 20 minutes (EMSR583 1.06, EMSR602_AOI04 1.31) where the heuristic leaves 0.47 and 0.22. In 15 of the 16 EMSR583 scenarios it loses by more than 5 ha, the extra burned area comes from one focus that the policy reached late (often after 1,000–3,400 s) or never, with 5.5 drops on it against the heuristic's 9.5; in 10 of the 15 it is the focus with the largest unmitigated growth.
+- Outcome follows whether the first focus attacked is the most dangerous one. EMSR602_AOI04, policy wins: policy 87%, heuristic 7%. EMSR583, policy loses: policy 25%, heuristic 75%; policy wins: 89% vs 44%.
+- The most dangerous focus is harder to anticipate on EMSR583: the focus that is largest after 900 s (first wind segment) is the final largest in 50% of scenarios, against 78% on EMSR602_AOI04 (78% and 84% after 1,800 s). Mean wind speed and shift size are similar (2.4 vs 2.3 m/s, 32° vs 39° per 900 s), and EMSR583's fuels all occur in at least five other incidents, so the difference comes from how its fuel layout responds to the D-60 wind shifts.
+
+Interpretation: the learned policy commits early to the focus it judges most dangerous. That beats the greedy downwind heuristic where danger is predictable from the first minutes and loses where later wind shifts change which focus runs; the heuristic re-ranks every drop by the current wind. Scripts were run ad hoc from this analysis and are not part of the package.
