@@ -58,11 +58,16 @@ WIND_ENSEMBLES = [
     (1.8, -1.0),  # moderate NW -> SE
 ]
 
-# Dead fine-fuel moisture ensembles (1h dead fuel fraction)
+# Fuel moisture ensemble (D-74): the four paired standard scenarios of Scott and
+# Burgan (2005, RMRS-GTR-153, tables 3 and 4), from very low dead moisture with
+# fully cured herbaceous fuel (D1L1) to high dead moisture with green fuel (D4L4).
+# Dead herbaceous moisture follows the 1-h value. A spread of fire days, not a
+# climatology of the incidents.
 MOISTURE_ENSEMBLES = [
-    {"dead_1h": 0.04, "dead_10h": 0.05, "dead_100h": 0.07, "dead_herbaceous": 0.04, "live_herbaceous": 0.30, "live_woody": 0.60},  # 97th percentile extreme drought
-    {"dead_1h": 0.05, "dead_10h": 0.06, "dead_100h": 0.08, "dead_herbaceous": 0.05, "live_herbaceous": 0.40, "live_woody": 0.70},  # 90th percentile very dry
-    {"dead_1h": 0.06, "dead_10h": 0.07, "dead_100h": 0.09, "dead_herbaceous": 0.06, "live_herbaceous": 0.50, "live_woody": 0.80},  # moderate summer dry
+    {"dead_1h": 0.03, "dead_10h": 0.04, "dead_100h": 0.05, "dead_herbaceous": 0.03, "live_herbaceous": 0.30, "live_woody": 0.60},  # D1L1 very low
+    {"dead_1h": 0.06, "dead_10h": 0.07, "dead_100h": 0.08, "dead_herbaceous": 0.06, "live_herbaceous": 0.60, "live_woody": 0.90},  # D2L2 low
+    {"dead_1h": 0.09, "dead_10h": 0.10, "dead_100h": 0.11, "dead_herbaceous": 0.09, "live_herbaceous": 0.90, "live_woody": 1.20},  # D3L3 moderate
+    {"dead_1h": 0.12, "dead_10h": 0.13, "dead_100h": 0.14, "dead_herbaceous": 0.12, "live_herbaceous": 1.20, "live_woody": 1.50},  # D4L4 high
 ]
 
 # Satellite pass intervals and report delivery latencies (seconds)

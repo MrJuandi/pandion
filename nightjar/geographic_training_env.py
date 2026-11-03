@@ -56,8 +56,10 @@ class GeographicTrainingEnv:
         *,
         drop_bonus_per_cell: float = 0.25,
         action_mode: str = "tactical",
+        drop_distances: Any = (0,),
     ):
         self._scenario = deepcopy(scenario)
+        self._drop_distances = tuple(drop_distances)
         self._drop_bonus_per_cell = float(drop_bonus_per_cell)
         self._action_mode = action_mode
         self._episode: Any = None
@@ -83,7 +85,15 @@ class GeographicTrainingEnv:
             return None, self._replay["affected_area_ha"], self._replay.get("drops", [])
 
     def _mask(self, observation: dict) -> list[dict]:
-        return valid_geographic_actions(observation)
+        valid = valid_geographic_actions(observation)
+        if self._action_mode == "parametric" and self._drop_distances != (0,):
+            # D-79: drops beyond the front aim at cells that are not fire-adjacent candidates.
+            mapper = self.action_mapper()._tactical
+            if observation["aircraft"]["phase"] == "idle" and observation["aircraft"]["water_l"] > 0:
+                extra = [{"type": "DROP", "target_m": [c * mapper.cell_size_m, r * mapper.cell_size_m]}
+                         for r, c in mapper.targets(observation).values()]
+                valid += [order for order in extra if order not in valid]
+        return valid
 
     @property
     def action_mask(self) -> list[dict]:
@@ -158,6 +168,7 @@ class GeographicTrainingEnv:
             cols=int(grid["cols"]),
             cell_size_m=float(grid["cell_size_m"]),
             action_mode=self._action_mode,
+            drop_distances=self._drop_distances,
         )
 
     def observation_tensorizer(self) -> Any:
