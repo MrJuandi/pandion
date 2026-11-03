@@ -90,6 +90,8 @@ python3 -m nightjar.geographic_family --raw-dir data/raw/cems --output-dir runs/
 python3 -m nightjar.geographic_family --synthetic --output-dir runs/geographic-family-synthetic
 python3 -m nightjar.geographic_integrated runs/geographic-family-real-v2/development/geographic-dev-emsr578-00.json --policy heuristic --output runs/geographic-family-real-v2/smoke-development-00.json
 python3 -m nightjar.geographic_benchmark runs/geographic-family-real-v2/development/geographic-dev-emsr578-00.json --output runs/geographic-family-real-v2/benchmark-development-00.json
+# Sensitivity of reference-policy results to the CL-415 water-effect parameters (D-74, D-76, D-78); development scenarios only, the output path must not exist:
+python3 -m nightjar.water_sensitivity runs/geographic-multi-ignition-family-d73-20261006/development --output runs/water-sensitivity.json --scenarios 64 --seed 7 --workers 6
 python3 -m nightjar.geographic_ppo --smoke --scenarios-dir runs/geographic-family-real-v2
 # Offline PPO checks require the synthetic family generated above and explicit mode:
 python3 -m nightjar.geographic_ppo --smoke --synthetic --scenarios-dir runs/geographic-family-synthetic

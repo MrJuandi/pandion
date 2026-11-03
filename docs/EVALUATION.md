@@ -528,3 +528,21 @@ Same benchmark on `runs/geographic-multi-ignition-family-d73-20261006` (43 devel
 ### Reference policy under D-74 (2026-10-06)
 
 One training run, same configuration as the D-73 sweep (two aircraft, parametric actions, thermal image with ROS, slot features, augmentation, 1,000 updates, seed 42), on `runs/geographic-multi-ignition-family-d72-20261006` (20 development incidents) with EMSR597 (Moros, never inspected) held out; `runs/geographic-reference-d72-20261006`, commit `173c794`. Validation (EMSR590, 24 scenarios): selected weights 23.08 ha against heuristic 23.2 and containment 23.5 (no intervention 26.0). Held-out EMSR597, 32 scenarios: policy 109.1 ha, heuristic 104.9, containment 105.5, no intervention 117.4; policy − heuristic +4.16 ha [+0.72, +9.06] (+4.0 %), better / equal / worse 8 / 7 / 17. Under the sourced drop effect the learned policy ties the heuristic on validation and is worse on the unseen incident; it has not learned to prefer targets where a drop can hold. One seed and one fold.
+
+### Sensitivity to the water-effect parameters (2026-11-03)
+
+`python3 -m nightjar.water_sensitivity runs/geographic-multi-ignition-family-d73-20261006/development --output runs/water-sensitivity-d74-20261103.json --scenarios 64 --seed 7 --workers 6` runs the no-intervention, heuristic and containment policies (two aircraft) on a seeded sample of 64 development scenarios while the D-74/D-76 hold limits and the D-78 evaporation delay are varied. No training; validation and reserved scenarios are not read. Mean final burned area is 48.4 ha without intervention.
+
+| Variant | Heuristic (ha) | Containment (ha) | Growth prevented by the heuristic | Heuristic − containment (ha) |
+|---|---|---|---|---|
+| Baseline (1 drop holds 1,000 kW/m, 3 hold 3,200, delay ×1) | 41.3 | 41.8 | 14.7 % | −0.56 |
+| Hold limits ×0.5 | 42.9 | 43.4 | 11.3 % | −0.44 |
+| Hold limits ×2 | 37.7 | 39.4 | 22.2 % | −1.77 |
+| Hold limits unbounded | 30.1 | 33.3 | 37.9 % | −3.22 |
+| No hold (evaporation delay only) | 46.2 | 46.3 | 4.6 % | −0.14 |
+| Delay ×0 | 41.6 | 42.3 | 14.1 % | −0.75 |
+| Delay ×0.25 | 41.6 | 42.2 | 14.1 % | −0.59 |
+| Hold ×0.5, delay ×0 | 44.1 | 44.5 | 8.8 % | −0.34 |
+| Hold ×2, delay ×0 | 38.1 | 39.8 | 21.3 % | −1.72 |
+
+The hold limits dominate: halving or doubling them moves the share of growth the heuristic prevents between 11 % and 22 %. Removing the evaporation delay changes it by about half a point, so the D-78 term matters little. The heuristic beats containment in every variant, by 0.1 to 3.2 ha. Limits: 64 scenarios and no confidence intervals, so differences of a point or less are not established; the learned policy was not run under these variants; the sweep measures sensitivity to the parameters and does not validate their values against observed drops.
