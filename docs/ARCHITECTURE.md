@@ -158,6 +158,15 @@ Simulation, controller, benchmark, and replay must run headlessly. A browser int
 
 ### Offline research workspace
 
+The [reproducible research workflow](RESEARCH_WORKFLOWS.md) loads legacy,
+image/cell and parametric checkpoints through the same model factory and rollout
+executor as evaluation. Model configuration, forced-step behavior and fleet
+size come from the supplied report; newly emitted reports bind checkpoint
+bytes and imagery content. Workspace baselines receive the same fleet override.
+Per-aircraft initial state and executed-drop index/litres are audit fields only;
+they do not alter controller observations or resource dynamics. The 3D and 2D
+renderers maintain independent tracks, tanks and follow-camera selection.
+
 `nightjar.workspace` reads a manifest-verified geographic family and emits the offline Spanish 3D viewer (`nightjar.viewer`), individual audit artifacts, and `nightjar-workspace-0.1` metadata. Only the requested first development scenarios run episodes; validation and reserved entries contain initial static cartography, no actions and no outcome metric. Static variants are environmental cases, not 24 independent incidents. Optional PPO inference uses a caller-supplied weights/report pair, records both file hashes, and checks report membership against development scenario hashes. Raw weights have no embedded report identity; matching membership and architecture do not prove which report produced a file.
 
 `nightjar-geographic-replay-0.2` adds true arrival times, fuel/water/elevation rasters, CRS and metric origin, scenario seed/hash and image time origin. It stores each delivered controller observation separately, records `decision_time_s` at issuance while retaining `time_s` at execution completion, and samples aircraft positions at execution endpoints. The flight line connects samples for inspection; it is not a measured continuous trajectory. These fields are audit output only and do not enter action generation or controller observations. Existing outcomes and simulator physics are unchanged.
@@ -173,3 +182,11 @@ The optional IGN/CNIG pilot DEM is bound to its original pilot through `load_ter
 For station intervals the solver caches directional cell behavior for each forcing interval and integrates edge travel distance across changes using the harmonic mean of source/target directional speeds. The time-dependent FIFO arrival graph has access to retrospective forcing; action generation and baselines receive only completed interval reports with availability no earlier than interval end. Before the first report, the controller wind vector is an explicit unknown-zero placeholder (`weather_status=not_yet_delivered`), not an observed calm condition. A final partial forcing interval can drive physical spread while its aggregate remains unavailable within the episode. Since D-49 this delayed delivery applies only to `observation_mode="scheduled"`; the default real-time mode exposes the interval containing the decision time (never a later one), every cell's current `unburned`/`burning`/`burned` state at age 0, and the current fuel moisture. `nightjar-geographic-replay-0.4` adds `observation_mode` and a `burnout_time_s` raster.
 
 Constant-weather scenarios retain the existing rate path. The resource interface and reward remain unchanged; permanent five-cell water barriers are provisional. Heights are orthometric; French/Italian GLO-30 heights are a surface-model proxy that includes vegetation/buildings. See [ENVIRONMENT_INTEGRATION.md](ENVIRONMENT_INTEGRATION.md) for assumptions and checks.
+
+
+Fold workspaces bind each held-out development replay to its own fold's
+checkpoint and verify scenario hashes after fleet overrides. Refill tracks
+record arrival separately from service completion. An episode ending during a
+mission preserves the in-progress position and tank contents instead of
+completing the mission at the horizon. Sources outside the tactical grid remain
+valid destinations; HOLD at those sources is a policy decision.

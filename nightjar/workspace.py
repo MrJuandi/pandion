@@ -52,12 +52,12 @@ def decorate(replay: dict, scenario: dict, terrain: dict | None = None, training
     p = scenario["provenance"]
     out.update({"name": scenario["name"], "source_kind": scenario["source_kind"],
                 "split": scenario["split"], "seed": scenario["seed"],
-                "scenario_hash": scenario["scenario_hash"], "provenance": deepcopy(p)})
+                "scenario_hash": replay.get("scenario_hash", scenario["scenario_hash"]), "provenance": deepcopy(p)})
     out["metadata"] = {
         "name": scenario["name"], "source_kind": scenario["source_kind"],
         "split": scenario["split"], "seed": scenario["seed"],
         "source": p.get("source", ""), "assumptions": p.get("assumptions", {}),
-        "scenario_hash": scenario["scenario_hash"], "acquired_at_utc": p.get("image_acquired_at_utc"),
+        "scenario_hash": replay.get("scenario_hash", scenario["scenario_hash"]), "acquired_at_utc": p.get("image_acquired_at_utc"),
         "wind_to_m_s": scenario["fire"].get("wind_to_m_s"),
         "terrain": {"label": "Terreno plano · sin DEM en la simulación", "source": "", "display_only": False},
     }
@@ -120,49 +120,20 @@ def pilot_map(pilot: dict, terrain: dict) -> dict:
     }
 
 
-def load_policy(checkpoint: Path, report_path: Path, scenarios: list[dict]):
-    """Load weights with a manifest-bound report; reject legacy unbound reports."""
-    report = json.loads(report_path.read_text())
-    if report.get("schema_version") not in ("nightjar-geographic-ppo-smoke-0.1", "nightjar-geographic-ppo-train-0.1"):
-        raise ValueError("workspace requires a geographic smoke/train report with dataset provenance")
-    entries = report.get("dataset", {}).get("splits", {}).get("development", [])
-    available = {s["scenario_id"]: s["scenario_hash"] for s in scenarios}
-    if not entries or any(available.get(e.get("scenario_id")) != e.get("scenario_hash") for e in entries):
-        raise ValueError("training report does not match the verified development family")
-    if not isinstance(report.get("recurrent"), bool):
-        raise ValueError("training report must specify recurrent configuration")
-    # Validate provenance first so unbound reports fail without requiring PyTorch.
-    import torch
-    from .model import SpatialActorCritic
-    grid = scenarios[0]["grid"]
-    model = SpatialActorCritic(grid_rows=grid["rows"], grid_cols=grid["cols"], action_dim=9, recurrent=report["recurrent"])
-    model.load_state_dict(torch.load(checkpoint, weights_only=True, map_location="cpu"))
-    model.eval()
-    info = {"label": "PPO geográfico · prueba técnica" if "smoke" in report["schema_version"] else "PPO geográfico · entrenamiento exploratorio",
-            "status": "Sin validación de rendimiento geográfico ni física",
-            "seed": report.get("seed"), "updates": 1 if "smoke" in report["schema_version"] else report.get("updates"),
-            "checkpoint_sha256": file_hash(checkpoint), "report_sha256": file_hash(report_path),
-            "dataset": report["dataset"], "checkpoint_report_binding": "caller_supplied; weights file has no embedded provenance"}
-    return model, info
+def load_policy(checkpoint: Path, report_path: Path, scenarios: list[dict], **options):
+    from .policy_artifact import load_policy_artifact
+    return load_policy_artifact(checkpoint, report_path, scenarios, **options)
 
 
 def policy_replay(model, scenario: dict) -> dict:
-    import torch
-    from .geographic_training_env import GeographicTrainingEnv
-    env = GeographicTrainingEnv(scenario, action_mode="tactical")
-    obs = env.reset(seed=scenario["seed"])
-    mapper, tensorizer = env.action_mapper(), env.observation_tensorizer()
-    state, done = None, False
-    while not done:
-        raster, vector = tensorizer.to_torch(obs)
-        mask = mapper.to_mask_torch(obs)
-        with torch.no_grad():
-            if model.recurrent:
-                action, _, _, _, state = model.get_action(raster, vector, mask, deterministic=True, state=state)
-            else:
-                action, _, _, _ = model.get_action(raster, vector, mask, deterministic=True)
-        obs, _, done, _ = env.step_discrete(int(action.item()))
-    replay = env.replay
+    from .geographic_ppo import rollout_geographic, with_fleet
+    config = getattr(model, "_nightjar_inference", {})
+    scenario = with_fleet([scenario], config.get("fleet_size", 1))[0]
+    replays = []
+    rollout_geographic(model, scenario, deterministic=True, inference_only=True, replay_out=replays,
+                       **{key: config[key] for key in ("device", "input_mode", "imagery_dir",
+                          "include_ros", "include_thermal", "skip_forced") if key in config})
+    replay = replays[0]
     replay["policy"] = "PPO geográfico"
     return replay
 
@@ -170,7 +141,8 @@ def policy_replay(model, scenario: dict) -> dict:
 def build_workspace(scenarios_dir: Path, output_dir: Path, *, episodes: int = 2,
                     terrain_path: Path | None = None, terrain_scenario: Path | None = None,
                     checkpoint: Path | None = None, training_report: Path | None = None,
-                    synthetic: bool = False) -> dict:
+                    synthetic: bool = False, imagery_dir: Path | None = None,
+                    device: str = "cpu", skip_forced: bool | None = None) -> dict:
     if episodes < 0:
         raise ValueError("episodes must be nonnegative")
     if bool(terrain_path) != bool(terrain_scenario):
@@ -182,7 +154,8 @@ def build_workspace(scenarios_dir: Path, output_dir: Path, *, episodes: int = 2,
     splits = {s: load_geographic_split(s, scenarios_dir, synthetic=synthetic) for s in ("development", "validation", "reserved")}
     pilot = json.loads(terrain_scenario.read_text()) if terrain_path else None
     terrain = load_terrain(terrain_path, pilot) if terrain_path else None
-    model, training = load_policy(checkpoint, training_report, splits["development"]) if checkpoint else (None, None)
+    model, training = load_policy(checkpoint, training_report, splits["development"], imagery_dir=imagery_dir,
+                                  device=device, skip_forced=skip_forced) if checkpoint else (None, None)
     output_dir.mkdir(parents=True, exist_ok=True)
     replays = [pilot_map(pilot, terrain)] if terrain else []
     if replays:
@@ -193,7 +166,9 @@ def build_workspace(scenarios_dir: Path, output_dir: Path, *, episodes: int = 2,
             if split == "development" and index < episodes:
                 if model is not None:
                     episodes_here.append(policy_replay(model, scenario))
-                episodes_here.extend(run_geographic_integrated(scenario, policy=p) for p in
+                from .geographic_ppo import with_fleet
+                baseline_scenario = with_fleet([scenario], training["inference"]["fleet_size"] if training else 1)[0]
+                episodes_here.extend(run_geographic_integrated(baseline_scenario, policy=p) for p in
                                      ("heuristic", "containment_heuristic", "no_intervention"))
             else:
                 episodes_here.append(static_map(scenario))
@@ -213,8 +188,84 @@ def build_workspace(scenarios_dir: Path, output_dir: Path, *, episodes: int = 2,
                 "static_map_count": sum(r["horizon_s"] == 0 for r in replays),
                 "episode_splits": ["development"] if episodes else [],
                 "scenario_hashes": {s["scenario_id"]: s["scenario_hash"] for v in splits.values() for s in v}}
+    manifest["artifacts"] = [{"path": p.name, "sha256": file_hash(p)} for p in sorted(output_dir.glob("*.json"))]
     (output_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False, allow_nan=False))
     write_viewer_html(replays, output_dir / "index.html", title="Nightjar · Laboratorio de incendios")
+    from .experiment_catalog import scan_catalog, write_catalog
+    roots = [output_dir] + ([checkpoint, training_report] if checkpoint else [])
+    write_catalog(scan_catalog(roots), output_dir / "experiments.json", output_dir / "experiments.html")
+    return manifest
+
+
+def build_fold_workspace(scenarios_dir: Path, folds_dir: Path, output_dir: Path, *,
+                         episodes: int = 2, synthetic: bool = False,
+                         imagery_dir: Path | None = None, device: str = "cpu",
+                         skip_forced: bool | None = None) -> dict:
+    """Replay each fold's held-out development cases with that fold's weights."""
+    from .geographic_ppo import with_fleet
+    from .identity import incident_group
+    if episodes < 1:
+        raise ValueError("fold workspace requires at least one episode per fold")
+    if output_dir.exists() and any(output_dir.iterdir()):
+        raise ValueError("output-dir must be new or empty")
+    scenarios = load_geographic_split("development", scenarios_dir, synthetic=synthetic)
+    by_id = {s["scenario_id"]: s for s in scenarios}
+    plans = []
+    for report_path in sorted(folds_dir.glob("*.json")):
+        report = json.loads(report_path.read_text())
+        if report.get("schema_version") != "nightjar-geographic-ppo-selection-0.1" or not report.get("holdout"):
+            continue
+        checkpoint = report_path.with_suffix(".pt")
+        if not checkpoint.is_file():
+            raise ValueError(f"missing fold checkpoint: {checkpoint}")
+        fold = report["holdout_activation"]
+        rows = report["holdout"]["rows"]
+        held = report.get("dataset", {}).get("splits", {}).get("holdout", [])
+        hashes = {e["scenario_id"]: e["scenario_hash"] for e in held}
+        selected = []
+        for row in rows[:episodes]:
+            case = by_id.get(row["scenario_id"])
+            if case is None or incident_group(case["activation_id"]) != incident_group(fold):
+                raise ValueError(f"fold {fold}: held-out scenario is not in the development family")
+            executed = with_fleet([case], report.get("fleet_size", 1))[0]
+            if hashes.get(case["scenario_id"]) != executed["scenario_hash"]:
+                raise ValueError(f"fold {fold}: held-out scenario hash mismatch")
+            selected.append(case)
+        if not selected:
+            raise ValueError(f"fold {fold}: no held-out rows")
+        plans.append((fold, checkpoint, report_path, selected))
+    if not plans:
+        raise ValueError("no completed fold reports found")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    replays, training_runs = [], []
+    for fold, checkpoint, report_path, selected in plans:
+        model, training = load_policy(checkpoint, report_path, scenarios, imagery_dir=imagery_dir,
+                                      device=device, skip_forced=skip_forced)
+        training.update(label=f"PPO · {folds_dir.name} · fold {fold}",
+                        checkpoint_name=checkpoint.name, fold=fold)
+        training_runs.append(training)
+        for case in selected:
+            episodes_here = [policy_replay(model, case)]
+            baseline = with_fleet([case], training["inference"]["fleet_size"])[0]
+            episodes_here.extend(run_geographic_integrated(baseline, policy=p) for p in
+                                 ("heuristic", "containment_heuristic", "no_intervention"))
+            for replay in episodes_here:
+                decorated = decorate(replay, case, training=training if replay["policy"] == "PPO geográfico" else None)
+                replays.append(decorated)
+                name = f"{case['scenario_id']}-{len(replays):02d}.json"
+                (output_dir / name).write_text(json.dumps(decorated, ensure_ascii=False, allow_nan=False))
+            print(f"{fold}: {case['scenario_id']} · {checkpoint.name}", flush=True)
+        del model
+    manifest = {"schema_version": SCHEMA_VERSION, "created_at_utc": datetime.now(timezone.utc).isoformat(),
+                "units": {"coordinates": "m", "time": "s", "area": "ha", "elevation": "m"},
+                "family_manifest_sha256": file_hash(scenarios_dir / "manifest.json"),
+                "mode": "held_out_folds", "training_runs": training_runs,
+                "scenario_count": sum(len(p[3]) for p in plans), "replay_count": len(replays),
+                "static_map_count": 0, "episode_splits": ["development"],
+                "scenario_hashes": {r["scenario_id"]: r["scenario_hash"] for r in replays}}
+    manifest["artifacts"] = [{"path": p.name, "sha256": file_hash(p)} for p in sorted(output_dir.glob("*.json"))]
+    (output_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False, allow_nan=False))
+    write_viewer_html(replays, output_dir / "index.html", title=f"Nightjar · {folds_dir.name}")
     return manifest
 
 
@@ -225,14 +276,27 @@ def main() -> None:
     p.add_argument("--episodes", type=int, default=2, help="Number of development scenarios to replay; 0 builds only maps")
     p.add_argument("--terrain", type=Path)
     p.add_argument("--terrain-scenario", type=Path)
+    p.add_argument("--folds-dir", type=Path, help="Completed fold reports and matching .pt checkpoints; replays held-out development cases per fold")
     p.add_argument("--checkpoint", type=Path)
     p.add_argument("--training-report", type=Path)
+    p.add_argument("--imagery-dir", type=Path, help="Relocated imagery directory, verified against report when bound")
+    p.add_argument("--device", choices=("cpu", "mps", "cuda"), default="cpu")
+    p.add_argument("--skip-forced", action=argparse.BooleanOptionalAction, default=None,
+                   help="Explicit recurrent-state behavior for legacy reports missing this setting")
     p.add_argument("--synthetic", action="store_true", help="Explicitly use a generated synthetic fixture family")
     args = p.parse_args()
     try:
-        manifest = build_workspace(args.scenarios_dir, args.output_dir, episodes=args.episodes,
-                                   terrain_path=args.terrain, terrain_scenario=args.terrain_scenario,
-                                   checkpoint=args.checkpoint, training_report=args.training_report, synthetic=args.synthetic)
+        if args.folds_dir:
+            if args.checkpoint or args.training_report or args.terrain or args.terrain_scenario:
+                raise ValueError("--folds-dir cannot be combined with a single checkpoint or pilot terrain")
+            manifest = build_fold_workspace(args.scenarios_dir, args.folds_dir, args.output_dir,
+                episodes=args.episodes, synthetic=args.synthetic, imagery_dir=args.imagery_dir,
+                device=args.device, skip_forced=args.skip_forced)
+        else:
+            manifest = build_workspace(args.scenarios_dir, args.output_dir, episodes=args.episodes,
+                                       terrain_path=args.terrain, terrain_scenario=args.terrain_scenario,
+                                       checkpoint=args.checkpoint, training_report=args.training_report, synthetic=args.synthetic, imagery_dir=args.imagery_dir,
+                                       device=args.device, skip_forced=args.skip_forced)
     except (OSError, ValueError) as exc:
         p.error(str(exc))
     print(f"Workspace: {args.output_dir / 'index.html'} ({manifest['scenario_count']} scenarios)")

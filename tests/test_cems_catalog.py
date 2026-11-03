@@ -55,11 +55,15 @@ class TestCemsCatalog(unittest.TestCase):
         development = incidents_for_split("development")
         self.assertEqual(development[0], "EMSR578")
         self.assertEqual(set(development[1:]), {"EMSR583", "EMSR625_AOI01", "EMSR625_AOI02",
-                                                "EMSR602_AOI02", "EMSR602_AOI04"})
+                                                "EMSR602_AOI02", "EMSR602_AOI04",
+                                                "EMSR365", "EMSR375", "EMSR457", "EMSR458", "EMSR522",
+                                                "EMSR538", "EMSR545", "EMSR581", "EMSR597", "EMSR599_AOI01",
+                                                "EMSR599_AOI02", "EMSR620", "EMSR623", "EMSR632"})
         self.assertEqual(incidents_for_split("validation"), ("EMSR590",))
         self.assertEqual(incidents_for_split("reserved"), ("EMSR592", "EMSR600"))
         self.assertEqual(raw_package_name("EMSR578"), "emsr578_del.zip")
         self.assertEqual(raw_package_name("EMSR625_AOI02"), "emsr625-aoi02_del.zip")
+        self.assertTrue(cems_product_url("EMSR457").endswith("EMSR457_AOI01_DEL_PRODUCT_r1_RTP01_v2_vector.zip"))
         self.assertEqual(
             cems_product_url("EMSR625_AOI02"),
             "https://cems-mapping-website.s3.eu-west-1.amazonaws.com/static/activations/EMSR625/"

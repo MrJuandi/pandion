@@ -11,7 +11,7 @@ from typing import Sequence
 
 from .replay_view import normalize_replay
 
-VIEWER_VERSION = "nightjar-viewer-0.5"
+VIEWER_VERSION = "nightjar-viewer-0.6"
 _ASSETS = Path(__file__).with_name("viewer_assets")
 
 
@@ -33,7 +33,7 @@ def build_viewer_html(replays: Sequence[dict], title: str = "Nightjar Replay Vie
     license_text = (_ASSETS / "vendor" / "THREE-LICENSE.txt").read_text(encoding="utf-8")
     js = "/*\n" + license_text + "\n*/\n" + "\n".join(
         (_ASSETS / name).read_text(encoding="utf-8") for name in
-        ("vendor/three-r128.min.js", "vendor/OrbitControls-r128.js", "scene3d.js", "viewer.js")
+        ("vendor/three-r128.min.js", "vendor/OrbitControls-r128.js", "scene3d.js", "fleet.js", "viewer.js")
     )
     generated_at = datetime.now(timezone.utc).isoformat()
     values = {"TITLE": html.escape(title, quote=True), "CSS": css,

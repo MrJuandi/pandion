@@ -355,7 +355,7 @@ def geographic_episode(
     # Water drop execution on physical landscape
     drops_log: list[dict[str, Any]] = []
 
-    def apply_water_drop(drop_time: float, target_x_m: float, target_y_m: float) -> list[list[int]]:
+    def apply_water_drop(drop_time: float, target_x_m: float, target_y_m: float, aircraft_index: int) -> list[list[int]]:
         """Apply water drop to cell and immediate neighborhood, establishing a physical barrier."""
         target_c = int(round(target_x_m / cell_size))
         target_r = int(round(target_y_m / cell_size))
@@ -371,6 +371,7 @@ def geographic_episode(
                     treated.append([nr, nc])
         drops_log.append({
             "time_s": round(drop_time, 2),
+            "aircraft_index": aircraft_index, "water_l": capacity_l,
             "target_local_m": [round(target_x_m, 2), round(target_y_m, 2)],
             "target_utm_m": [round(target_x_m + origin_x, 2), round(target_y_m + origin_y, 2)],
             "treated_cells_count": len(treated),
@@ -429,19 +430,22 @@ def geographic_episode(
 
     def apply_effects(until_s: float) -> None:
         """Apply scheduled drop/refill completions up to ``until_s`` in time order."""
+        nonlocal refills_count, total_flight_dist_m
         pending_effects.sort(key=lambda e: (e[0], e[1]))
         while pending_effects and pending_effects[0][0] <= until_s + 1e-9:
             effect_time, _, index, kind, payload = pending_effects.pop(0)
             advance_fire(effect_time)
             craft = fleet[index]
             if kind == "drop":
-                treated = apply_water_drop(effect_time, payload[0], payload[1])
+                treated = apply_water_drop(effect_time, payload[0], payload[1], index)
                 known_treated_cells.extend(treated)
                 craft["pos"] = [payload[0], payload[1]]
                 craft["water"] = max(0, craft["water"] - capacity_l)
             elif kind == "refill":
                 craft["pos"] = [refill_x, refill_y]
                 craft["water"] = capacity_l
+                refills_count += 1
+                total_flight_dist_m += payload[0]
             craft["task"] = None
 
     def fleet_view(time_s: float) -> list[dict]:
@@ -529,7 +533,7 @@ def geographic_episode(
             break
         idle = [i for i, craft in enumerate(fleet) if craft["free_at"] <= cur_sim_time + 1e-9]
         if not idle:
-            cur_sim_time = min(craft["free_at"] for craft in fleet)
+            cur_sim_time = min(horizon_s, min(craft["free_at"] for craft in fleet))
             continue
         ego = idle[0]
         aircraft_pos, aircraft_water = fleet[ego]["pos"], fleet[ego]["water"]
@@ -609,13 +613,12 @@ def geographic_episode(
             dist = hypot(refill_x - aircraft_pos[0], refill_y - aircraft_pos[1])
             transit_time = dist / cruise_speed
             total_time = transit_time + refill_service_s
-            craft["free_at"] = min(horizon_s, decided_at + total_time)
+            craft["free_at"] = decided_at + total_time
             craft["task"] = {"phase": "refill", "t0": decided_at, "from": list(aircraft_pos),
                              "to": [refill_x, refill_y], "arrive": decided_at + transit_time}
-            pending_effects.append((craft["free_at"], effect_seq, ego, "refill", None))
+            pending_effects.append((craft["free_at"], effect_seq, ego, "refill",
+                                    (dist, decided_at, transit_time)))
             effect_seq += 1
-            total_flight_dist_m += dist * 2.0  # roundtrip transit consideration
-            refills_count += 1
             decisions_log.append({
                 "time_s": round(craft["free_at"], 2),
                 "order": order,
@@ -623,6 +626,12 @@ def geographic_episode(
                 "aircraft_water_l": capacity_l,
             })
             track_position = [refill_x, refill_y]
+            # Arriving at the source ends the transit; service keeps the aircraft there.
+            arrival_time = decided_at + transit_time
+            if arrival_time <= horizon_s + 1e-9:
+                aircraft_track.append({"time_s": round(arrival_time, 2),
+                                       "position_m": [refill_x, refill_y],
+                                       **({"aircraft_index": ego} if fleet_size > 1 else {})})
 
         elif order_type == "DROP":
             target_x, target_y = order["target_m"]
@@ -639,9 +648,12 @@ def geographic_episode(
                 track_position = [target_x, target_y]
             else:
                 # Horizon reached during transit
-                craft["free_at"] = horizon_s
+                craft["free_at"] = drop_time
                 water_after = aircraft_water
-                track_position = list(aircraft_pos)
+                fraction = 0.0 if dist <= 0 else min(1.0, max(0.0, (horizon_s - decided_at) / (drop_time - decided_at)))
+                track_position = [aircraft_pos[0] + fraction * (target_x - aircraft_pos[0]),
+                                  aircraft_pos[1] + fraction * (target_y - aircraft_pos[1])]
+                total_flight_dist_m += dist * fraction
             craft["task"] = {"phase": "transit_to_drop", "t0": decided_at, "from": list(aircraft_pos),
                              "to": [target_x, target_y], "arrive": drop_time}
             decisions_log.append({
@@ -653,12 +665,21 @@ def geographic_episode(
             raise ValueError(f"Unknown order type: {order_type}")
 
         # Audit output only: the controller still receives current_obs alone.
+        decisions_log[-1]["completed_at_s"] = round(craft["free_at"], 2)
         decisions_log[-1]["decision_time_s"] = current_obs["time_s"]
         if fleet_size > 1:
             decisions_log[-1]["aircraft_index"] = ego
         if record_observations:
             decisions_log[-1]["observation"] = deepcopy(current_obs)
-        track_entry = {"time_s": round(craft["free_at"], 2), "position_m": track_position}
+        track_time = craft["free_at"]
+        if track_time > horizon_s:
+            track_time = horizon_s
+            if order_type == "RETURN_TO_REFILL":
+                elapsed = max(0.0, horizon_s - decided_at)
+                fraction = 1.0 if transit_time <= 0 else min(1.0, elapsed / transit_time)
+                track_position = [aircraft_pos[0] + fraction * (refill_x - aircraft_pos[0]),
+                                  aircraft_pos[1] + fraction * (refill_y - aircraft_pos[1])]
+        track_entry = {"time_s": round(track_time, 2), "position_m": track_position}
         if fleet_size > 1:
             track_entry["aircraft_index"] = ego
         aircraft_track.append(track_entry)
@@ -674,6 +695,13 @@ def geographic_episode(
         eval_time = horizon_s
     else:
         eval_time = cur_sim_time
+
+    # Unfinished refill transit contributes only the outbound distance flown by eval_time.
+    for completion_time, _, _, kind, payload in pending_effects:
+        if kind == "refill":
+            dist, decided_at, transit_time = payload
+            fraction = 1.0 if transit_time <= 0 else min(1.0, max(0.0, (eval_time - decided_at) / transit_time))
+            total_flight_dist_m += dist * fraction
 
     def front_end_times(end_s: float) -> list[list[float | None]]:
         """Audit raster: when each reached cell stopped burning (D-67).
@@ -732,6 +760,8 @@ def geographic_episode(
         "water_mask": deepcopy(fire_dict.get("water_mask", [[False] * cols for _ in range(rows)])),
         "elevation_m": deepcopy(elevation),
         "aircraft_track": aircraft_track,
+        "aircraft_initial_state": [{"index": i, "position_m": list(pos), "water_l": capacity_l,
+                                    "capacity_l": capacity_l} for i, pos in enumerate(starts)],
         "horizon_s": horizon_s,
         "grid": {
             "rows": rows,
