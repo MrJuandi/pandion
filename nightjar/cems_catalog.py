@@ -17,6 +17,7 @@ from copy import deepcopy
 from hashlib import sha256
 import json
 import math
+import time
 from pathlib import Path
 from typing import Any, Sequence
 from urllib.request import urlopen
@@ -33,6 +34,12 @@ from .pilot_emsr578 import (
 
 SCHEMA_VERSION = "nightjar-cems-scenario-0.1"
 BASE_URL_TEMPLATE = "https://cems-mapping-website.s3.eu-west-1.amazonaws.com/static/activations/{activation}/"
+RAPID_MAPPING_URL_TEMPLATE = "https://rapidmapping.emergency.copernicus.eu/backend/{activation}/{aoi}/DEL_PRODUCT/{activation}_{aoi}_DEL_PRODUCT_{version}.zip"
+# Rapid Mapping packages (2023 on) carry no land use or hydrography; their fuel and
+# water bodies come from CORINE Land Cover 2018 (D-75), queried from the EEA service.
+CLC2018_QUERY_URL = "https://image.discomap.eea.europa.eu/arcgis/rest/services/Corine/CLC2018_WM/MapServer/0/query"
+CLC_WATER_BODY_CODE = "512"
+CLC_WATER_SEARCH_MARGIN_DEG = 0.3  # about 30 km around the AOI, the D-70 scooping search radius
 
 # Extended universal CORINE Land Cover -> Scott & Burgan 40 crosswalk
 UNIVERSAL_CORINE_CROSSWALK: dict[str, dict[str, Any]] = deepcopy(EMSR578_CORINE_CROSSWALK)
@@ -274,7 +281,7 @@ ACTIVATIONS.update({
         "7911b3c74855b1148e443945c792abe21314471ae3331297a05dfc9210237e1c", 4096.7),
 })
 
-# Further development-only incidents (D-71): every mainland-Spain wildfire
+# Further development-only incidents (D-73): every mainland-Spain wildfire
 # delineation package on the CEMS mapping site (2019-2022) that carries the
 # naturalLandUseA, observedEventA and areaOfInterestA layers. Later Rapid Mapping
 # packages (2023 onwards) no longer include land use and are not usable as is.
@@ -342,6 +349,149 @@ ACTIVATIONS.update({
         "f992abde999a33b243d2d179284ca8cea74cac578ccbeb8a34596b5a26ad3ec9", 3769.2),
 })
 
+def _rapid_mapping_incident(key: str, cems_activation: str, aoi: str, name: str, province: str, region: str,
+                            utm_zone: int, bounds: tuple[float, float, float, float], delivered_at_utc: str,
+                            sha256_digest: str, burnt_area_ha: float, landcover_sha256: str,
+                            version: str = "v1") -> dict[str, Any]:
+    """Development incident from a Rapid Mapping DEL package, with CORINE 2018 fuel (D-75)."""
+    entry = _development_incident(key, cems_activation, aoi, name, province, region, utm_zone, bounds,
+                                  delivered_at_utc, sha256_digest, burnt_area_ha)
+    entry["source_page"] = f"https://rapidmapping.emergency.copernicus.eu/{cems_activation}/"
+    entry["products"]["del"].update({
+        "vector_filename": f"{cems_activation}_{aoi}_DEL_PRODUCT_{version}.zip",
+        "download_url": RAPID_MAPPING_URL_TEMPLATE.format(activation=cems_activation, aoi=aoi, version=version),
+        "fuel_source": "clc2018",
+        "landcover_sha256": landcover_sha256,
+    })
+    return entry
+
+
+# Rapid Mapping development incidents (D-75): mainland-Spain wildfire DEL packages
+# from 2023 on (EMSR656 to EMSR921). They lack land use and hydrography, so fuel and
+# water bodies come from a pinned CORINE 2018 extract. Burnt area is the
+# observedEventA polygon area; delivery time is the product version delivery time
+# from the Rapid Mapping API. Excluded: EMSR667 (Pinofranqueado, Las Hurdes, next to
+# the validation incident EMSR590), EMSR898 AOI02 (5 ha), EMSR682 (no burnt area
+# layer), EMSR837 AOI01 (Ourense) and AOI04 (Villablino), whose AOIs hold several
+# separate fires so the tactical window centred on the burnt area contains none of
+# it, EMSR837 AOI02 (Odollo), whose window overlaps EMSR602 AOI02 (the same area
+# burnt in 2022), EMSR905 (Artana; 295 ha in over a thousand small polygons, too
+# little burnt area in the window for two separated foci), EMSR887 (Congosto; the
+# AOI is 3.3 km tall, less than the 4 km square tactical window that augmentation
+# needs) and the Canary Islands activations.
+ACTIVATIONS.update({
+    "EMSR656": _rapid_mapping_incident(
+        "EMSR656", "EMSR656", "AOI01", "Villanueva de Viver", "Castellón", "Comunitat Valenciana", 30,
+        (-0.8, 39.9, -0.4, 40.3), "2023-03-26T19:22:00Z",
+        "9b8ab882e0707cff77e5763cd4b590271c18f99d02937d9f080cea20dde3fc11", 3531.7,
+        landcover_sha256="904a53d0ae2a7228414c57df1197bab12d5d00da23fd0e26c43b1eade752c22a"),
+    "EMSR704": _rapid_mapping_incident(
+        "EMSR704", "EMSR704", "AOI01", "Villalonga", "Valencia", "Comunitat Valenciana", 30,
+        (-0.5, 38.7, 0.0, 39.0), "2023-11-06T16:23:00Z",
+        "4d1a564a25a94e793a49dc82acc36bd392222abf84fa25cfc6875f472ac80cce", 1472.4,
+        landcover_sha256="c0e62e3524edb1a4f32e940524edce391354f9b86d42cdaa56453d1642951e92", version="v2"),
+    "EMSR719": _rapid_mapping_incident(
+        "EMSR719", "EMSR719", "AOI01", "Tàrbena", "Alicante", "Comunitat Valenciana", 30,
+        (-0.2, 38.6, 0.1, 38.9), "2024-04-17T15:17:39Z",
+        "5de40b58fde58ec4a65b8bfc6720f388e2412b5ee0bb289050c7562c32fa3d34", 559.2,
+        landcover_sha256="9a26cb1bbf554ebe18fb6ccca9ea8194eaafd067f02a8fd9d8c9f6185478b6bc", version="v2"),
+    "EMSR837_AOI03": _rapid_mapping_incident(
+        "EMSR837_AOI03", "EMSR837", "AOI03", "Portilla de la Reina", "León", "Castilla y León", 30,
+        (-5.0, 42.8, -4.3, 43.2), "2025-08-19T08:58:00Z",
+        "5104eee208a0a68681f06b201eaea19c57f61e36b0af01fce65c49a65118ced2", 4386.6,
+        landcover_sha256="b8f3f9a64ec1d28810f8ab2f565534f5ba1e477d2798f75829a2ba500cb2c7b9", version="v2"),
+    "EMSR837_AOI05": _rapid_mapping_incident(
+        "EMSR837_AOI05", "EMSR837", "AOI05", "Jiménez de Jamuz", "León", "Castilla y León", 29,
+        (-6.4, 41.9, -5.7, 42.5), "2025-08-16T21:18:44Z",
+        "343b5fe0acde2dbf6f4403d58b5d907e350231cf1ac5ff9576ff6a462cc810d6", 32374.2,
+        landcover_sha256="f5d7ebc42d6be2302c5194c4f42aca2b5c11329e03b7b17999aa480655126bd9"),
+    "EMSR837_AOI06": _rapid_mapping_incident(
+        "EMSR837_AOI06", "EMSR837", "AOI06", "Ferreruela de Tábara", "Zamora", "Castilla y León", 29,
+        (-6.3, 41.6, -5.9, 42.0), "2025-08-19T16:45:21Z",
+        "200f0d2c6c5ab743473c7fe63484c4c4620035bf5b359cb8e6615b41ad87e3ea", 6130.4,
+        landcover_sha256="872cad96e1d3b283d4410d14b596953258b72c1565dd0fff2dd26939f1f7a2ac", version="v2"),
+    "EMSR837_AOI07": _rapid_mapping_incident(
+        "EMSR837_AOI07", "EMSR837", "AOI07", "Plasencia", "Cáceres", "Extremadura", 30,
+        (-6.2, 40.0, -5.7, 40.4), "2025-08-17T20:19:10Z",
+        "2ed78758fc0a953995c45f190de0d6467e447534ccdd66fe406e2c85bec7aa56", 6951.4,
+        landcover_sha256="8f4ce74190d88d9038d847b122c0d3240eb8c0bcab9a69dd92b2e8263d405569"),
+    "EMSR837_AOI08": _rapid_mapping_incident(
+        "EMSR837_AOI08", "EMSR837", "AOI08", "Llerena", "Badajoz", "Extremadura", 29,
+        (-6.3, 38.0, -5.9, 38.4), "2025-08-17T10:45:06Z",
+        "52d3035177849bf9a4fb7c0fde1dc9357a1c6f560c1bc7413a2fa5c2f9b20e7d", 5370.7,
+        landcover_sha256="4c0e36ab4a7befa423b7f36193e0a5cfcdc2394e511a1a644f51e1ab31e122e6"),
+    "EMSR837_AOI14": _rapid_mapping_incident(
+        "EMSR837_AOI14", "EMSR837", "AOI14", "Monforte de Lemos", "Lugo", "Galicia", 29,
+        (-7.7, 42.2, -7.1, 42.7), "2025-08-27T00:15:11Z",
+        "ec7eca22abe4c0cab85f7147d3e8c3b088b105871dc96c8d0335b5bd9de1eedf", 713.7,
+        landcover_sha256="95c2607484ee705175db0369b39483fa1ef462c068c541657cb6e91b9571b8ac"),
+    "EMSR837_AOI15": _rapid_mapping_incident(
+        "EMSR837_AOI15", "EMSR837", "AOI15", "Garaño", "León", "Castilla y León", 30,
+        (-6.0, 42.6, -5.6, 43.0), "2025-08-27T14:32:54Z",
+        "bc7e52d38ffc7a92af3b6b798c44bcd76a830a34336e0c2500be3975fc16fdaa", 920.4,
+        landcover_sha256="8fdcd341edc14086fbefbeff75d8c281e199117081d4608ea2d95e9dde758b27"),
+    "EMSR837_AOI16": _rapid_mapping_incident(
+        "EMSR837_AOI16", "EMSR837", "AOI16", "Canalejas", "León", "Castilla y León", 30,
+        (-5.1, 42.5, -4.7, 42.9), "2025-08-27T18:26:58Z",
+        "90eae47e02697752e3e997db3e75adb68e888ac53017b0222e33f3acb2b7ef33", 4586.6,
+        landcover_sha256="1e80cea4c9db4453765655732bb64e99b84f153c1d1523b5aab0c341b2b7e13e"),
+    "EMSR837_AOI17": _rapid_mapping_incident(
+        "EMSR837_AOI17", "EMSR837", "AOI17", "San Cristóbal de los Mochuelos", "Salamanca", "Castilla y León", 29,
+        (-6.7, 40.7, -5.7, 41.4), "2025-08-28T11:02:38Z",
+        "5c7c87bb55d7d476d295b1a2f63c0b71dea1acfc0f58705e256de5a6ceac4773", 9716.7,
+        landcover_sha256="615a17622d3e7027e3adfea850afeb0cb1d1ec6e7904a01fb0caffb8d8403c32"),
+    "EMSR881": _rapid_mapping_incident(
+        "EMSR881", "EMSR881", "AOI01", "Gibraleón", "Huelva", "Andalucía", 29,
+        (-7.3, 37.3, -6.8, 37.7), "2026-06-10T22:00:16Z",
+        "4055ce768927148f1a57a8b7ff320a9270c786849f78f42b2a011eea888acb01", 3783.2,
+        landcover_sha256="3bea93f76637b47e84e04175d8c9b1ae30b4d45d60dccfdb7af4401891d69b19"),
+    "EMSR888": _rapid_mapping_incident(
+        "EMSR888", "EMSR888", "AOI01", "Santa Cristina d'Aro", "Girona", "Catalonia", 31,
+        (2.9, 41.7, 3.2, 42.0), "2026-07-04T20:22:02Z",
+        "0df0d944c444a9122b00f31e05528860d4005c30a9ce0af936cfed50133ebee6", 165.1,
+        landcover_sha256="eadfaa8b001477c3c36736f572a20c032cd6565cdf2b0a8d5759cdb1cf92da75"),
+    "EMSR892": _rapid_mapping_incident(
+        "EMSR892", "EMSR892", "AOI01", "Los Gallardos", "Almería", "Andalucía", 30,
+        (-2.1, 37.0, -1.8, 37.3), "2026-07-10T21:37:04Z",
+        "9d6d91b3cc479044eb1eab0ce59e62d546c974b7b81141ead67bb2c79b162b01", 3198.1,
+        landcover_sha256="0b2dfea0c3e6a68e1e0a47170a956f0ea30a364f8095dd5c0188f28c205a49df"),
+    "EMSR896": _rapid_mapping_incident(
+        "EMSR896", "EMSR896", "AOI01", "Asín", "Zaragoza", "Aragón", 30,
+        (-1.3, 42.1, -0.8, 42.5), "2026-07-17T16:57:40Z",
+        "1759639430e7f74a2a953979a20654635a863e8c89a7c312ea512c0c9735acf1", 8156.5,
+        landcover_sha256="74bd3cefb2b9d502a5795921cd4d6b700c34bd9f09549973a791f5067ac92f18"),
+    "EMSR898_AOI01": _rapid_mapping_incident(
+        "EMSR898_AOI01", "EMSR898", "AOI01", "La Mierla", "Guadalajara", "Castilla-La Mancha", 30,
+        (-3.4, 40.8, -2.7, 41.5), "2026-07-21T02:32:40Z",
+        "9c8511a4fb12901a720f17eaa8548bd85e7eb2ae81d520d9ba5c5902208ba674", 12640.7,
+        landcover_sha256="fc6799812cc5bd1445b09f09e157d63b83176c4ed6d56e1601bfc433355516dd"),
+    "EMSR900_AOI01": _rapid_mapping_incident(
+        "EMSR900_AOI01", "EMSR900", "AOI01", "Brieva", "Segovia", "Castilla y León", 30,
+        (-4.2, 40.9, -3.8, 41.2), "2026-07-24T17:59:53Z",
+        "0afb69c4633b2aecc6efdb1f98b6e26cc25150e47d4eee3fd7375d9ac06e7325", 2975.2,
+        landcover_sha256="9bc487c218a2f5df5dd12a99ff0e29a3c6e6a27afc07eb96025733c99089f166"),
+    "EMSR900_AOI02": _rapid_mapping_incident(
+        "EMSR900_AOI02", "EMSR900", "AOI02", "Villa del Prado", "Madrid", "Comunidad de Madrid", 30,
+        (-4.5, 40.1, -4.2, 40.4), "2026-07-24T15:45:07Z",
+        "a1306415a460f7304b2f0af813310ab21dcdacbcffd160b49a962e483c889ac1", 657.8,
+        landcover_sha256="e66e3945de22e0984d06fec39c09e9b4274440735ee3d85e40a2c1faa2058f1d"),
+    "EMSR900_AOI03": _rapid_mapping_incident(
+        "EMSR900_AOI03", "EMSR900", "AOI03", "La Atalaya", "Ávila", "Castilla y León", 30,
+        (-4.9, 40.2, -4.2, 40.5), "2026-07-24T22:43:32Z",
+        "2052ba3ab8a1626c3c381852203bfd7e6aab4b0fd8a0f41ea550c071a1985c90", 8255.7,
+        landcover_sha256="d81f87e750cf517f5ac286b9c380f43f7659aec3333c3faa570a2e207f7c0cec"),
+    "EMSR913": _rapid_mapping_incident(
+        "EMSR913", "EMSR913", "AOI01", "Niebla", "Huelva", "Andalucía", 29,
+        (-6.8, 37.3, -6.5, 37.6), "2026-08-08T17:25:09Z",
+        "76b1ba2ecac23429a6d1aabd6f804c2ca9eb06eb548c9abb442b3ffd9224c29b", 3295.9,
+        landcover_sha256="96e5a3f61760894877548f976f4578007cdaa4ad78a92758d14da96ea3c5cbf8"),
+    "EMSR921": _rapid_mapping_incident(
+        "EMSR921", "EMSR921", "AOI01", "Santa Cruz de la Serós", "Huesca", "Aragón", 30,
+        (-1.0, 42.2, -0.4, 42.7), "2026-08-16T17:06:26Z",
+        "7517107cefa55f8627d9072186cd4e260da693b31bdbbc414bd326b9afb303ef", 10560.3,
+        landcover_sha256="7b1d75255208f7a834fe418077364b869fb2c1682325cf84cc418fd143cc1bf5"),
+})
+
 FIXED_SPLIT_INCIDENTS = {"validation": ("EMSR590",), "reserved": ("EMSR592", "EMSR600")}
 
 
@@ -367,8 +517,68 @@ def cems_product_url(activation_id: str, stage: str = "del") -> str:
     prod = activation["products"].get(stage)
     if not prod:
         raise ValueError(f"Unknown stage '{stage}' for activation {activation_id}")
+    if prod.get("download_url"):
+        return prod["download_url"]
     folder = activation.get("cems_activation", activation_id.upper())
     return BASE_URL_TEMPLATE.format(activation=folder) + prod["vector_filename"]
+
+
+def landcover_filename(activation_id: str) -> str:
+    """Local file for an incident's CORINE 2018 extract, e.g. ``emsr837-aoi05_clc2018.geojson``."""
+    return f"{activation_id.lower().replace('_', '-')}_clc2018.geojson"
+
+
+def _clc2018_query(bounds: Sequence[float], where: str) -> list[dict[str, Any]]:
+    """CORINE 2018 polygons intersecting a WGS84 box, paged and ordered by OBJECTID."""
+    from urllib.parse import urlencode
+    features: list[dict[str, Any]] = []
+    while True:
+        params = {"where": where, "geometry": ",".join(f"{v:.6f}" for v in bounds),
+                  "geometryType": "esriGeometryEnvelope", "inSR": 4326, "spatialRel": "esriSpatialRelIntersects",
+                  "outFields": "OBJECTID,Code_18", "outSR": 4326, "orderByFields": "OBJECTID",
+                  "resultOffset": len(features), "resultRecordCount": 500, "f": "geojson"}
+        for attempt in range(6):  # the EEA service intermittently answers 500 under load
+            try:
+                with urlopen(CLC2018_QUERY_URL + "?" + urlencode(params), timeout=180) as response:
+                    page = json.loads(response.read())
+                break
+            except OSError:
+                if attempt == 5:
+                    raise
+                time.sleep(10 * (attempt + 1))
+        batch = page.get("features", [])
+        features.extend({"type": "Feature", "properties": {"OBJECTID": f["properties"]["OBJECTID"],
+                                                           "Code_18": str(f["properties"]["Code_18"])},
+                         "geometry": f["geometry"]} for f in batch)
+        if not batch or not page.get("exceededTransferLimit", len(batch) == 500):
+            return features
+
+
+def landcover_bytes(land: list[dict[str, Any]], water: list[dict[str, Any]]) -> bytes:
+    """Canonical serialisation of a CORINE extract; its SHA-256 is what the catalog pins."""
+    payload = {"type": "FeatureCollection", "source": "CORINE Land Cover 2018 (EEA), vector, Code_18",
+               "features": land, "water_bodies": water}
+    return json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+
+
+def fetch_clc2018(activation_id: str, output_path: Path) -> str:
+    """Download an incident's CORINE 2018 land cover (AOI box) and water bodies (box + ~30 km).
+
+    Returns the SHA-256 of the written file; raises if a registered digest differs.
+    """
+    info = ACTIVATIONS[activation_id.upper()]
+    west, south, east, north = info["aoi_bounds_wgs84"]
+    m = CLC_WATER_SEARCH_MARGIN_DEG
+    land = _clc2018_query((west, south, east, north), "1=1")
+    water = _clc2018_query((west - m, south - m, east + m, north + m), f"Code_18='{CLC_WATER_BODY_CODE}'")
+    content = landcover_bytes(land, water)
+    digest = sha256(content).hexdigest()
+    expected = info["products"]["del"].get("landcover_sha256")
+    if expected and digest != expected:
+        raise ValueError(f"{activation_id}: CORINE extract hash {digest} differs from registered {expected}")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_bytes(content)
+    return digest
 
 
 def fetch_cems_package(activation_id: str, stage: str, output_path: Path) -> Path:
@@ -494,7 +704,7 @@ SCOOPING_SOURCES: dict[str, list[dict[str, Any]]] = {
         _osm_source("Embalse de Campañana", 683931.75, 4708094.96, 92.94, 1935.2, 360.4, "way/47234341"),
         _osm_source("Encoro de Penarrubia", 679858.92, 4703635.5, 112.26, 5832.6, 190.1, "relation/18080576"),
     ],
-    # D-71 incidents without an eligible CEMS body, same query and screen.
+    # D-73 incidents without an eligible CEMS body, same query and screen.
     # OSM water=river sections were excluded on review (river reaches, not
     # scoopable straight runs), e.g. near EMSR458 and EMSR623.
     "EMSR375": [
@@ -659,6 +869,7 @@ def build_cems_scenario(
     zip_path: Path,
     cell_size_m: float = 100.0,
     stage: str = "del",
+    landcover_path: Path | None = None,
 ) -> dict[str, Any]:
     """Build a georeferenced raster scenario from any reviewed Copernicus CEMS vector package.
 
@@ -693,13 +904,18 @@ def build_cems_scenario(
         hydro_names = [n for n in names if "hydrographyA" in n and n.endswith(".json")]
         obs_names = [n for n in names if "observedEventA" in n and n.endswith(".json")]
 
-        if not aoi_names or not landuse_names or not obs_names:
+        clc = prod_info.get("fuel_source") == "clc2018"
+        if not aoi_names or not obs_names or not (landuse_names or clc):
             raise ValueError(f"{zip_path}: missing required GeoJSON layers (aoi, naturalLandUse, observedEvent)")
 
         aoi_data = json.loads(archive.read(aoi_names[0]))
-        landuse_data = json.loads(archive.read(landuse_names[0]))
-        hydro_data = json.loads(archive.read(hydro_names[0])) if hydro_names else {"type": "FeatureCollection", "features": []}
         obs_data = json.loads(archive.read(obs_names[0]))
+        if clc:
+            landuse_data, hydro_data = _clc2018_layers(activation_id, prod_info, landcover_path)
+        else:
+            landuse_data = json.loads(archive.read(landuse_names[0]))
+            hydro_data = (json.loads(archive.read(hydro_names[0])) if hydro_names
+                          else {"type": "FeatureCollection", "features": []})
 
     _validate_aoi_geographic_bounds(
         activation_id.upper(),
@@ -796,6 +1012,10 @@ def build_cems_scenario(
             "source_product_code": prod_info["product_code"],
             "source_product_filename": prod_info["vector_filename"],
             "source_url": cems_product_url(activation_id, stage),
+            # Only Rapid Mapping incidents carry this key, so earlier scenario hashes are unchanged.
+            **({"fuel_source": {"dataset": "CORINE Land Cover 2018 (EEA)", "query_url": CLC2018_QUERY_URL,
+                                "extract_sha256": prod_info["landcover_sha256"]}}
+               if prod_info.get("fuel_source") == "clc2018" else {}),
             "image_acquired_at_utc": prod_info["acquired_at_utc"],
             "acquired_at_utc": prod_info["acquired_at_utc"],
             "units": {"coordinates": "m", "cell_size": "m", "burned_area": "ha"},
@@ -837,6 +1057,32 @@ def build_cems_scenario(
         "burn_mask": burn_mask.tolist(),
         "water_scooping_waypoints": utm_waypoints,
     }
+
+
+def _clc2018_layers(activation_id: str, prod_info: dict[str, Any],
+                    landcover_path: Path | None) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Land use and hydrography stand-ins from a verified CORINE 2018 extract (D-75).
+
+    Land cover polygons carry their Code_18 in ``info`` like CEMS naturalLandUseA,
+    so the same crosswalk applies; CORINE water bodies (512) are the hydrography
+    screened for scooping. CORINE has no names, so bodies are labelled by class.
+    """
+    if landcover_path is None or not landcover_path.is_file():
+        raise FileNotFoundError(f"{activation_id}: CORINE 2018 extract {landcover_filename(activation_id)} is required; "
+                                "fetch it with `python -m nightjar.cems_catalog fetch-landcover`")
+    content = landcover_path.read_bytes()
+    digest = sha256(content).hexdigest()
+    if digest != prod_info["landcover_sha256"]:
+        raise ValueError(f"{activation_id}: CORINE extract SHA-256 {digest} differs from registered "
+                         f"{prod_info['landcover_sha256']}")
+    extract = json.loads(content)
+    land = {"type": "FeatureCollection", "features": [
+        {"type": "Feature", "properties": {"info": f["properties"]["Code_18"]}, "geometry": f["geometry"]}
+        for f in extract["features"]]}
+    water = {"type": "FeatureCollection", "features": [
+        {"type": "Feature", "properties": {"obj_type": "CLC 512", "name": "CORINE 512 water body"},
+         "geometry": f["geometry"]} for f in extract["water_bodies"]]}
+    return land, water
 
 
 def _rasterize_cems_polygons(
@@ -890,7 +1136,7 @@ def _rasterize_cems_polygons(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("list", "fetch", "build", "report"))
+    parser.add_argument("action", choices=("list", "fetch", "fetch-landcover", "build", "report"))
     parser.add_argument("--activation", type=str, default="EMSR578")
     parser.add_argument("--stage", type=str, default="del")
     parser.add_argument("--directory", type=Path, default=Path("data/raw/cems"))
@@ -904,9 +1150,14 @@ def main() -> None:
             print(f"{act_id:<10} {info['name']:<28} {info['region']:<20} {info['utm_zone']:<10} {info['default_split']:<12}")
 
     elif args.action == "fetch":
-        target = args.directory / f"{args.activation.lower()}_{args.stage}.zip"
+        target = args.directory / raw_package_name(args.activation, args.stage)
         path = fetch_cems_package(args.activation, args.stage, target)
         print(f"Downloaded and verified {args.activation} {args.stage} -> {path}")
+
+    elif args.action == "fetch-landcover":
+        target = args.directory / landcover_filename(args.activation)
+        digest = fetch_clc2018(args.activation, target)
+        print(f"Wrote CORINE 2018 extract for {args.activation} -> {target} (sha256 {digest})")
 
     elif args.action == "build":
         zip_path = args.directory / f"{args.activation.lower()}_{args.stage}.zip"

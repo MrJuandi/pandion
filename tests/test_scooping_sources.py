@@ -107,7 +107,9 @@ class RegisteredScoopingSourceTests(unittest.TestCase):
         for split in ("development", "validation", "reserved"):
             for activation in incidents_for_split(split):
                 with self.subTest(activation=activation):
-                    self.assertTrue(activation in CEMS_SCOOPING_SOURCE or SCOOPING_SOURCES.get(activation))
+                    # D-75 incidents screen CORINE 2018 water bodies within ~30 km instead.
+                    corine = ACTIVATIONS[activation]["products"]["del"].get("fuel_source") == "clc2018"
+                    self.assertTrue(activation in CEMS_SCOOPING_SOURCE or SCOOPING_SOURCES.get(activation) or corine)
 
     def test_registered_sources_are_complete_and_in_the_incident_zone(self):
         self.assertTrue(SCOOPING_SOURCES)

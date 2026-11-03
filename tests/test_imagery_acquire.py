@@ -10,6 +10,7 @@ import numpy as np
 
 from nightjar.imagery_acquire import (
     SCHEMA_VERSION,
+    acquire_imagery,
     best_available_pixel,
     buffer_pixels,
     cems_code,
@@ -112,6 +113,14 @@ class ImageryAcquireTests(unittest.TestCase):
         self.assertEqual(family_grid([scenario(), scenario()])[:2], (2, 3))
         with self.assertRaises(ValueError):
             family_grid([scenario(), scenario(x0=1500.0)])
+
+    def test_activation_filter_rejects_incidents_absent_from_family(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            family = Path(tmp) / "family"
+            (family / "development").mkdir(parents=True)
+            (family / "development" / "a.json").write_text(json.dumps(scenario()))
+            with self.assertRaisesRegex(ValueError, "EMSR999"):
+                acquire_imagery(family, Path(tmp) / "out", activations=["EMSR578", "EMSR999"])
 
     def test_north_up_to_grid_puts_south_in_row_zero(self):
         north_up = np.zeros((2, 1, 3), dtype=np.uint8)

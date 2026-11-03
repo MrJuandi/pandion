@@ -33,6 +33,7 @@ from .cems_catalog import (
     build_cems_scenario,
     fetch_cems_package,
     incidents_for_split,
+    landcover_filename,
     raw_package_name,
     universal_clc_to_scott_burgan,
 )
@@ -506,7 +507,8 @@ def main() -> None:
             if missing:
                 raise FileNotFoundError("Missing required local CEMS products: " + ", ".join(missing) +
                                         ". Place all four verified _del.zip files in --raw-dir; no download is attempted.")
-            cems_scenarios = {activation_id: build_cems_scenario(activation_id, path)
+            cems_scenarios = {activation_id: build_cems_scenario(
+                                  activation_id, path, landcover_path=args.raw_dir / landcover_filename(activation_id))
                               for activation_id, path in zip_paths.items()}
         result = build_geographic_family(
             cems_scenarios=cems_scenarios,
