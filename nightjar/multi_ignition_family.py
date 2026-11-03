@@ -32,11 +32,12 @@ import random
 from typing import Any
 
 from .environment import MOISTURE_KEYS, SCHEMA_VERSION as ENVIRONMENT_SCHEMA_VERSION
+from .identity import content_hash, without_generation_times
 from .geographic_family import canonical_hash
 from .geographic_ppo import load_geographic_split
 from .ignition_family import SPLITS, ignition_candidates
 
-SCHEMA_VERSION = "nightjar-geographic-multi-ignition-family-0.1"
+SCHEMA_VERSION = "nightjar-geographic-multi-ignition-family-0.2"
 FOCI_RANGE = (2, 4)
 FOCUS_RADII_CELLS = (1, 2)
 MIN_SEPARATION_CELLS = 6
@@ -81,10 +82,10 @@ def shifting_wind(base_wind: tuple[float, float], horizon_s: float, moisture: di
     return forcing
 
 
-def derive_scenario(parent: dict[str, Any], index: int) -> dict[str, Any]:
+def derive_scenario(parent: dict[str, Any], index: int, *, seed: int = 0) -> dict[str, Any]:
     """Child scenario with several foci and, unless the parent has station forcing, shifting wind."""
-    rng = random.Random(f"{parent['scenario_hash']}:multi:{index}")
-    child = deepcopy(parent)
+    rng = random.Random(f"{content_hash(parent)}:multi:{seed}:{index}")
+    child = without_generation_times(parent)
     fire = child["fire"]
     fuel = fire["fuel_grid"]
     rows, cols = len(fuel), len(fuel[0])
@@ -127,6 +128,8 @@ def derive_scenario(parent: dict[str, Any], index: int) -> dict[str, Any]:
     child["name"] = f"{parent.get('name', 'Wildfire')} multi-focus {index:02d}"
     provenance = child["provenance"]
     provenance["multi_ignition_family"] = SCHEMA_VERSION
+    provenance["experimental_seed"] = seed
+    provenance["parent_content_sha256"] = content_hash(parent)
     provenance["multi_ignition_parent_scenario_hash"] = parent["scenario_hash"]
     provenance["cems_burn_mask_sha256"] = canonical_hash(parent["fire"]["burn_mask"])
     provenance["foci"] = [
@@ -149,6 +152,7 @@ def build_multi_ignition_family(
     counts: dict[str, int] | None = None,
     *,
     synthetic: bool = False,
+    seed: int = 0,
 ) -> dict[str, Any]:
     """Derive and save the family from a manifest-verified geographic environment family."""
     scenarios_dir, output_dir = Path(scenarios_dir), Path(output_dir)
@@ -159,7 +163,7 @@ def build_multi_ignition_family(
         raise ValueError("scenarios per parent must be positive for every split")
     parent_manifest = json.loads((scenarios_dir / "manifest.json").read_text(encoding="utf-8"))
     derived = {
-        split: [derive_scenario(parent, i)
+        split: [derive_scenario(parent, i, seed=seed)
                 for parent in load_geographic_split(split, scenarios_dir, synthetic=synthetic)
                 for i in range(counts[split])]
         for split in SPLITS
@@ -167,12 +171,13 @@ def build_multi_ignition_family(
     manifest = deepcopy(parent_manifest)
     manifest.update({
         "schema_version": SCHEMA_VERSION,
-        "family_id": "geographic-multi-ignition-family-0.1",
+        "family_id": "geographic-multi-ignition-family-0.2",
         "description": "Initial-attack scenarios with 2-4 simultaneous foci and shifting synthetic wind on the parent family's maps.",
         "created_at_utc": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
         "parent_family": {"scenarios_dir": str(scenarios_dir), "schema_version": parent_manifest.get("schema_version"),
                           "manifest_sha256": canonical_hash(parent_manifest)},
         "multi_ignition": {
+            "experimental_seed": seed,
             "foci_range": list(FOCI_RANGE), "focus_radii_cells": list(FOCUS_RADII_CELLS),
             "min_separation_cells": MIN_SEPARATION_CELLS, "wind_segment_s": WIND_SEGMENT_S,
             "direction_step_std_deg": DIRECTION_STEP_DEG, "speed_factor_range": list(SPEED_FACTOR),
@@ -204,11 +209,12 @@ def main() -> None:
     for split in SPLITS:
         parser.add_argument(f"--{split}-scenarios", type=int, default=DEFAULT_SCENARIOS[split],
                             help=f"Scenarios per {split} parent")
+    parser.add_argument("--seed", type=int, default=0, help="Explicit experimental seed (independent of generation time)")
     parser.add_argument("--synthetic", action="store_true", help="Parent is an explicitly generated synthetic family")
     args = parser.parse_args()
     result = build_multi_ignition_family(args.scenarios_dir, args.output_dir,
                                          {split: getattr(args, f"{split}_scenarios") for split in SPLITS},
-                                         synthetic=args.synthetic)
+                                         synthetic=args.synthetic, seed=args.seed)
     print(json.dumps(result["manifest"]["counts"]))
 
 

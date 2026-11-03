@@ -1,5 +1,12 @@
 # Data, provenance, physical calibration, and observation validity
 
+Environment/ignition family 0.2 separates generation clocks from scenario
+content and records explicit experimental seeds. Existing complete-payload
+hash verification is retained for archived families. New report entries add
+content identity, source products, grid/CRS and parent lineage; no new external
+sources are introduced. See [RESEARCH_WORKFLOWS.md](RESEARCH_WORKFLOWS.md) for
+the migration and reproducibility contract.
+
 **Status:** design checklist. Candidate sources below have different scales and licenses; inclusion requires a source-specific review.
 
 The [2026-09-30 EMSR578 environmental inventory](PILOT_ENVIRONMENT.md) adds a separate source-bound numeric terrain artifact and a historical Baldomar weather audit. IGN/CNIG 25 m terrain is requested at the pilot's 100 m grid in EPSG:25831; its acquisition epoch and unadvertised source footprint remain unknown. Meteocat supplies complete valid half-hour coverage for five station variables over the observation window, with forward-interval timestamp semantics. This is station evidence, not landscape-wide midflame wind or fuel moisture, and the original inventory is an audit artifact. The derived 2026-10-01 environment family now consumes dry station intervals under explicit assumptions; the original base family remains flat/synthetic. See [ENVIRONMENT_INTEGRATION.md](ENVIRONMENT_INTEGRATION.md). Daily cumulative maps support growth diagnostics at actual elapsed times, not inferred hourly trajectories or independent validation; source hashes, commands and limits are recorded in the inventory.
@@ -84,3 +91,10 @@ The offline workspace reuses the existing source-audited 24-case family (four in
 An optional terrain artifact must pass the existing pilot scenario hash, CRS, shape, orientation, timestamp, unit and validity checks. EMSR578 tactical windows sample that already aligned DEM by metric offsets; origin rounding differences up to 0.1 m are accepted, while other offsets, CRS/resolution mismatches and out-of-bounds crops fail. This legacy display-overlay path applies no DEM to EMSR590/592/600; the new derived environment family supplies all four incidents with sourced heights. The IGN/CNIG source, raw hash, unknown acquisition epoch and source footprint remain visible in display provenance. This reuse introduces no new geographic source or physical-validation claim; see [PILOT_ENVIRONMENT.md](PILOT_ENVIRONMENT.md) for the acquisition audit.
 
 For PPO/baseline replays the DEM is explicitly a visual overlay on flat-terrain dynamics, never a change to the training dataset or controller inputs. The separate environment family now implements terrain-backed physics and observations; its development experiment is documented in [ENVIRONMENT_INTEGRATION.md](ENVIRONMENT_INTEGRATION.md). The workspace saves scenario hashes, family/terrain/checkpoint/report hashes, UTC creation time, units and CRS inventory under ignored `runs/` paths. The supplied geographic checkpoint/report pair is caller-associated; weights have no embedded provenance, optimizer or random-state identity.
+
+
+The workspace now accepts the D-71 development catalog (twenty areas) using
+the pinned registrations from training commit `79d5a7b`, including the fourteen
+additional development areas and existing OSM refill-source registrations.
+No acquisition was performed for this correction; archived family payloads and
+hashes are checked as stored. Fixed validation/reserved membership is unchanged.

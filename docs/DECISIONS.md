@@ -1,5 +1,12 @@
 # Design decisions and open questions
 
+The 2026-10-06 [research-workspace contract](RESEARCH_WORKFLOWS.md) settles
+generation clocks outside new scenario identities, explicit derivation seeds,
+hash-bound model reports, shared inference, per-aircraft replay and CEMS
+activation groups as future holdout independence units. Archived hashes and
+historical experiment meanings remain intact. This named contract avoids
+reusing decision numbers already assigned on concurrent branches.
+
 ## Agreed direction
 
 | ID | Decision | Rationale |
@@ -102,3 +109,11 @@
 | O-19 | Which training accelerations preserve the required policy quality and observation contract? | D-71 implements batching, parallel CPU episode owners and preprocessing reuse with the existing input/model contract. D-72 records further learner probes and separates equivalent-work prototypes from reduced optimization budgets. Long-run quality, memory demand for longer episodes and throughput across seeds remain empirical questions. The initial [performance investigation](TRAINING_PERFORMANCE.md) also measured about 1.8× shorter first-update runtime with 4 px/cell imagery; adopting that separate input change still needs corrected derivative metadata and a matched learning comparison. |
 
 Open questions are tracked here so they are resolved deliberately rather than embedded as undocumented defaults.
+
+
+2026-10-06 workspace correction: a k-fold preview uses the corresponding model
+for each held-out development case, never a single older fold for all cases.
+Checkpoint/fold identity is visible and persisted. Mission completion retains
+its physical event time even when it exceeds the episode horizon; replay tracks
+separate flight arrival from refill service. Archived training artifacts are
+preserved and remain explicitly legacy when their historical binding is absent.

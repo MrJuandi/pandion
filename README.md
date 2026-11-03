@@ -51,6 +51,7 @@ These are research gates, not claims that any stage is complete. The detailed pl
 
 ## Documentation
 
+- [RESEARCH_WORKFLOWS.md](docs/RESEARCH_WORKFLOWS.md) — reproducible scenario seeds, current checkpoint inference, multi-aircraft replay, searchable artifact catalog and incident-group report audits.
 - [ARCHITECTURE.md](docs/ARCHITECTURE.md) — state, observation, actions, reward, policy, and growth to multiple resources.
 - [PHYSICAL_MODEL_V0.md](docs/PHYSICAL_MODEL_V0.md) — sourced surface-fire and CL-415 references, implemented FM1 subset, and remaining validation limits.
 - [STANDARD_FUEL_PATH.md](docs/STANDARD_FUEL_PATH.md) — standard-fuel scenario, reproduction command, boundaries, and ordered steps toward real maps.
@@ -293,6 +294,23 @@ python3 -m nightjar.annaburroo_compare --output runs/annaburroo-fm1-diagnostic.j
 ```
 
 Its 120 eligible plots yield 0.5264 m/s mean absolute error for unchanged FM1; scope and exclusions are in [VALIDATION_ANNABURROO.md](docs/VALIDATION_ANNABURROO.md). This does not close the training gate.
+
+
+To inspect completed leave-one-incident-out folds with their own checkpoints,
+use `--folds-dir` instead of a single `--checkpoint`. This selects held-out
+cases from the development family and shows the fold/checkpoint in the viewer:
+
+```sh
+python3 -m nightjar.workspace --scenarios-dir runs/geographic-multi-ignition-family-d71-20261006 --folds-dir runs/geographic-holdout-folds-d71-20261006 --output-dir runs/workspace-d71 --episodes 1 --skip-forced
+```
+
+`--episodes` is per fold. D-71's archived reports omitted `skip_forced`; the
+explicit flag reproduces their recorded launch configuration. Existing output
+directories are never overwritten. Water sources can lie outside the tactical
+map; aircraft remain at the source when the policy issues HOLD after refilling.
+Refill tracks distinguish arrival from service, and unfinished missions at the
+episode horizon do not teleport or complete a refill.
+
 
 ## Scope and limitations
 
