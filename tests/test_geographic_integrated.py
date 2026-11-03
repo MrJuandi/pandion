@@ -5,6 +5,7 @@ import unittest
 
 from nightjar.environment import SCHEMA_VERSION as ENVIRONMENT_SCHEMA_VERSION
 from nightjar.geographic_family import (
+    MOISTURE_ENSEMBLES,
     build_synthetic_cems_fixture,
     generate_geographic_scenario,
 )
@@ -25,6 +26,100 @@ def growing_fire_scenario(horizon_s=3600.0):
     return scenario
 
 
+def with_weather(scenario, moisture, wind_to_m_s):
+    """Uniform moisture and wind for the whole episode."""
+    out = deepcopy(scenario)
+    out["fire"]["moisture"] = dict(zip(("dead_1h", "dead_10h", "dead_100h", "dead_herbaceous", "live_herbaceous",
+                                        "live_woody"), moisture))
+    out["fire"]["wind_to_m_s"] = list(wind_to_m_s)
+    out.pop("environment", None)
+    return out
+
+
+class TestDropEffect(unittest.TestCase):
+    """D-74: one treated cell per drop, holding only fronts up to the single-drop intensity limit."""
+
+    def treated_cells_reached(self, replay):
+        arrival = replay["arrival_time_s"]
+        treated = [cell for drop in replay["drops"] for cell in drop["treated_cells"]]
+        return treated, [cell for cell in treated if arrival[cell[0]][cell[1]] is not None]
+
+    def test_each_drop_treats_at_most_the_target_cell(self):
+        replay = run_geographic_integrated(growing_fire_scenario(), policy="heuristic")
+        self.assertTrue(replay["drops"])
+        self.assertTrue(all(drop["treated_cells_count"] <= 1 for drop in replay["drops"]))
+
+    def test_low_intensity_front_is_held_by_a_treated_cell(self):
+        # GR2 at 8% dead moisture and 1 m/s midflame wind: head fire about 160 kW/m.
+        scenario = with_weather(growing_fire_scenario(), (0.08, 0.09, 0.10, 0.08, 0.6, 0.9), (0.7, 0.7))
+        treated, reached = self.treated_cells_reached(run_geographic_integrated(scenario, policy="heuristic"))
+        self.assertTrue(treated)
+        self.assertEqual(reached, [])
+
+    def test_intense_front_breaches_a_treated_cell(self):
+        # GR2 at 3% dead moisture and 4 m/s midflame wind: head fire about 2,500 kW/m.
+        scenario = with_weather(growing_fire_scenario(), (0.03, 0.04, 0.05, 0.03, 0.3, 0.6), (2.83, 2.83))
+        treated, reached = self.treated_cells_reached(run_geographic_integrated(scenario, policy="heuristic"))
+        self.assertTrue(treated)
+        self.assertTrue(reached)
+
+
+class TestStackedDrops(unittest.TestCase):
+    """D-76: up to three drops stack on a cell; three hold fronts up to 3,200 kW/m."""
+
+    def stacked(self, wind):
+        from collections import Counter
+        scenario = with_weather(growing_fire_scenario(), (0.03, 0.04, 0.05, 0.03, 0.3, 0.6), wind)
+        replay = run_geographic_integrated(scenario, policy="heuristic")
+        arrival = replay["arrival_time_s"]
+        counts = Counter(tuple(c) for d in replay["drops"] for c in d["treated_cells"])
+        reached = {cell: n for cell, n in counts.items() if arrival[cell[0]][cell[1]] is not None}
+        return counts, reached
+
+    def test_three_stacked_drops_hold_a_front_one_drop_cannot(self):
+        # GR2, 3 % dead moisture, 4 m/s midflame wind: head fire about 2,500 kW/m.
+        counts, reached = self.stacked((2.83, 2.83))
+        self.assertLessEqual(max(counts.values()), 3)
+        self.assertIn(3, counts.values())
+        self.assertNotIn(3, reached.values())
+        self.assertIn(1, reached.values())
+
+    def test_a_breaching_front_is_delayed_by_boiling_off_the_water(self):
+        # D-78: one drop on the head of a ~4,000 kW/m front delays its arrival there by
+        # water mass x (heating + evaporation) / (intensity x cell width).
+        from nightjar.geographic_integrated import WATER_EVAPORATION_KJ_KG, WATER_HEATING_KJ_KG
+        from nightjar.geographic_training_env import GeographicTrainingEnv
+        from nightjar.policies import candidate_cells, choose_order
+        scenario = with_weather(growing_fire_scenario(), (0.03, 0.04, 0.05, 0.03, 0.3, 0.6), (4.6, 4.6))
+        scenario["aircraft"]["fleet_size"] = 1
+
+        def run(drop):
+            env = GeographicTrainingEnv(scenario, drop_bonus_per_cell=0.0, action_mode="spatial")
+            obs, done, target = env.reset(), False, None
+            while not done:
+                if drop and target is None and obs["aircraft"]["phase"] == "idle" and obs["aircraft"]["water_l"] > 0:
+                    order = choose_order("heuristic", obs, candidates=candidate_cells(obs))
+                    target = (round(order["target_m"][1] / 100), round(order["target_m"][0] / 100))
+                else:
+                    order = {"type": "HOLD"} if {"type": "HOLD"} in env.action_mask else env.action_mask[0]
+                obs, _, done, _ = env.step(order)
+            return env.replay, target
+
+        plain, _ = run(False)
+        wet, (r, c) = run(True)
+        self.assertEqual([d["treated_cells"] for d in wet["drops"]], [[[r, c]]])
+        delay = wet["arrival_time_s"][r][c] - plain["arrival_time_s"][r][c]
+        energy_kj = 6137 * (WATER_HEATING_KJ_KG + WATER_EVAPORATION_KJ_KG)
+        self.assertGreater(delay, 0.0)
+        # Implied intensity of the crossing front: the head of this fire, about 4,000 kW/m.
+        self.assertAlmostEqual(energy_kj / (delay * 100.0), 4033.0, delta=60.0)
+
+    def test_a_front_above_the_stacked_limit_breaches_three_drops(self):
+        # Same fuel at 6.5 m/s: head fire about 4,000 kW/m, beyond what three drops hold.
+        counts, reached = self.stacked((4.6, 4.6))
+        self.assertIn(3, reached.values())
+
+
 class TestGeographicIntegrated(unittest.TestCase):
     def setUp(self):
         fixture = build_synthetic_cems_fixture("EMSR578", utm_zone=31, rows=40, cols=40)
@@ -36,6 +131,8 @@ class TestGeographicIntegrated(unittest.TestCase):
             window_cols=30,
             horizon_s=1800.0,
         )
+        # Very low moisture (D1L1) so the fire spreads whichever ensemble member was drawn.
+        self.scenario["fire"]["moisture"] = dict(MOISTURE_ENSEMBLES[0])
 
     def test_no_intervention_spreads_without_aircraft_activity(self):
         res = run_geographic_integrated(self.scenario, policy="no_intervention")
