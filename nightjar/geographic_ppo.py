@@ -93,6 +93,7 @@ def build_policy_model(
     include_ros: bool = False,
     include_thermal: bool = False,
     slot_features: bool = False,
+    drop_distances: Any = (0,),
 ) -> Any:
     """Construct the actor-critic matching an input/action configuration."""
     _require_torch()
@@ -114,7 +115,8 @@ def build_policy_model(
                             action_mode=action_mode, recurrent=recurrent,
                             use_image=input_mode == "image",
                             image_channels=getattr(tensorizer, "image_channels", 3),
-                            slot_raw_features=slot_features and action_mode == "parametric")
+                            slot_raw_features=slot_features and action_mode == "parametric",
+                            drop_distances=tuple(drop_distances) if action_mode == "parametric" else (0,))
 
 
 def with_fleet(scenarios: list[dict[str, Any]], fleet_size: int) -> list[dict[str, Any]]:
@@ -358,7 +360,8 @@ def rollout_geographic(
     """
     _require_torch()
     action_mode = getattr(model, "action_mode", "tactical")
-    env = GeographicTrainingEnv(scenario, drop_bonus_per_cell=drop_bonus_per_cell, action_mode=action_mode)
+    env = GeographicTrainingEnv(scenario, drop_bonus_per_cell=drop_bonus_per_cell, action_mode=action_mode,
+                                drop_distances=getattr(model, "drop_distances", (0,)))
     observation = env.reset(seed=scenario.get("seed"))
     mapper = env.action_mapper()
     tensorizer = make_input_tensorizer(scenario, input_mode=input_mode, imagery_dir=imagery_dir,
@@ -636,6 +639,7 @@ def train_geographic_ppo(
     image_checkpoint_chunk: int | None = None,
     augment: bool = False,
     slot_features: bool = False,
+    drop_distances: Any = (0,),
     selection_scenarios: list[dict[str, Any]] | None = None,
     eval_every: int = 0,
     history: list[dict[str, Any]] | None = None,
@@ -668,7 +672,7 @@ def train_geographic_ppo(
     input_options = {"input_mode": input_mode, "imagery_dir": imagery_dir, "include_ros": include_ros,
                      "include_thermal": include_thermal}
     build_kwargs = {"action_mode": action_mode, "recurrent": recurrent, "slot_features": slot_features,
-                    **input_options}
+                    "drop_distances": tuple(drop_distances), **input_options}
     augmented: dict[tuple[str, int], dict[str, Any]] = {}
     model = build_policy_model(dev_scenarios[0], **build_kwargs).to(device)
     if hasattr(model, "IMAGE_CHUNK"):
@@ -855,6 +859,8 @@ def main() -> None:
                              "best weights (D-66)")
     parser.add_argument("--augment", action="store_true",
                         help="train on random rotations/mirrors of each scenario (D-65)")
+    parser.add_argument("--drop-distances", type=int, nargs="+", default=[0],
+                        help="parametric drops may aim these many cells beyond the front (D-79); default 0 only")
     parser.add_argument("--slot-features", action="store_true",
                         help="parametric head also sees each focus slot's raw input averages and area (D-65)")
     parser.add_argument("--holdout-activation",
@@ -883,7 +889,8 @@ def main() -> None:
                                args.fleet_size)
     input_options = {"input_mode": args.input_mode, "imagery_dir": args.imagery_dir, "include_ros": args.ros,
                      "include_thermal": args.thermal}
-    model_options = {"action_mode": args.action_mode, "slot_features": args.slot_features, **input_options}
+    model_options = {"action_mode": args.action_mode, "slot_features": args.slot_features,
+                     "drop_distances": tuple(args.drop_distances), **input_options}
     holdout_scenarios = []
     if args.holdout_activation:
         dev_scenarios, holdout_scenarios = partition_holdout(dev_scenarios, args.holdout_activation)
@@ -902,6 +909,7 @@ def main() -> None:
                              "gae_lambda": args.gae_lambda, "reward_scaling": args.reward_scaling,
                              "target_kl": args.target_kl, "entropy_coef": args.entropy_coef,
                              "entropy_coef_final": args.entropy_coef_final}, "input_mode": args.input_mode, "action_mode": args.action_mode, "include_ros": args.ros, "include_thermal": args.thermal, "fleet_size": args.fleet_size, "holdout_activation": args.holdout_activation,
+                     "drop_distances": list(args.drop_distances),
                      "imagery_dir": str(args.imagery_dir) if args.imagery_dir else None,
                      "collection": {"rollout_envs": args.rollout_envs, "rollout_workers": args.rollout_workers},
                      "slot_features": args.slot_features, "skip_forced": args.skip_forced,

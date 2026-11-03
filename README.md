@@ -90,6 +90,8 @@ python3 -m nightjar.geographic_family --raw-dir data/raw/cems --output-dir runs/
 python3 -m nightjar.geographic_family --synthetic --output-dir runs/geographic-family-synthetic
 python3 -m nightjar.geographic_integrated runs/geographic-family-real-v2/development/geographic-dev-emsr578-00.json --policy heuristic --output runs/geographic-family-real-v2/smoke-development-00.json
 python3 -m nightjar.geographic_benchmark runs/geographic-family-real-v2/development/geographic-dev-emsr578-00.json --output runs/geographic-family-real-v2/benchmark-development-00.json
+# Sensitivity of reference-policy results to the CL-415 water-effect parameters (D-74, D-76, D-78); development scenarios only, the output path must not exist:
+python3 -m nightjar.water_sensitivity runs/geographic-multi-ignition-family-d73-20261006/development --output runs/water-sensitivity.json --scenarios 64 --seed 7 --workers 6
 python3 -m nightjar.geographic_ppo --smoke --scenarios-dir runs/geographic-family-real-v2
 # Offline PPO checks require the synthetic family generated above and explicit mode:
 python3 -m nightjar.geographic_ppo --smoke --synthetic --scenarios-dir runs/geographic-family-synthetic
@@ -194,6 +196,8 @@ D-73 adds fourteen more Spanish delineation products to development (EMSR365, EM
 # Imagery for the new incidents only (--activations), merged with the earlier 8 px directory, then downsampled to 4 px:
 .venv/bin/python -m nightjar.imagery_acquire runs/geographic-multi-ignition-family-d71-20261006 runs/geographic-imagery-s2-d71-new-20261006 --activations EMSR365 ...
 ```
+
+D-74 changes the physics and the scenario mix: a drop treats one cell that holds only fronts up to 1,000 kW/m, fuel moisture follows the Scott and Burgan D1L1–D4L4 scenarios and multi-focus ignitions are single cells (family 0.2). Regenerate the chain above (same terrain and imagery) into `runs/geographic-family-d72-20261006`, `runs/geographic-environment-family-d72-20261006` and `runs/geographic-multi-ignition-family-d72-20261006`; results from earlier families are not comparable.
 
 D-75 adds 22 Rapid Mapping incidents (2023–2026) whose fuel comes from CORINE 2018. For each, fetch the package and the pinned land-cover extract, then regenerate the chain (terrain and imagery only for the new incidents, `--activations`):
 
