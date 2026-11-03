@@ -325,6 +325,30 @@ class TestGeographicPPO(unittest.TestCase):
         self.assertEqual(len(losses), 2)
         self.assertTrue(all(torch.isfinite(torch.tensor(l)) for l in losses))
 
+    def test_gamma_reaches_returns_in_rollouts_and_reward_scaling(self):
+        import nightjar.geographic_ppo as ppo
+        seen = []
+        original = ppo.returns_and_advantages
+
+        def spy(rewards, values, gamma=0.99, **kwargs):
+            seen.append(gamma)
+            return original(rewards, values, gamma, **kwargs)
+
+        for gamma in (1.0, 0.9):
+            seen.clear()
+            torch.manual_seed(0)
+            random.seed(0)
+            with patch.object(ppo, "returns_and_advantages", spy):
+                _, losses = train_geographic_ppo([self.scenario], updates=1, episodes_per_update=2,
+                                                 reward_scaling=True, gamma=gamma)
+            self.assertTrue(seen)
+            self.assertEqual(set(seen), {gamma})
+            self.assertTrue(all(torch.isfinite(torch.tensor(l)) for l in losses))
+
+    def test_training_default_is_undiscounted(self):
+        import inspect
+        self.assertEqual(inspect.signature(train_geographic_ppo).parameters["gamma"].default, 1.0)
+
     def test_with_fleet_rehashes_copies(self):
         from nightjar.geographic_ppo import with_fleet
         from nightjar.geographic_family import canonical_hash
