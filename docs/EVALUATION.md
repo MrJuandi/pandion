@@ -505,3 +505,44 @@ Diagnostic replays of the D-73 fold checkpoints (deterministic) and the heuristi
 - The most dangerous focus is harder to anticipate on EMSR583: the focus that is largest after 900 s (first wind segment) is the final largest in 50% of scenarios, against 78% on EMSR602_AOI04 (78% and 84% after 1,800 s). Mean wind speed and shift size are similar (2.4 vs 2.3 m/s, 32° vs 39° per 900 s), and EMSR583's fuels all occur in at least five other incidents, so the difference comes from how its fuel layout responds to the D-60 wind shifts.
 
 Interpretation: the learned policy commits early to the focus it judges most dangerous. That beats the greedy downwind heuristic where danger is predictable from the first minutes and loses where later wind shifts change which focus runs; the heuristic re-ranks every drop by the current wind. Scripts were run ad hoc from this analysis and are not part of the package.
+
+## Baselines under the D-74 drop rule and scenario mix (2026-10-06)
+
+No training. `runs/geographic-multi-ignition-family-d72-20261006`, 640 development and 24 validation scenarios (reserved unopened), two aircraft, commit of the D-74 change. Mean final burned area (ha) and the share of the unmitigated growth the heuristic prevents; "breached" is the share of heuristic-treated cells that the fire later crossed.
+
+| Fuel moisture (Scott and Burgan) | Scenarios | Start | No intervention | Heuristic | Containment | Growth prevented by heuristic | Treated cells breached |
+|---|---|---|---|---|---|---|---|
+| D1L1 (3 % dead 1-h, cured) | 149 | 3.0 | 160.6 | 149.1 | 150.1 | 19 % | 60 % |
+| D2L2 (6 %) | 160 | 3.0 | 79.2 | 70.4 | 70.5 | 36 % | 50 % |
+| D3L3 (9 %) | 181 | 3.1 | 34.9 | 31.6 | 31.7 | 29 % | 37 % |
+| D4L4 (12 %, green) | 142 | 3.0 | 7.4 | 3.8 | 3.8 | 84 % | 4 % |
+| EMSR578 station weather | 32 | 3.0 | 68.8 | 64.0 | 64.1 | 20 % | 67 % |
+| All | 664 | 3.0 | 69.5 | 62.9 | 63.2 | 37 % | 41 % |
+
+Per incident the heuristic prevents from 3 % (EMSR538, Navalacruz) to 80 % (EMSR365) of the growth. Aircraft now matter most on moderate days and little on extreme ones, and both heuristics waste many drops on fronts too intense to hold, since they rank targets by downwind position and not by whether a drop can hold there. Policy results before D-74 are not comparable with these numbers.
+
+### With the D-75 incidents (2026-10-06)
+
+Same benchmark on `runs/geographic-multi-ignition-family-d73-20261006` (43 development incidents, 1,376 scenarios, plus 24 validation; reserved unopened). All: no intervention 59.1 ha, heuristic 51.9 ha, 45 % of the unmitigated growth prevented, 31 % of treated cells breached. The 23 CORINE-fuel incidents: 52.8 / 44.8 ha, 54 % prevented, 21 % breached; the 20 earlier ones: 66.1 / 59.9 ha, 36 %, 40 %. Per new incident prevention ranges from 16 % (EMSR892, Los Gallardos) and 18 % (EMSR837 AOI07, Plasencia) to 99 % (EMSR900 AOI02, Villa del Prado).
+
+### Reference policy under D-74 (2026-10-06)
+
+One training run, same configuration as the D-73 sweep (two aircraft, parametric actions, thermal image with ROS, slot features, augmentation, 1,000 updates, seed 42), on `runs/geographic-multi-ignition-family-d72-20261006` (20 development incidents) with EMSR597 (Moros, never inspected) held out; `runs/geographic-reference-d72-20261006`, commit `173c794`. Validation (EMSR590, 24 scenarios): selected weights 23.08 ha against heuristic 23.2 and containment 23.5 (no intervention 26.0). Held-out EMSR597, 32 scenarios: policy 109.1 ha, heuristic 104.9, containment 105.5, no intervention 117.4; policy − heuristic +4.16 ha [+0.72, +9.06] (+4.0 %), better / equal / worse 8 / 7 / 17. Under the sourced drop effect the learned policy ties the heuristic on validation and is worse on the unseen incident; it has not learned to prefer targets where a drop can hold. One seed and one fold.
+
+### Sensitivity to the water-effect parameters (2026-11-03)
+
+`python3 -m nightjar.water_sensitivity runs/geographic-multi-ignition-family-d73-20261006/development --output runs/water-sensitivity-d74-20261103.json --scenarios 64 --seed 7 --workers 6` runs the no-intervention, heuristic and containment policies (two aircraft) on a seeded sample of 64 development scenarios while the D-74/D-76 hold limits and the D-78 evaporation delay are varied. No training; validation and reserved scenarios are not read. Mean final burned area is 48.4 ha without intervention.
+
+| Variant | Heuristic (ha) | Containment (ha) | Growth prevented by the heuristic | Heuristic − containment (ha) |
+|---|---|---|---|---|
+| Baseline (1 drop holds 1,000 kW/m, 3 hold 3,200, delay ×1) | 41.3 | 41.8 | 14.7 % | −0.56 |
+| Hold limits ×0.5 | 42.9 | 43.4 | 11.3 % | −0.44 |
+| Hold limits ×2 | 37.7 | 39.4 | 22.2 % | −1.77 |
+| Hold limits unbounded | 30.1 | 33.3 | 37.9 % | −3.22 |
+| No hold (evaporation delay only) | 46.2 | 46.3 | 4.6 % | −0.14 |
+| Delay ×0 | 41.6 | 42.3 | 14.1 % | −0.75 |
+| Delay ×0.25 | 41.6 | 42.2 | 14.1 % | −0.59 |
+| Hold ×0.5, delay ×0 | 44.1 | 44.5 | 8.8 % | −0.34 |
+| Hold ×2, delay ×0 | 38.1 | 39.8 | 21.3 % | −1.72 |
+
+The hold limits dominate: halving or doubling them moves the share of growth the heuristic prevents between 11 % and 22 %. Removing the evaporation delay changes it by about half a point, so the D-78 term matters little. The heuristic beats containment in every variant, by 0.1 to 3.2 ha. Limits: 64 scenarios and no confidence intervals, so differences of a point or less are not established; the learned policy was not run under these variants; the sweep measures sensitivity to the parameters and does not validate their values against observed drops.

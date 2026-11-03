@@ -415,7 +415,8 @@ class ActionMapper:
       - "tactical": 9 tactical macro-actions (HOLD, REFILL, HEAD, CONTAINMENT, FLANKS, REAR, CLOSEST).
     """
 
-    def __init__(self, rows: int, cols: int, cell_size_m: float, action_mode: str = "spatial") -> None:
+    def __init__(self, rows: int, cols: int, cell_size_m: float, action_mode: str = "spatial",
+                 drop_distances: Any = (0,)) -> None:
         self.rows = rows
         self.cols = cols
         self.cell_size_m = cell_size_m
@@ -425,7 +426,7 @@ class ActionMapper:
             self.num_actions = self._tactical.num_actions
         elif action_mode == "parametric":
             from .parametric_actions import ParametricActionMapper
-            self._tactical = ParametricActionMapper(cell_size_m)
+            self._tactical = ParametricActionMapper(cell_size_m, drop_distances)
             self.num_actions = self._tactical.num_actions
         else:
             self._tactical = None

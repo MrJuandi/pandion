@@ -18,6 +18,30 @@ def _is_burnable_fuel(val: Any) -> bool:
 # Manhattan distance 2.
 _DROP_FOOTPRINT = ((0, 0), (-1, 0), (1, 0), (0, -1), (0, 1))
 _OVERLAP_RADIUS = 2
+# A geographic cell may receive up to this many stacked drops (D-76; McFayden et al.
+# 2023 A8.5: three CL-415 drops hold open-fuel line up to 3,200 kW/m). Observations
+# announce their limit as ``max_stacked_drops``; without it a treated cell is never
+# targeted again, as in the synthetic integrated episode.
+MAX_STACKED_DROPS = 3
+
+
+def stack_limit(observation: dict) -> int:
+    return int(observation.get("max_stacked_drops", 1))
+
+
+def full_cells(observation: dict) -> set[tuple[int, int]]:
+    """Treated cells that cannot take another drop."""
+    limit = stack_limit(observation)
+    return {cell for cell, n in treated_counts(observation).items() if n >= limit}
+
+
+def treated_counts(observation: dict) -> dict[tuple[int, int], int]:
+    """Drops received per cell; ``known_treated_cells`` lists a cell once per drop."""
+    counts: dict[tuple[int, int], int] = {}
+    for cell in observation.get("known_treated_cells", []):
+        key = (int(cell[0]), int(cell[1]))
+        counts[key] = counts.get(key, 0) + 1
+    return counts
 
 
 def claimed_cells(observation: dict) -> set[tuple[int, int]]:
@@ -48,6 +72,9 @@ def claimed_cells(observation: dict) -> set[tuple[int, int]]:
 def candidate_cells(observation: dict) -> list[list[int]]:
     """Return observed unburned burnable cells adjacent to an observed active fire.
 
+    Cells holding the observation's ``max_stacked_drops`` are excluded (one drop
+    when absent); a cell with fewer can be targeted again to stack water (D-76).
+
     Only delivered cell records in ``observation['fire']['cells']`` are read;
     unknown cells never count as either burning or unburned. With several
     aircraft, targets whose drop footprint would overlap another aircraft's
@@ -68,7 +95,7 @@ def candidate_cells(observation: dict) -> list[list[int]]:
         for c in range(cols)
         if isinstance(cells[r][c], dict) and cells[r][c].get("fire_detected") is True
     }
-    treated = {tuple(cell) for cell in observation.get("known_treated_cells", [])}
+    full = full_cells(observation)
     forbidden = claimed_cells(observation)
     candidates = set()
     for r, c in burning:
@@ -77,7 +104,7 @@ def candidate_cells(observation: dict) -> list[list[int]]:
             if not (0 <= nr < rows and 0 <= nc < cols):
                 continue
             record = cells[nr][nc]
-            if (nr, nc) not in treated and (nr, nc) not in forbidden and _is_burnable_fuel(fuel[nr][nc]) and isinstance(record, dict) and record.get("fire_detected") is False:
+            if (nr, nc) not in full and (nr, nc) not in forbidden and _is_burnable_fuel(fuel[nr][nc]) and isinstance(record, dict) and record.get("fire_detected") is False:
                 candidates.add((nr, nc))
     return [[r, c] for r, c in sorted(candidates)]
 

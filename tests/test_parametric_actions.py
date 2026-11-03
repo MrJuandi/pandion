@@ -10,7 +10,9 @@ from nightjar.parametric_actions import (
     MAX_SLOTS,
     NUM_ACTIONS,
     ParametricActionMapper,
+    action_names,
     fire_slots,
+    num_actions,
     slot_masks,
 )
 from nightjar.policies import candidate_cells
@@ -90,6 +92,76 @@ class ParametricActionTests(unittest.TestCase):
         order = mapper.to_order(2, obs)
         self.assertEqual(order["type"], "DROP")
         self.assertIn([int(order["target_m"][1] / 100), int(order["target_m"][0] / 100)], candidate_cells(obs))
+
+    def test_zero_distance_is_the_d61_action_set(self):
+        obs = observation(BIG | SMALL, water=3000)
+        plain, zero = ParametricActionMapper(100.0), ParametricActionMapper(100.0, (0,))
+        self.assertEqual(zero.num_actions, NUM_ACTIONS)
+        self.assertEqual(zero.compute_mask(obs), plain.compute_mask(obs))
+        for index in range(2, NUM_ACTIONS):
+            if plain.compute_mask(obs)[index]:
+                self.assertEqual(zero.target_cell(index, obs), plain.target_cell(index, obs))
+
+    def test_drop_distances_step_away_from_the_fire(self):
+        # D-79: index 2 + (4k + a) * D + j aims distances[j] cells beyond the front cell.
+        mapper = ParametricActionMapper(100.0, (0, 1, 2))
+        self.assertEqual(mapper.num_actions, num_actions((0, 1, 2)))
+        self.assertEqual(mapper.num_actions, 2 + MAX_SLOTS * len(ASPECTS) * 3)
+        self.assertEqual(action_names((0, 1, 2))[2:5], ("ATTACK_F0_HEAD_D0", "ATTACK_F0_HEAD_D1", "ATTACK_F0_HEAD_D2"))
+        obs = observation(BIG, wind=(2.0, 0.0))  # cluster columns 2-4, head to the east
+        head = [mapper.target_cell(2 + j, obs) for j in range(3)]
+        self.assertEqual([c for _, c in head], [5, 6, 7])
+        self.assertEqual(len({r for r, _ in head}), 1)
+        rear = [mapper.target_cell(2 + 3 * 3 + j, obs) for j in range(2)]
+        self.assertEqual(rear[0][1], 1)
+        self.assertEqual(rear[1][1], 0)
+        # Two cells west of column 1 is off the grid: that action is masked.
+        mask = mapper.compute_mask(obs)
+        self.assertFalse(mask[2 + 3 * 3 + 2])
+        with self.assertRaises(ValueError):
+            mapper.target_cell(2 + 3 * 3 + 2, obs)
+
+    def test_offset_targets_must_be_untreated_unburned_fuel(self):
+        mapper = ParametricActionMapper(100.0, (0, 1))
+        obs = observation(BIG, wind=(2.0, 0.0))
+        r, c = mapper.target_cell(2 + 1, obs)  # head, one cell beyond the front
+        obs["known_treated_cells"] = [[r, c]]
+        self.assertFalse(mapper.compute_mask(obs)[2 + 1])
+        obs = observation(BIG, wind=(2.0, 0.0))
+        obs["fuel_model"][r][c] = "0"
+        self.assertFalse(mapper.compute_mask(obs)[2 + 1])
+        self.assertTrue(mapper.compute_mask(obs)[2 + 0])
+
+    def test_environment_executes_a_drop_beyond_the_front(self):
+        import sys, os
+        sys.path.insert(0, os.path.dirname(__file__))
+        from test_geographic_integrated import growing_fire_scenario
+        from nightjar.geographic_training_env import GeographicTrainingEnv
+        env = GeographicTrainingEnv(growing_fire_scenario(), action_mode="parametric", drop_distances=(0, 1, 2))
+        obs = env.reset()
+        mapper = env.action_mapper()
+        while not any(mapper.compute_mask(obs)[2:]):
+            obs, _, done, _ = env.step_discrete(0)
+            self.assertFalse(done)
+        far = next(i for i, ok in enumerate(mapper.compute_mask(obs)) if ok and i >= 2 and (i - 2) % 3 == 2)
+        target = mapper._tactical.target_cell(far, obs)
+        self.assertNotIn(list(target), candidate_cells(obs))  # two cells out: not fire-adjacent
+        obs, _, done, _ = env.step_discrete(far)
+        while not done:  # hold, or refill when empty, until the horizon
+            obs, _, done, _ = env.step_discrete(mapper.compute_mask(obs).index(True))
+        drops = [(round(d["target_local_m"][1] / 100), round(d["target_local_m"][0] / 100)) for d in env.replay["drops"]]
+        self.assertIn(target, drops)
+
+    @unittest.skipUnless(HAS_TORCH, "PyTorch not installed")
+    def test_head_outputs_one_logit_per_aspect_and_distance(self):
+        import torch
+        from nightjar.image_model import ImageActorCritic
+        model = ImageActorCritic(cell_channels=2 + MAX_SLOTS, vector_dim=3, px_per_cell=1, grid_rows=6,
+                                 grid_cols=6, action_mode="parametric", use_image=False, recurrent=False,
+                                 width=8, hidden_dim=16, drop_distances=(0, 1, 2))
+        logits, _ = model(torch.zeros(1, 2 + MAX_SLOTS, 6, 6), torch.zeros(1, 3))
+        self.assertEqual(logits.shape, (1, num_actions((0, 1, 2))))
+        self.assertEqual(model.config["drop_distances"], (0, 1, 2))
 
     @unittest.skipUnless(HAS_TORCH, "PyTorch not installed")
     def test_slot_logits_follow_slot_masks(self):
