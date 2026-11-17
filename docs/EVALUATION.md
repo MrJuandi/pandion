@@ -662,3 +662,56 @@ Per seed on the held-out set: −1.05, −0.85 and −1.20 ha against `heuristic
 
 Selection on these incidents chooses weights that are better on unseen data: the selected checkpoints beat the last ones on the held-out activation by 0.51 ha [0.24, 0.81], consistently across the three seeds. With validation selection that comparison was possible for one seed only (seeds 43 and 44 kept their last weights): 0.12 ha. The end result, however, equals the earlier one (new minus earlier selected: +0.04 [−0.26, +0.39] held out): these runs ended worse than the earlier ones (last weights 41.23 against 40.68 ha), which may be seed variation or the 128 training scenarios given to selection, and the better selection recovers that difference. All runs stay about 2 ha behind `hold_aware_heuristic`. Limits: three seeds, one held-out activation; the selection incidents were chosen from reference outcomes on the development split, not from policy results.
 
+#### Where the learning signal goes (2026-11-17)
+
+Diagnostic on the selected weights of seed 42 of the D-84 run, on 96 seeded training scenarios (development split without the held-out group and the selection incidents), 1,784 real decisions. The policy is rolled out stochastically with the heuristic-relative reward, as in training. At every decision the simulator is branched: the action taken and three other valid actions, chosen uniformly, are each followed to the end four times by the same stochastic policy (prefix replayed; independent continuations). The mean of a branch is an estimate of Q(s, a) for the current policy; the spread between the four continuations of one action is the noise a single Monte Carlo return carries. Scripts `diag_signal.py` and `diag_analyse.py` were run ad hoc; output in `runs/geographic-signal-diagnostic-20261117`.
+
+| Quantity | Value |
+|---|---|
+| Critic: correlation of the value with the return-to-go; variance explained after a linear rescale | 0.25; 6 % |
+| Decisions where no scored action and no continuation changes the outcome | 47 % |
+| Variance between actions (signal) / variance between continuations of one action (noise), mean per decision | 0.81 / 2.31 ha² |
+| Share of the between-action variance in the top 10 % of decisions | 97 % |
+| Correlation of the Monte Carlo advantage that PPO uses (return-to-go − rescaled value) with the branched advantage of the taken action | 0.20 |
+| Same, on decisions where the branched advantage exceeds 0.05 ha in absolute value (50 %); sign agreement | 0.22; 51 % |
+| Probability on targets whose water already suffices, against their share of valid drop actions; mean logit gap | 31 % vs 15 %; +2.1 |
+| Branched Q(sufficient target) − Q(other targets), same decision | −0.01 ha (worse in 21 %, better in 16 %, equal in 63 %) |
+
+Reading: the policy gradient is close to noise. Half of the decisions have no effect at all; the effect of the others is concentrated in a few decisions per episode and is smaller than the spread caused by the policy's own later choices; the critic removes almost none of that spread. As a result the Monte Carlo advantage of a decision that matters has the sign of its branched advantage about as often as a coin. Under the current policy's continuation, preferring targets that already hold enough water costs little on average, which is why the policy has kept the preference: what separates it from `hold_aware_heuristic` is the few decisions that matter, and those are the ones the signal does not reach. This motivated branched advantages with common random numbers (D-85). Limits: one seed; the branched advantage is itself estimated from four independent continuations per action and is measured against the mean of four scored actions rather than the policy's value, so the correlations understate the agreement somewhat; the 51 % sign agreement is too low for that alone to explain.
+
+#### When a decision changes the burned area (2026-11-17)
+
+Same weights and the same 96 training scenarios as above (1,802 decisions). At every decision four actions are sampled from the policy and each is followed to the end by the same policy with common random numbers (`nightjar.vine`); the burned area of each branch is read from its replay's arrival times at fixed minutes after the decision, so branches are compared at equal simulated times. Each pair of distinct sampled actions gives a difference curve d(τ) and a final difference at the 60-minute horizon. Scripts `diag_window.py` and `window_analyse.py`, output in `runs/geographic-signal-diagnostic-20261117`.
+
+A third of the decisions (560 of 1,697 with two distinct sampled actions) change the area at some point; 17 % of action pairs end with a different final area (median 1 ha, 90th percentile 3, maximum 15) and 5 % differ only temporarily.
+
+| Minutes after the decision | 0 | 5 | 10 | 15 | 20 | 30 | 40 | 50 | horizon |
+|---|---|---|---|---|---|---|---|---|---|
+| Pairs whose final difference is already visible (same sign) | 0 % | 9 % | 21 % | 32 % | 45 % | 67 % | 83 % | 92 % | 100 % |
+| Variance of the final difference explained by d(τ) | 0 | 0.02 | 0.10 | 0.18 | 0.32 | 0.63 | 0.82 | 0.94 | 1 |
+| Decisions of the episode inside the window (mean) | 0 | 0.9 | 2.6 | 4.0 | 5.4 | 7.8 | 9.7 | 11.0 | 11.6 |
+
+| Decision made at minute | Pairs with a final difference | Mean final difference | Minutes to 90 % of it: median, 90th percentile |
+|---|---|---|---|
+| 0–15 | 28 % | 2.0 ha | 50, 60 |
+| 15–30 | 23 % | 1.8 ha | 30, 40 |
+| 30–45 | 15 % | 1.2 ha | 20, 27 |
+| 45–60 | 5 % | 1.2 ha | 9, 13 |
+
+Reading: almost nothing shows in the first five minutes, because water only changes the outcome when the front reaches the treated cell; the median effect needs 30 minutes, about eight later decisions, to appear, and early decisions, which matter most, need until the end of the episode. A return truncated to a short window would miss most of the effect of the decisions that matter, so branched returns run to the horizon. Late decisions rarely matter, partly because the fixed 60-minute horizon cuts their consequences: the episode ends before the front reaches their water. Limits: one seed; differences are between actions the policy samples, not the best and worst actions; times are bounded by the horizon.
+
+#### Branched advantages (D-85, 2026-11-17)
+
+`runs/geographic-vine-d85-20261117` (`run.sh`, code in `code.tar.gz`): the D-84 recipe with seed 42 (32 episodes × 250 updates, entropy 0.01 → 0.001, `--reward-reference heuristic --action-features`, EMSR837 held out, weights chosen on EMSR719, EMSR892, EMSR632 and EMSR457) plus `--vine-states 4 --vine-actions 4`: four decisions of every episode branched, four policy-sampled actions each, continuations with common random numbers. 9 CPU workers; 20–31 s per update (15–24 s of it branching), 2 h 10 min in all, against about 12 s per update without branching.
+
+Selection score (mean final area on the 128 selection scenarios, lower is better) fell from 84.3 ha at update 25 to 77.6 at update 175 (selected); seed 42 of the D-84 run reached 82.7 at best. Held-out EMSR837 (288 scenarios) and the 120-scenario development sample of the earlier tables, policy − reference in ha with 95 % bootstrap intervals, evaluated with `eval_ckpt.py`:
+
+| Selected weights, seed 42 | Held out: − heuristic | Held out: − hold-aware | Development sample: − heuristic | Development sample: − hold-aware |
+|---|---|---|---|---|
+| Branched advantages (D-85) | −3.21 [−4.64, −1.99] | −0.16 [−0.59, +0.27] | −2.95 [−5.12, −1.19] | +0.17 [−0.75, +1.14] |
+| Monte Carlo/GAE advantages (D-84 run) | −1.05 [−1.82, −0.40] | +2.01 [+1.08, +3.09] | −1.12 [−1.99, −0.26] | +2.00 [+0.56, +3.86] |
+| Branched − Monte Carlo, paired | −2.16 [−3.39, −1.18] | | −1.83 [−3.76, −0.33] | |
+
+Held out, the branched policy burns 38.55 ha against 41.76 for `heuristic` and 38.70 for `hold_aware_heuristic`; against the latter it is better in 62 scenarios, equal in 161 and worse in 65 (D-84 policy: 30 / 141 / 117).
+
+Reading: with the same seed, data, features, reward and selection, replacing Monte Carlo/GAE advantages by branched ones gains about 2 ha on the held-out incident and closes the gap to `hold_aware_heuristic`, which the learned policies trailed by about 2 ha in every earlier run. This supports the diagnosis that the limit was the learning signal rather than the inputs or the action set. Limits: one seed; one held-out activation; the policy now ties the hold-aware rule rather than beating it, and remains below the one-step oracle of the headroom section.

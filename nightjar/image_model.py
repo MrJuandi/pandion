@@ -259,6 +259,19 @@ if HAS_TORCH:
             """``evaluate_actions(*inputs, action_mask, actions)``; recurrent inputs are one
             episode [T, ...] (BPTT). Returns log-probs, entropies, values."""
             *inputs, action_mask, actions = inputs_mask_actions
+            dist, values = self._episode_distribution(inputs, action_mask, initial_state)
+            return dist.log_prob(actions), dist.entropy(), values
+
+        def evaluate_log_probs(self, *inputs_and_mask: torch.Tensor,
+                               initial_state: tuple[torch.Tensor, torch.Tensor] | None = None) -> tuple:
+            """``evaluate_log_probs(*inputs, action_mask)`` over one episode: log-probabilities of
+            every action [T, A], entropies and values; used for branched (vine) samples (D-85)."""
+            *inputs, action_mask = inputs_and_mask
+            dist, values = self._episode_distribution(inputs, action_mask, initial_state)
+            return dist.logits, dist.entropy(), values
+
+        def _episode_distribution(self, inputs: list, action_mask: torch.Tensor,
+                                  initial_state: tuple[torch.Tensor, torch.Tensor] | None) -> tuple:
             features, latents = self.encode(*inputs)
             if not self.recurrent:
                 logits, values = self._heads(features, latents)
@@ -269,8 +282,7 @@ if HAS_TORCH:
                     h, c = self.lstm(latents[t:t + 1], (h, c))
                     hs.append(h)
                 logits, values = self._heads(features, torch.cat(hs, dim=0))
-            dist = Categorical(logits=self._masked(logits, action_mask))
-            return dist.log_prob(actions), dist.entropy(), values
+            return Categorical(logits=self._masked(logits, action_mask)), values
 
 else:
 
