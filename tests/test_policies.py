@@ -1,7 +1,24 @@
 import random
 import unittest
 
+from nightjar.environment import MOISTURE_KEYS
 from nightjar.policies import candidate_cells, choose_order
+
+
+def moist(obs):
+    """Attach fuel moisture so the hold-aware branch (not the no-moisture fallback) runs."""
+    obs["fuel_moisture"] = dict.fromkeys(MOISTURE_KEYS, 0.08)
+    return obs
+
+
+class StubBehavior:
+    """Fixed drops-needed per cell, standing in for ObservedFireBehavior."""
+
+    def __init__(self, needs):
+        self.needs = needs
+
+    def needed_at(self, observation, r, c):
+        return self.needs[(r, c)]
 
 
 def observation(*, cells=None, phase="idle", water=100.0, position=(0.0, 0.0), wind=(1.0, 0.0)):
@@ -128,6 +145,55 @@ class PolicyTests(unittest.TestCase):
             choose_order("containment_heuristic", first),
             choose_order("containment_heuristic", second),
         )
+
+    def test_hold_aware_matches_heuristic_when_all_candidates_share_a_tier(self):
+        obs = moist(observation(position=(20.0, 0.0), wind=(1.0, 0.0)))
+        needs = StubBehavior({(0, 0): 1.0, (0, 2): 1.0, (1, 1): 1.0})
+        self.assertEqual(choose_order("hold_aware_heuristic", obs, behavior=needs),
+                         choose_order("heuristic", obs))
+
+    def test_hold_aware_skips_a_cell_whose_treated_water_already_holds_the_front(self):
+        obs = moist(observation(position=(20.0, 0.0), wind=(1.0, 0.0)))
+        obs["max_stacked_drops"] = 3
+        obs["known_treated_cells"] = [[0, 2]]  # the heuristic's target, once; it needs one drop
+        needs = StubBehavior({(0, 0): 1.0, (0, 2): 1.0, (1, 1): 1.0})
+        self.assertEqual(choose_order("heuristic", obs)["target_m"], [20.0, 0.0])
+        self.assertNotEqual(choose_order("hold_aware_heuristic", obs, behavior=needs)["target_m"], [20.0, 0.0])
+
+    def test_hold_aware_holds_when_every_candidate_is_already_sufficiently_treated(self):
+        obs = moist(observation())
+        obs["max_stacked_drops"] = 3
+        obs["known_treated_cells"] = [[0, 0], [0, 2], [1, 1]]
+        self.assertEqual(candidate_cells(obs), [[0, 0], [0, 2], [1, 1]])
+        needs = StubBehavior({(0, 0): 1.0, (0, 2): 1.0, (1, 1): 1.0})
+        self.assertEqual(choose_order("hold_aware_heuristic", obs, behavior=needs), {"type": "HOLD"})
+
+    def test_unholdable_candidate_ranks_after_a_holdable_one_even_if_more_downwind(self):
+        obs = moist(observation(position=(20.0, 0.0), wind=(1.0, 0.0)))
+        self.assertEqual(choose_order("heuristic", obs)["target_m"], [20.0, 0.0])
+        needs = StubBehavior({(0, 0): 1.0, (0, 2): float("inf"), (1, 1): 1.0})
+        self.assertEqual(choose_order("hold_aware_heuristic", obs, behavior=needs)["target_m"], [10.0, 10.0])
+
+    def test_hold_aware_falls_back_to_heuristic_without_fuel_moisture(self):
+        obs = observation(position=(20.0, 0.0), wind=(1.0, 0.0))
+        self.assertIsNone(obs.get("fuel_moisture"))
+        # The stub raises if consulted, so this also checks that no fire behaviour is read.
+        order = choose_order("hold_aware_heuristic", obs, behavior=StubBehavior({}))
+        self.assertEqual(order, choose_order("heuristic", obs))
+
+    def test_hold_aware_builds_observed_behaviour_when_none_is_given(self):
+        obs = observation(position=(20.0, 0.0), wind=(1.0, 0.0))
+        obs["fuel_model"] = [[102] * 3 for _ in range(3)]
+        obs["elevation_m"] = [[0.0] * 3 for _ in range(3)]
+        obs["fuel_moisture"] = dict.fromkeys(MOISTURE_KEYS, 0.08)
+        obs["max_stacked_drops"] = 3
+        order = choose_order("hold_aware_heuristic", obs)
+        self.assertEqual(order["type"], "DROP")
+        self.assertIn(order["target_m"], [[20.0, 0.0], [0.0, 0.0], [10.0, 10.0]])
+
+    def test_hold_aware_is_a_known_policy_name(self):
+        with self.assertRaisesRegex(ValueError, "policy must be"):
+            choose_order("hold_aware", observation())
 
 
 if __name__ == "__main__":

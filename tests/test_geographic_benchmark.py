@@ -31,6 +31,10 @@ class TestGeographicBenchmark(unittest.TestCase):
         self.assertIn("random_valid_mean", res["policies"])
         self.assertIn("heuristic", res["policies"])
         self.assertIn("containment_heuristic", res["policies"])
+        self.assertIn("hold_aware_heuristic", res["policies"])
+        hold = res["policies"]["hold_aware_heuristic"]
+        self.assertEqual(set(hold), {"final_burned_ha", "area_saved_ha", "drops_count", "refills_count",
+                                     "water_l", "flight_km"})
 
         no_int = res["policies"]["no_intervention"]
         heur = res["policies"]["heuristic"]

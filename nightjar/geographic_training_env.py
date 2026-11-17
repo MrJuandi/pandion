@@ -7,12 +7,33 @@ with CL-415 aerial operations and continuous-time Rothermel fire spread.
 from __future__ import annotations
 
 from copy import deepcopy
+import bisect
 import pickle
-from typing import Any
+from typing import Any, Callable
 
 from .aircraft import tank_capacity_l
-from .geographic_integrated import geographic_episode
+from .geographic_integrated import geographic_episode, run_geographic_integrated
 from .policies import candidate_cells
+
+REWARD_REFERENCES = ("heuristic", "no_intervention")
+_REFERENCE_CACHE: dict[tuple[str, str], tuple[list[float], float]] = {}
+
+
+def reference_area_curve(scenario: dict, policy: str) -> Callable[[float], float]:
+    """Burned area (ha) of ``policy`` in this scenario as a function of time.
+    The reference episode never depends on the learner; cached per scenario hash."""
+    if policy not in REWARD_REFERENCES:
+        raise ValueError(f"reward_reference must be one of {REWARD_REFERENCES}, got {policy!r}")
+    key = (str(scenario.get("scenario_hash") or scenario.get("scenario_id")), policy)
+    if key not in _REFERENCE_CACHE:
+        if len(_REFERENCE_CACHE) > 4096:
+            _REFERENCE_CACHE.clear()
+        replay = run_geographic_integrated(scenario, policy=policy, _record_observations=False)
+        times = sorted(t for row in replay["arrival_time_s"] for t in row if t is not None)
+        cell_ha = float(scenario["grid"]["cell_size_m"]) ** 2 / 10000.0
+        _REFERENCE_CACHE[key] = (times, cell_ha)
+    times, cell_ha = _REFERENCE_CACHE[key]
+    return lambda t: bisect.bisect_right(times, t + 1e-9) * cell_ha
 
 
 def _copy(value: Any) -> Any:
@@ -44,7 +65,10 @@ class GeographicTrainingEnv:
 
     Reward is the negative change in cumulative burned area, in hectares,
     between consecutive decision boundaries, plus an optional drop bonus
-    for newly blocked cells on the active fire perimeter.
+    for newly blocked cells on the active fire perimeter. With
+    ``reward_reference`` (D-81) the reward also adds the reference policy's
+    area growth over the same interval, so a full episode sums to the
+    reference's final area minus the policy's final area.
     """
 
     reward_units = "ha"
@@ -57,11 +81,19 @@ class GeographicTrainingEnv:
         drop_bonus_per_cell: float = 0.25,
         action_mode: str = "tactical",
         drop_distances: Any = (0,),
+        reward_reference: str | None = None,
     ):
+        if reward_reference is not None and reward_reference not in REWARD_REFERENCES:
+            raise ValueError(f"reward_reference must be one of {REWARD_REFERENCES}, got {reward_reference!r}")
         self._scenario = deepcopy(scenario)
         self._drop_distances = tuple(drop_distances)
         self._drop_bonus_per_cell = float(drop_bonus_per_cell)
         self._action_mode = action_mode
+        self._reward_reference = reward_reference
+        self._reference: Callable[[float], float] | None = None
+        self._reference_time = 0.0
+        if reward_reference is not None:
+            self.reward_definition += f" + {reward_reference}_policy_area_growth_over_the_same_interval_ha"
         self._episode: Any = None
         self._observation: dict | None = None
         self._replay: dict | None = None
@@ -123,6 +155,9 @@ class GeographicTrainingEnv:
         self._drop_count = len(drops)
         self._terminated = observation is None
         self._observation = observation
+        self._reference = (reference_area_curve(self._scenario, self._reward_reference)
+                           if self._reward_reference else None)
+        self._reference_time = float(observation["time_s"]) if observation is not None else 0.0
         return _copy(self._observation)
 
     def step(self, action: dict) -> tuple[dict, float, bool, dict]:
@@ -138,6 +173,11 @@ class GeographicTrainingEnv:
         previous_observation = self._observation
         next_observation, new_area, new_drops = self._advance(deepcopy(action))
         reward = -(new_area - self._area_ha)
+        if self._reference is not None:
+            end = (float(next_observation["time_s"]) if next_observation is not None
+                   else float(self._scenario["fire"]["horizon_s"]))
+            reward += self._reference(end) - self._reference(self._reference_time)
+            self._reference_time = end
         self._area_ha = new_area
 
         if self._drop_bonus_per_cell > 0 and len(new_drops) > self._drop_count:

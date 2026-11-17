@@ -114,18 +114,21 @@ def choose_order(
     observation: dict,
     candidates: list[list[int]] | None = None,
     rng: random.Random | None = None,
+    behavior: Any = None,
 ) -> dict:
     """Choose HOLD, RETURN_TO_REFILL, or a DROP order from current observation.
 
-    ``policy`` is one of ``no_intervention``, ``random_valid``,
-    ``heuristic``, or ``containment_heuristic``. The latter three use only
-    observed cells and static fuel/aircraft data.
+    ``policy`` is one of ``no_intervention``, ``random_valid``, ``heuristic``,
+    ``containment_heuristic``, or ``hold_aware_heuristic``. The non-random
+    policies use only observed cells and static fuel/aircraft data.
+    ``hold_aware_heuristic`` takes an ``ObservedFireBehavior`` as ``behavior``
+    (created here when omitted).
 
     With several aircraft, overlapping drops are excluded upstream by
     ``candidate_cells``; with no admissible target the aircraft holds.
     """
-    if policy not in {"no_intervention", "random_valid", "heuristic", "containment_heuristic"}:
-        raise ValueError("policy must be no_intervention, random_valid, heuristic, or containment_heuristic")
+    if policy not in {"no_intervention", "random_valid", "heuristic", "containment_heuristic", "hold_aware_heuristic"}:
+        raise ValueError("policy must be no_intervention, random_valid, heuristic, containment_heuristic, or hold_aware_heuristic")
     if policy == "no_intervention":
         return {"type": "HOLD"}
     aircraft = observation["aircraft"]
@@ -142,37 +145,74 @@ def choose_order(
         target = rng.choice(candidates)
     elif policy == "containment_heuristic":
         target = _containment_target(observation, candidates)
+    elif policy == "hold_aware_heuristic":
+        if observation.get("fuel_moisture") is None:
+            # Delayed observation before the first weather report: no fire behaviour yet.
+            target = _heuristic_target(observation, candidates)
+        else:
+            if behavior is None:
+                from .action_features import ObservedFireBehavior
+                behavior = ObservedFireBehavior()
+            target = _hold_aware_target(observation, candidates, behavior)
+            if target is None:
+                return {"type": "HOLD"}
     else:
         target = _heuristic_target(observation, candidates)
     cell_size = float(observation["cell_size_m"])
     return {"type": "DROP", "target_m": [target[1] * cell_size, target[0] * cell_size]}
 
 
-def _heuristic_target(observation: dict, candidates: list[list[int]]) -> list[int]:
-    """Maximize downwind projection, then proximity, then coordinate order."""
+def _downwind_rank(observation: dict, candidate: list[int]) -> tuple[float, float, int, int]:
+    """Sort key of a candidate: maximal downwind projection, then proximity, then coordinate order."""
     cells = observation["fire"]["cells"]
     east, north = observation["midflame_wind_to_m_s"]
     position_x, position_y = observation["aircraft"]["position_m"]
     cell_size = float(observation["cell_size_m"])
+    r, c = candidate
+    sources = []
+    for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+        nr, nc = r + dr, c + dc
+        if 0 <= nr < len(cells) and 0 <= nc < len(cells[0]):
+            record = cells[nr][nc]
+            if isinstance(record, dict) and record.get("fire_detected") is True:
+                # Geographic displacement from burning source to target.
+                # Neighbor offsets point from target back to source; invert
+                # them to project source-to-target displacement.
+                sources.append((-dc * cell_size * east - dr * cell_size * north) / cell_size)
+    downwind = max(sources) if sources else float("-inf")
+    x, y = c * cell_size, r * cell_size
+    distance = hypot(x - position_x, y - position_y)
+    return (-downwind, distance, r, c)
 
-    def rank(candidate: list[int]) -> tuple[float, float, int, int]:
-        r, c = candidate
-        sources = []
-        for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1)):
-            nr, nc = r + dr, c + dc
-            if 0 <= nr < len(cells) and 0 <= nc < len(cells[0]):
-                record = cells[nr][nc]
-                if isinstance(record, dict) and record.get("fire_detected") is True:
-                    # Geographic displacement from burning source to target.
-                    # Neighbor offsets point from target back to source; invert
-                    # them to project source-to-target displacement.
-                    sources.append((-dc * cell_size * east - dr * cell_size * north) / cell_size)
-        downwind = max(sources) if sources else float("-inf")
-        x, y = c * cell_size, r * cell_size
-        distance = hypot(x - position_x, y - position_y)
-        return (-downwind, distance, r, c)
 
-    return min(candidates, key=rank)
+def _heuristic_target(observation: dict, candidates: list[list[int]]) -> list[int]:
+    """Maximize downwind projection, then proximity, then coordinate order."""
+    return min(candidates, key=lambda candidate: _downwind_rank(observation, candidate))
+
+
+def _hold_aware_target(observation: dict, candidates: list[list[int]], behavior: Any) -> list[int] | None:
+    """Downwind target with two corrections from the stacked drops a front needs.
+
+    Candidates whose treated water already holds the front are dropped, and
+    the rest are tiered: fronts that stacked drops can hold, then fronts no
+    water holds that have none yet, then those that already have some. Ties
+    follow the downwind rank. The hold class is the D-74/D-76 limits applied to
+    Rothermel fireline intensity from observed fuel, terrain, wind and moisture.
+    """
+    counts = treated_counts(observation)
+    ranked = []
+    for r, c in candidates:
+        need = behavior.needed_at(observation, r, c)
+        have = counts.get((r, c), 0)
+        holdable = need != float("inf")
+        if holdable and have >= need:
+            continue  # the water already there holds this front
+        tier = 0 if holdable else (1 if have == 0 else 2)
+        ranked.append((tier,) + _downwind_rank(observation, [r, c]))
+    if not ranked:
+        return None
+    best = min(ranked)
+    return [best[3], best[4]]
 
 
 def _containment_target(observation: dict, candidates: list[list[int]]) -> list[int]:

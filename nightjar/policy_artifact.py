@@ -51,12 +51,18 @@ def inference_config(report: dict) -> dict:
     for key in ("include_ros", "include_thermal", "slot_features", "skip_forced"):
         if report.get(key) is not None and not isinstance(report[key], bool):
             raise ValueError(f"{key} must be boolean")
-    return {"input_mode": input_mode, "action_mode": action_mode, "recurrent": recurrent,
-            "fleet_size": fleet_size, "include_ros": report.get("include_ros", False),
-            "include_thermal": report.get("include_thermal", False),
-            "slot_features": report.get("slot_features"),
-            "skip_forced": report.get("skip_forced", report.get("ppo", {}).get("skip_forced")),
-            "imagery_dir": report.get("imagery_dir")}
+    inference = {"input_mode": input_mode, "action_mode": action_mode, "recurrent": recurrent,
+                 "fleet_size": fleet_size, "include_ros": report.get("include_ros", False),
+                 "include_thermal": report.get("include_thermal", False),
+                 "slot_features": report.get("slot_features"),
+                 "skip_forced": report.get("skip_forced", report.get("ppo", {}).get("skip_forced")),
+                 "imagery_dir": report.get("imagery_dir")}
+    # Keys appear only for reports that use them, so older reports keep their exact binding.
+    if report.get("drop_distances") and list(report["drop_distances"]) != [0]:
+        inference["drop_distances"] = list(report["drop_distances"])
+    if report.get("action_features"):
+        inference["action_features"] = True
+    return inference
 
 
 def write_report(report: dict, report_path: Path, checkpoint: Path | None = None, *, attach_sidecar: bool = True) -> None:
@@ -148,7 +154,9 @@ def load_policy_artifact(checkpoint: Path, report_path: Path, scenarios: list[di
     scenario = with_fleet([training_scenario], config["fleet_size"])[0]
     model = build_policy_model(scenario, **{k: config[k] for k in
                                ("input_mode", "action_mode", "recurrent", "include_ros", "include_thermal", "slot_features")},
-                               imagery_dir=image_path)
+                               imagery_dir=image_path,
+                               drop_distances=tuple(config.get("drop_distances", (0,))),
+                               action_features=bool(config.get("action_features", False)))
     try:
         model.load_state_dict(state)
     except RuntimeError as exc:

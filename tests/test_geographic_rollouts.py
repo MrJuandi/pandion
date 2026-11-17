@@ -94,6 +94,17 @@ class BatchedRolloutTests(unittest.TestCase):
                 self.assertEqual(metrics, [result[1] for result in serial])
                 self.assert_episodes_equal([result[0] for result in serial], records)
 
+    def test_batched_drop_distances_keep_masks_at_model_action_dim(self):
+        # Regression: batched collection once built masks without the model's drop distances.
+        model = build_policy_model(self.scenarios[0], recurrent=True, action_mode="parametric",
+                                   input_mode="cells", drop_distances=(0, 1))
+        records, metrics = rollout_geographic_batch(model, self.scenarios, rollout_envs=2,
+                                                    deterministic=True, input_mode="cells")
+        self.assertTrue(all(m["rejected_orders"] == 0 for m in metrics))
+        masks = [record["mask"] for episode in records for record in episode]
+        self.assertTrue(masks)
+        self.assertTrue(all(len(mask) == model.action_dim for mask in masks))
+
     def test_skip_forced_matches_serial_with_nondefault_bonus(self):
         for mode, action_mode in (("legacy", "tactical"), ("cells", "parametric")):
             with self.subTest(mode=mode):

@@ -1,7 +1,7 @@
 """Benchmark comparison across policies on real geographic scenarios.
 
-Evaluates no_intervention, random_valid, heuristic, and containment_heuristic,
-measuring final burned area, hectares saved, and aircraft operational efficiency.
+Evaluates no_intervention, random_valid, heuristic, containment_heuristic, and
+hold_aware_heuristic, measuring final burned area, hectares saved, and aircraft operational efficiency.
 """
 
 from __future__ import annotations
@@ -34,7 +34,11 @@ def run_geographic_benchmark(
     cont = run_geographic_integrated(scenario, policy="containment_heuristic")
     cont_ha = float(cont["outcomes"]["final_burned_ha"])
 
-    # 4. Random valid policy (averaged across seeds)
+    # 4. Hold-aware heuristic (stacked-drop corrections)
+    hold = run_geographic_integrated(scenario, policy="hold_aware_heuristic")
+    hold_ha = float(hold["outcomes"]["final_burned_ha"])
+
+    # 5. Random valid policy (averaged across seeds)
     random_runs = [
         run_geographic_integrated(scenario, policy="random_valid", policy_seed=s)
         for s in random_seeds
@@ -74,6 +78,14 @@ def run_geographic_benchmark(
             "refills_count": cont["aircraft_metrics"]["refills_count"],
             "water_l": cont["aircraft_metrics"]["total_water_dropped_l"],
             "flight_km": cont["aircraft_metrics"]["total_flight_distance_km"],
+        },
+        "hold_aware_heuristic": {
+            "final_burned_ha": hold_ha,
+            "area_saved_ha": round(max(0.0, unmitigated_ha - hold_ha), 4),
+            "drops_count": hold["aircraft_metrics"]["drops_count"],
+            "refills_count": hold["aircraft_metrics"]["refills_count"],
+            "water_l": hold["aircraft_metrics"]["total_water_dropped_l"],
+            "flight_km": hold["aircraft_metrics"]["total_flight_distance_km"],
         },
     }
 

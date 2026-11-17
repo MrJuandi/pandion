@@ -11,6 +11,7 @@ from nightjar.geographic_integrated import geographic_episode, run_geographic_in
 from nightjar.geographic_training_env import GeographicTrainingEnv, valid_geographic_actions
 from nightjar.model import ActionMapper
 from nightjar.parametric_actions import ParametricActionMapper
+from nightjar.policies import choose_order
 
 
 class TestGeographicTrainingEnv(unittest.TestCase):
@@ -122,6 +123,51 @@ class TestGeographicTrainingEnv(unittest.TestCase):
         while obs["aircraft"]["water_l"] > 0:
             obs, _, _, info = env.step({"type": "HOLD"})
         self.assertEqual(info["action_mask"], [{"type": "RETURN_TO_REFILL"}])
+
+    def _run_policy(self, env, policy="heuristic"):
+        """Step an episode with ``policy``; returns the per-step rewards."""
+        obs = env.reset()
+        rewards, done = [], False
+        while not done:
+            obs, reward, done, _ = env.step(choose_order(policy, obs))
+            rewards.append(reward)
+        return rewards
+
+    def spreading_scenario(self):
+        """Scenario whose fire spreads within the horizon, so reference areas differ
+        (the 35x35 fixture above burns a constant 21 ha under every policy)."""
+        fixture = build_synthetic_cems_fixture("EMSR578", rows=40, cols=40)
+        return generate_geographic_scenario(fixture, index=0, split="development",
+                                            window_rows=12, window_cols=12, horizon_s=3600.0)
+
+    def test_reward_reference_heuristic_totals_zero_when_following_heuristic(self):
+        scenario = self.spreading_scenario()
+        env = GeographicTrainingEnv(scenario, drop_bonus_per_cell=0, reward_reference="heuristic")
+        self.assertIn("heuristic_policy_area_growth", env.reward_definition)
+        self.assertAlmostEqual(sum(self._run_policy(env)), 0.0, delta=1e-6)
+
+    def test_reward_reference_no_intervention_totals_area_saved(self):
+        scenario = self.spreading_scenario()
+        env = GeographicTrainingEnv(scenario, drop_bonus_per_cell=0, reward_reference="no_intervention")
+        total = sum(self._run_policy(env))
+        no_intervention = run_geographic_integrated(scenario, "no_intervention")["affected_area_ha"]
+        self.assertGreater(abs(no_intervention - env.replay["affected_area_ha"]), 0.5)
+        self.assertAlmostEqual(total, no_intervention - env.replay["affected_area_ha"], delta=1e-6)
+
+    def test_default_reward_is_unchanged_burned_area_change(self):
+        env = GeographicTrainingEnv(self.scenario, drop_bonus_per_cell=0)
+        self.assertEqual(env.reward_definition, GeographicTrainingEnv.reward_definition)
+        self.env.reset()
+        initial = self.env._area_ha
+        rewards = self._run_policy(env)
+        self.assertAlmostEqual(sum(rewards), -(env.replay["affected_area_ha"] - initial), delta=1e-6)
+
+    def test_invalid_reward_reference_raises_value_error(self):
+        from nightjar.geographic_training_env import reference_area_curve
+        with self.assertRaises(ValueError):
+            GeographicTrainingEnv(self.scenario, reward_reference="random_valid")
+        with self.assertRaises(ValueError):
+            reference_area_curve(self.scenario, "random_valid")
 
 if __name__ == "__main__":
     unittest.main()
