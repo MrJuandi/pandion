@@ -23,7 +23,7 @@ from .aircraft import CAPACITY_L
 from .geographic_benchmark import run_geographic_benchmark
 from .geographic_family import canonical_hash
 from .cems_catalog import ACTIVATIONS, incidents_for_split
-from .geographic_training_env import GeographicTrainingEnv
+from .geographic_training_env import REWARD_REFERENCES, GeographicTrainingEnv
 from .model import (
     HAS_TORCH,
     SpatialActorCritic,
@@ -52,17 +52,21 @@ def make_input_tensorizer(
     include_ros: bool = False,
     include_thermal: bool = False,
     focus_slots: bool = False,
+    action_features: bool = False,
+    drop_distances: Any = (0,),
 ) -> Any:
     """Tensorizer for a scenario: legacy rasters, D-49 image inputs, or the no-image
     ablation ``cells`` (same per-cell/vector inputs, fire state as explicit channels).
-    Fleet features are added when the scenario has more than one aircraft."""
+    Fleet features are added when the scenario has more than one aircraft.
+    ``action_features`` (D-82) and ``drop_distances`` apply to image and cells inputs only."""
     fleet_features = int(scenario.get("aircraft", {}).get("fleet_size", 1)) > 1
     if input_mode == "legacy":
         return GeographicTrainingEnv(scenario).observation_tensorizer()
     if input_mode == "cells":
         from .policy_inputs import GeographicInputTensorizer
         return GeographicInputTensorizer(scenario, None, include_ros=include_ros, explicit_fire=True,
-                                         focus_slots=focus_slots, fleet_features=fleet_features)
+                                         focus_slots=focus_slots, fleet_features=fleet_features,
+                                         action_features=action_features, drop_distances=tuple(drop_distances))
     if input_mode != "image":
         raise ValueError(f"Unknown input_mode: {input_mode}")
     if imagery_dir is None:
@@ -80,7 +84,8 @@ def make_input_tensorizer(
         _IMAGE_CACHE[key] = image
     return GeographicInputTensorizer(scenario, _IMAGE_CACHE[key], include_ros=include_ros,
                                      include_thermal=include_thermal, focus_slots=focus_slots,
-                                     fleet_features=fleet_features)
+                                     fleet_features=fleet_features, action_features=action_features,
+                                     drop_distances=tuple(drop_distances))
 
 
 def build_policy_model(
@@ -94,6 +99,7 @@ def build_policy_model(
     include_thermal: bool = False,
     slot_features: bool = False,
     drop_distances: Any = (0,),
+    action_features: bool = False,
 ) -> Any:
     """Construct the actor-critic matching an input/action configuration."""
     _require_torch()
@@ -108,7 +114,9 @@ def build_policy_model(
 
     tensorizer = make_input_tensorizer(scenario, input_mode=input_mode, imagery_dir=imagery_dir,
                                        include_ros=include_ros, include_thermal=include_thermal,
-                                       focus_slots=action_mode == "parametric")
+                                       focus_slots=action_mode == "parametric",
+                                       action_features=action_features and action_mode == "parametric",
+                                       drop_distances=drop_distances)
     return ImageActorCritic(cell_channels=tensorizer.num_cell_channels,
                             vector_dim=tensorizer.num_vector_features,
                             px_per_cell=max(tensorizer.px_per_cell, 1), grid_rows=rows, grid_cols=cols,
@@ -116,7 +124,8 @@ def build_policy_model(
                             use_image=input_mode == "image",
                             image_channels=getattr(tensorizer, "image_channels", 3),
                             slot_raw_features=slot_features and action_mode == "parametric",
-                            drop_distances=tuple(drop_distances) if action_mode == "parametric" else (0,))
+                            drop_distances=tuple(drop_distances) if action_mode == "parametric" else (0,),
+                            action_feature_dim=tensorizer.num_action_features)
 
 
 def with_fleet(scenarios: list[dict[str, Any]], fleet_size: int) -> list[dict[str, Any]]:
@@ -343,9 +352,13 @@ def rollout_geographic(
     skip_forced: bool = False,
     inference_only: bool = False,
     replay_out: list[dict] | None = None,
+    reward_reference: str | None = None,
 ) -> tuple[list[dict], dict[str, Any]]:
     """Execute a single rollout of the CL-415 in a geographic scenario.
 
+    With ``reward_reference`` (D-81) each step's reward also adds the reference
+    policy's ("heuristic" or "no_intervention") burned-area growth over the same
+    interval, so the episode's rewards sum to reference minus policy final area.
     With ``skip_forced`` (D-64), steps whose mask allows a single action are
     executed without querying the model and are not training records; their
     reward is added to the preceding decision (or the first one), so returns
@@ -361,12 +374,15 @@ def rollout_geographic(
     _require_torch()
     action_mode = getattr(model, "action_mode", "tactical")
     env = GeographicTrainingEnv(scenario, drop_bonus_per_cell=drop_bonus_per_cell, action_mode=action_mode,
-                                drop_distances=getattr(model, "drop_distances", (0,)))
+                                drop_distances=getattr(model, "drop_distances", (0,)),
+                                reward_reference=reward_reference)
     observation = env.reset(seed=scenario.get("seed"))
     mapper = env.action_mapper()
     tensorizer = make_input_tensorizer(scenario, input_mode=input_mode, imagery_dir=imagery_dir,
                                        include_ros=include_ros, include_thermal=include_thermal,
-                                       focus_slots=action_mode == "parametric")
+                                       focus_slots=action_mode == "parametric",
+                                       action_features=getattr(model, "action_feature_dim", 0) > 0,
+                                       drop_distances=getattr(model, "drop_distances", (0,)))
 
     records: list[dict] = []
     rewards: list[float] = []
@@ -544,7 +560,7 @@ def holdout_evaluation(
     """Score a selected policy and the baselines on scenarios used neither for
     training nor for selection (D-68)."""
     policy = evaluate_geographic_policy(model, scenarios, device=device, **rollout_options)
-    names = ("no_intervention", "heuristic", "containment_heuristic", "random_valid_mean")
+    names = ("no_intervention", "heuristic", "containment_heuristic", "hold_aware_heuristic", "random_valid_mean")
     rows = []
     for scenario, metrics in zip(scenarios, policy):
         bench = run_geographic_benchmark(scenario, random_seeds=(42, 43))["policies"]
@@ -645,6 +661,8 @@ def train_geographic_ppo(
     history: list[dict[str, Any]] | None = None,
     rollout_envs: int = 1,
     gamma: float = 1.0,
+    reward_reference: str | None = None,
+    action_features: bool = False,
 ) -> tuple[Any, list[float]]:
     """Train a geographic policy (legacy SpatialActorCritic or D-49 ImageActorCritic).
 
@@ -665,6 +683,9 @@ def train_geographic_ppo(
     spawned processes. Policy weights stay fixed throughout collection.
     ``gamma`` discounts returns per decision (D-80); 1.0, the default, optimises the final burned area.
     Serial collection remains the default for seeded trajectory compatibility.
+    ``reward_reference`` (D-81) trains on hectares saved relative to a reference
+    policy in the same scenario; it applies to training collection only, not selection.
+    ``action_features`` (D-82) gives the parametric head features of each action's target cell.
     """
     _require_torch()
     if rollout_envs < 1 or rollout_workers < 0:
@@ -674,7 +695,7 @@ def train_geographic_ppo(
     input_options = {"input_mode": input_mode, "imagery_dir": imagery_dir, "include_ros": include_ros,
                      "include_thermal": include_thermal}
     build_kwargs = {"action_mode": action_mode, "recurrent": recurrent, "slot_features": slot_features,
-                    "drop_distances": tuple(drop_distances), **input_options}
+                    "drop_distances": tuple(drop_distances), "action_features": action_features, **input_options}
     augmented: dict[tuple[str, int], dict[str, Any]] = {}
     model = build_policy_model(dev_scenarios[0], **build_kwargs).to(device)
     if hasattr(model, "IMAGE_CHUNK"):
@@ -739,7 +760,10 @@ def train_geographic_ppo(
             backend = resources.enter_context(RolloutBackend(
                 action_mode=action_mode, input_options=input_options,
                 workers=min(rollout_workers, rollout_envs, episodes_per_update),
-                skip_forced=skip_forced, drop_bonus_per_cell=drop_bonus_per_cell))
+                skip_forced=skip_forced, drop_bonus_per_cell=drop_bonus_per_cell,
+                drop_distances=tuple(drop_distances),
+                action_features=action_features and action_mode == "parametric",
+                reward_reference=reward_reference))
         elif updates and rollout_workers > 1:
             import multiprocessing
             from concurrent.futures import ProcessPoolExecutor
@@ -750,7 +774,7 @@ def train_geographic_ppo(
             batch_records = []
             rollout_kwargs = {"gae_lambda": gae_lambda, "normalize_advantages": not batch_normalized, "gamma": gamma,
                               "skip_forced": skip_forced, "drop_bonus_per_cell": drop_bonus_per_cell,
-                              **input_options}
+                              "reward_reference": reward_reference, **input_options}
             chosen = [random.choice(dev_scenarios) for _ in range(episodes_per_update)]
             if augment:
                 from .augmentation import NUM_TRANSFORMS, augment_scenario
@@ -874,6 +898,13 @@ def main() -> None:
                         help="do not query or train on single-action steps (D-64); applies to evaluation too")
     parser.add_argument("--gamma", type=float, default=1.0,
                         help="discount per decision (D-80); 1.0 optimises the final burned area")
+    parser.add_argument("--reward-reference", choices=REWARD_REFERENCES, default=None,
+                        help="train on hectares saved relative to this policy in the same scenario (D-81)")
+    parser.add_argument("--selection-activations", nargs="+", metavar="ACTIVATION",
+                        help="with --select: leave these development incidents out of training and choose the "
+                             "weights on them instead of on the validation split (D-84)")
+    parser.add_argument("--action-features", action="store_true",
+                        help="parametric head also sees features of each action's target cell (D-82)")
     parser.add_argument("--entropy-coef-final", type=float,
                         help="decay the entropy bonus linearly to this value over the updates")
     parser.add_argument("--checkpoint-every", type=int, default=0,
@@ -894,10 +925,16 @@ def main() -> None:
     input_options = {"input_mode": args.input_mode, "imagery_dir": args.imagery_dir, "include_ros": args.ros,
                      "include_thermal": args.thermal}
     model_options = {"action_mode": args.action_mode, "slot_features": args.slot_features,
-                     "drop_distances": tuple(args.drop_distances), **input_options}
+                     "drop_distances": tuple(args.drop_distances), "action_features": args.action_features,
+                     **input_options}
     holdout_scenarios = []
     if args.holdout_activation:
         dev_scenarios, holdout_scenarios = partition_holdout(dev_scenarios, args.holdout_activation)
+    selection_scenarios: list[dict[str, Any]] = []
+    for activation in args.selection_activations or []:
+        # D-84: selection incidents are development incidents used neither for training nor as the holdout.
+        dev_scenarios, chosen = partition_holdout(dev_scenarios, activation)
+        selection_scenarios += chosen
     rollout_options = {**input_options, "skip_forced": args.skip_forced}
     ppo_options = {"ppo_epochs": args.ppo_epochs, "minibatches": args.minibatches, "gae_lambda": args.gae_lambda,
                    "reward_scaling": args.reward_scaling, "target_kl": args.target_kl,
@@ -905,15 +942,18 @@ def main() -> None:
                    "skip_forced": args.skip_forced, "drop_bonus_per_cell": args.drop_bonus,
                    "rollout_workers": args.rollout_workers, "augment": args.augment,
                    "slot_features": args.slot_features, "eval_every": args.eval_every,
-                   "image_checkpoint_chunk": args.image_checkpoint_chunk, "gamma": args.gamma}
+                   "image_checkpoint_chunk": args.image_checkpoint_chunk, "gamma": args.gamma,
+                   "reward_reference": args.reward_reference}
     train_options = {**model_options, **ppo_options,
                      "checkpoint_path": args.checkpoint, "checkpoint_every": args.checkpoint_every,
                      "rollout_envs": args.rollout_envs, "rollout_workers": args.rollout_workers}
     config_report = {"ppo": {"epochs": args.ppo_epochs, "minibatches": args.minibatches,
                              "gae_lambda": args.gae_lambda, "reward_scaling": args.reward_scaling,
                              "target_kl": args.target_kl, "entropy_coef": args.entropy_coef,
-                             "entropy_coef_final": args.entropy_coef_final, "gamma": args.gamma}, "input_mode": args.input_mode, "action_mode": args.action_mode, "include_ros": args.ros, "include_thermal": args.thermal, "fleet_size": args.fleet_size, "holdout_activation": args.holdout_activation,
-                     "drop_distances": list(args.drop_distances),
+                             "entropy_coef_final": args.entropy_coef_final, "gamma": args.gamma,
+                             "reward_reference": args.reward_reference}, "input_mode": args.input_mode, "action_mode": args.action_mode, "include_ros": args.ros, "include_thermal": args.thermal, "fleet_size": args.fleet_size, "holdout_activation": args.holdout_activation,
+                     "drop_distances": list(args.drop_distances), "action_features": args.action_features,
+                     "selection_activations": args.selection_activations,
                      "imagery_dir": str(args.imagery_dir) if args.imagery_dir else None,
                      "collection": {"rollout_envs": args.rollout_envs, "rollout_workers": args.rollout_workers},
                      "slot_features": args.slot_features, "skip_forced": args.skip_forced,
@@ -996,8 +1036,9 @@ def main() -> None:
         return
 
     if args.select:
-        val_scenarios = with_fleet(load_geographic_split("validation", args.scenarios_dir, synthetic=args.synthetic),
-                                   args.fleet_size)
+        selection_split = "selection" if selection_scenarios else "validation"
+        val_scenarios = selection_scenarios or with_fleet(
+            load_geographic_split("validation", args.scenarios_dir, synthetic=args.synthetic), args.fleet_size)
         if args.eval_scenarios is not None:
             val_scenarios = val_scenarios[:args.eval_scenarios]
         print(f"Training {args.candidates} candidates on {len(dev_scenarios)} development scenarios...")
@@ -1031,7 +1072,7 @@ def main() -> None:
             total_drops = sum(r["drops_count"] for r in val_results)
 
             candidate_reports.append({
-                "dataset": _dataset_report(args.scenarios_dir, {"development": dev_scenarios, "validation": val_scenarios}),
+                "dataset": _dataset_report(args.scenarios_dir, {"development": dev_scenarios, selection_split: val_scenarios}),
                 "candidate_index": c_idx,
                 "seed": c_seed,
                 "mean_burned_ha": round(mean_burned, 2),
@@ -1040,7 +1081,7 @@ def main() -> None:
                 "selection_history": selection_history,
             })
 
-            print(f"Candidate {c_idx + 1} validation mean burned: {mean_burned:.2f} ha (total drops: {total_drops})")
+            print(f"Candidate {c_idx + 1} {selection_split} mean burned: {mean_burned:.2f} ha (total drops: {total_drops})")
 
             if mean_burned < best_mean_burned:
                 best_mean_burned = mean_burned
@@ -1058,12 +1099,13 @@ def main() -> None:
             print(f"Holdout {args.holdout_activation}: policy {holdout_report['policy_mean_ha']:.2f} ha | "
                   f"heuristic {holdout_report['baselines_mean_ha']['heuristic']:.2f} | "
                   f"containment {holdout_report['baselines_mean_ha']['containment_heuristic']:.2f} | "
+                  f"hold-aware {holdout_report['baselines_mean_ha']['hold_aware_heuristic']:.2f} | "
                   f"no intervention {holdout_report['baselines_mean_ha']['no_intervention']:.2f}")
 
         report = {
             "schema_version": SELECTION_SCHEMA_VERSION,
             "holdout": holdout_report,
-            "dataset": _dataset_report(args.scenarios_dir, {"development": dev_scenarios, "validation": val_scenarios,
+            "dataset": _dataset_report(args.scenarios_dir, {"development": dev_scenarios, selection_split: val_scenarios,
                                                             **({"holdout": holdout_scenarios} if holdout_scenarios else {})}),
             "seed": args.seed,
             "recurrent": recurrent,
@@ -1098,6 +1140,7 @@ def main() -> None:
             rollout_options = {key: config[key] for key in ("input_mode", "imagery_dir", "include_ros", "include_thermal", "skip_forced")}
             config_report.update({key: config[key] for key in ("input_mode", "action_mode", "recurrent", "include_ros", "include_thermal", "fleet_size", "slot_features", "skip_forced")})
             config_report["imagery_dir"] = str(config["imagery_dir"]) if config["imagery_dir"] else None
+            config_report["action_features"] = bool(config.get("action_features", False))
             config_report["device"] = str(device)
             config_report["training_artifact"] = artifact_info
         else:
@@ -1113,6 +1156,7 @@ def main() -> None:
             no_int_ha = bm["policies"]["no_intervention"]["final_burned_ha"]
             heur_ha = bm["policies"]["heuristic"]["final_burned_ha"]
             cont_ha = bm["policies"]["containment_heuristic"]["final_burned_ha"]
+            hold_ha = bm["policies"]["hold_aware_heuristic"]["final_burned_ha"]
             rand_ha = bm["policies"]["random_valid_mean"]["final_burned_ha"]
             rl_ha = rl_metrics["final_burned_ha"]
             area_saved = round(no_int_ha - rl_ha, 2)
@@ -1121,6 +1165,7 @@ def main() -> None:
                 "no_intervention_ha": no_int_ha,
                 "heuristic_ha": heur_ha,
                 "containment_ha": cont_ha,
+                "hold_aware_ha": hold_ha,
                 "random_valid_ha": rand_ha,
                 "ppo_rl_ha": rl_ha,
                 "area_saved_ha": area_saved,

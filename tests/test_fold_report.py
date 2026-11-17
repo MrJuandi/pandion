@@ -122,6 +122,26 @@ class FoldReportTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "finite"):
             summarise([first], resamples=100)
 
+    def test_hold_aware_baseline_is_compared_when_every_report_has_it(self):
+        reports = [report("A", 1, [90.0, 100.0], [100.0, 100.0]), report("B", 1, [90.0, 100.0], [100.0, 100.0])]
+        for r in reports:
+            for row in r["holdout"]["rows"]:
+                row["hold_aware_heuristic_ha"] = 95.0
+        summary = summarise(reports, resamples=100)
+        self.assertIn("hold_aware_heuristic", summary["pooled"]["versus"])
+        self.assertIn("hold_aware_heuristic", summary["folds"][0]["versus"])
+        self.assertEqual(summary["pooled"]["baselines_mean_ha"]["hold_aware_heuristic"], 95.0)
+        self.assertIn("| Hold-aware ha |", format_table(summary).splitlines()[0])
+
+    def test_hold_aware_baseline_is_left_out_when_one_report_lacks_it(self):
+        first, second = report("A", 1, [90.0, 100.0], [100.0, 100.0]), report("B", 1, [90.0, 100.0], [100.0, 100.0])
+        for row in first["holdout"]["rows"]:
+            row["hold_aware_heuristic_ha"] = 95.0
+        summary = summarise([first, second], resamples=100)
+        self.assertNotIn("hold_aware_heuristic", summary["pooled"]["versus"])
+        self.assertNotIn("hold_aware_heuristic", summary["pooled"]["baselines_mean_ha"])
+        self.assertNotIn("Hold-aware", format_table(summary))
+
     def test_load_skips_files_without_holdout_and_table_has_pooled_row(self):
         with tempfile.TemporaryDirectory() as tmp:
             directory = Path(tmp)

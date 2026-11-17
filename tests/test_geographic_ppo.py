@@ -271,6 +271,22 @@ class TestGeographicPPO(unittest.TestCase):
         loss = ppo_update_geographic(model, optimizer, records)
         self.assertTrue(torch.isfinite(torch.tensor(loss)))
 
+    def test_reward_reference_sums_to_reference_minus_policy_final_area(self):
+        from nightjar.geographic_integrated import run_geographic_integrated
+        # 40x40 fixture with a 3600 s horizon: the fire spreads, so the reference differs from the policy.
+        fixture = build_synthetic_cems_fixture("EMSR578", rows=40, cols=40)
+        scenario = generate_geographic_scenario(fixture, index=0, split="development",
+                                                window_rows=12, window_cols=12, horizon_s=3600.0)
+        torch.manual_seed(1)
+        model = SpatialActorCritic(grid_rows=12, grid_cols=12, action_dim=len(TACTICAL_ACTION_NAMES),
+                                   recurrent=True)
+        records, metrics = rollout_geographic(model, scenario, deterministic=True,
+                                              drop_bonus_per_cell=0, reward_reference="heuristic")
+        heuristic_final = run_geographic_integrated(scenario, "heuristic")["outcomes"]["final_burned_ha"]
+        self.assertGreater(abs(heuristic_final - metrics["final_burned_ha"]), 0.5)
+        self.assertAlmostEqual(sum(r["reward"] for r in records),
+                               heuristic_final - metrics["final_burned_ha"], delta=1e-4)
+
     def test_ppo_update_accumulation_equals_batched_loss(self):
         import copy
         for recurrent in (True, False):
@@ -441,7 +457,8 @@ class TestGeographicPPO(unittest.TestCase):
         report = holdout_evaluation(model, [self.scenario])
         self.assertEqual(report["scenarios"], 1)
         self.assertEqual(set(report["baselines_mean_ha"]),
-                         {"no_intervention", "heuristic", "containment_heuristic", "random_valid_mean"})
+                         {"no_intervention", "heuristic", "containment_heuristic", "hold_aware_heuristic",
+                          "random_valid_mean"})
         row = report["rows"][0]
         self.assertEqual(report["policy_mean_ha"], row["policy_ha"])
         self.assertGreaterEqual(row["no_intervention_ha"], row["heuristic_ha"])
@@ -564,6 +581,37 @@ class TestGeographicPPO(unittest.TestCase):
             for name in outputs[0][2]:
                 self.assertTrue(torch.equal(outputs[0][2][name], outputs[1][2][name]), name)
 
+
+    def test_select_cli_chooses_weights_on_selection_incidents(self):
+        from nightjar.geographic_family import build_synthetic_cems_fixture
+        from nightjar.geographic_ppo import main
+
+        fixture = build_synthetic_cems_fixture("EMSR578", rows=25, cols=25)
+        scenarios = []
+        for index, activation in enumerate(("EMSR578", "EMSR578", "EMSR583", "EMSR625_AOI01")):
+            scenario = generate_geographic_scenario(fixture, index=index, split="development", window_rows=15,
+                                                    window_cols=15, horizon_s=300.0)
+            scenario["activation_id"] = activation
+            scenarios.append(scenario)
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            output = root / "select.json"
+            with patch("sys.argv", [
+                "geographic_ppo", "--select", "--synthetic", "--candidates", "1", "--updates", "1",
+                "--scenarios-dir", str(root), "--output", str(output), "--seed", "7",
+                "--selection-activations", "EMSR583", "--holdout-activation", "EMSR625_AOI01",
+            ]), patch("nightjar.geographic_ppo.load_geographic_split", return_value=scenarios) as loader:
+                main()
+            # The validation split is never loaded: selection uses the named development incident.
+            loader.assert_called_once_with("development", root, synthetic=True)
+            report = json.loads(output.read_text())
+            splits = report["dataset"]["splits"]
+            self.assertNotIn("validation", splits)
+            self.assertEqual({row["activation_id"] for row in splits["development"]}, {"EMSR578"})
+            self.assertEqual([row["activation_id"] for row in splits["selection"]], ["EMSR583"])
+            self.assertEqual([row["activation_id"] for row in splits["holdout"]], ["EMSR625_AOI01"])
+            self.assertEqual(report["selection_activations"], ["EMSR583"])
+            self.assertEqual(report["holdout"]["scenarios"], 1)
 
 if __name__ == "__main__":
     unittest.main()

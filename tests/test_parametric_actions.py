@@ -121,6 +121,24 @@ class ParametricActionTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             mapper.target_cell(2 + 3 * 3 + 2, obs)
 
+    def test_target_details_agree_with_targets(self):
+        mapper = ParametricActionMapper(100.0, (0, 1, 2))
+        obs = observation(BIG | SMALL, burned={(0, 0)}, wind=(2.0, 1.0))
+        details = mapper.target_details(obs)
+        self.assertEqual(mapper.targets(obs), {i: (r, c) for i, (r, c, *_) in details.items()})
+        checked = 0
+        for i, (r, c, orow, ocol, d) in details.items():
+            if d == 0:
+                continue
+            j = (i - 2) % len(mapper.distances)  # distance index; its d=0 sibling is i - j
+            base = details.get(i - j)
+            if base is None:
+                continue
+            checked += 1
+            self.assertEqual((r, c), (base[0] + d * orow, base[1] + d * ocol))
+            self.assertEqual((orow, ocol), (base[2], base[3]))
+        self.assertGreater(checked, 0)
+
     def test_offset_targets_must_be_untreated_unburned_fuel(self):
         mapper = ParametricActionMapper(100.0, (0, 1))
         obs = observation(BIG, wind=(2.0, 0.0))

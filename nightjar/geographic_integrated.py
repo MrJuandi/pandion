@@ -62,7 +62,7 @@ def drops_needed(intensity_kw_m: float) -> float:
     return float("inf")
 
 
-POLICIES = ("no_intervention", "random_valid", "heuristic", "containment_heuristic")
+POLICIES = ("no_intervention", "random_valid", "heuristic", "containment_heuristic", "hold_aware_heuristic")
 
 
 def run_geographic_integrated(
@@ -79,7 +79,8 @@ def run_geographic_integrated(
 
     Parameters:
     - scenario: dict matching 'nightjar-geographic-scenario-0.1/0.2' or 'nightjar-cems-scenario-0.1'.
-    - policy: 'no_intervention', 'random_valid', 'heuristic', or 'containment_heuristic'.
+    - policy: one of POLICIES ('no_intervention', 'random_valid', 'heuristic',
+      'containment_heuristic', or 'hold_aware_heuristic').
     - policy_seed: optional integer seed for randomized policies.
     - observation_mode: 'realtime' (default; full grid and current weather at
       every decision, no delivery delay) or 'scheduled' (legacy delayed
@@ -96,6 +97,10 @@ def run_geographic_integrated(
                                  truncated=_stop_after_steps is not None,
                                  record_observations=_record_observations)
     rng = Random(scenario.get("seed", 42) if policy_seed is None else policy_seed)
+    behavior = None
+    if policy == "hold_aware_heuristic":
+        from .action_features import ObservedFireBehavior  # lazy: action_features imports this module
+        behavior = ObservedFireBehavior()
     step = 0
     try:
         observation, _, _ = next(episode)
@@ -105,7 +110,8 @@ def run_geographic_integrated(
             elif _actions is not None and step < len(_actions):
                 order = _actions[step]
             else:
-                order = choose_order(policy, observation, candidates=candidate_cells(observation), rng=rng)
+                order = choose_order(policy, observation, candidates=candidate_cells(observation), rng=rng,
+                                     behavior=behavior)
             step += 1
             observation, _, _ = episode.send(order)
     except StopIteration as finished:
@@ -881,7 +887,7 @@ def geographic_episode(
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("scenario", type=Path, help="Path to geographic scenario JSON")
-    parser.add_argument("--policy", choices=("no_intervention", "random_valid", "heuristic", "containment_heuristic"), default="heuristic")
+    parser.add_argument("--policy", choices=POLICIES, default="heuristic")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--observation-mode", choices=OBSERVATION_MODES)
     parser.add_argument("--output", type=Path)
