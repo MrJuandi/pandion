@@ -190,7 +190,8 @@ def build_workspace(scenarios_dir: Path, output_dir: Path, *, episodes: int = 2,
                 "scenario_hashes": {s["scenario_id"]: s["scenario_hash"] for v in splits.values() for s in v}}
     manifest["artifacts"] = [{"path": p.name, "sha256": file_hash(p)} for p in sorted(output_dir.glob("*.json"))]
     (output_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False, allow_nan=False))
-    write_viewer_html(replays, output_dir / "index.html", title="Nightjar · Laboratorio de incendios")
+    write_viewer_html(replays, output_dir / "index.html", title="Nightjar · Laboratorio de incendios",
+                      imagery_dirs=[imagery_dir] if imagery_dir else None)
     from .experiment_catalog import scan_catalog, write_catalog
     roots = [output_dir] + ([checkpoint, training_report] if checkpoint else [])
     write_catalog(scan_catalog(roots), output_dir / "experiments.json", output_dir / "experiments.html")
@@ -265,7 +266,8 @@ def build_fold_workspace(scenarios_dir: Path, folds_dir: Path, output_dir: Path,
                 "scenario_hashes": {r["scenario_id"]: r["scenario_hash"] for r in replays}}
     manifest["artifacts"] = [{"path": p.name, "sha256": file_hash(p)} for p in sorted(output_dir.glob("*.json"))]
     (output_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False, allow_nan=False))
-    write_viewer_html(replays, output_dir / "index.html", title=f"Nightjar · {folds_dir.name}")
+    write_viewer_html(replays, output_dir / "index.html", title=f"Nightjar · {folds_dir.name}",
+                      imagery_dirs=[imagery_dir] if imagery_dir else None)
     return manifest
 
 
@@ -279,7 +281,8 @@ def main() -> None:
     p.add_argument("--folds-dir", type=Path, help="Completed fold reports and matching .pt checkpoints; replays held-out development cases per fold")
     p.add_argument("--checkpoint", type=Path)
     p.add_argument("--training-report", type=Path)
-    p.add_argument("--imagery-dir", type=Path, help="Relocated imagery directory, verified against report when bound")
+    p.add_argument("--imagery-dir", type=Path, help="Relocated imagery directory, verified against report when bound; "
+                   "also embedded in the viewer as a display-only Sentinel-2 base layer for matching grids")
     p.add_argument("--device", choices=("cpu", "mps", "cuda"), default="cpu")
     p.add_argument("--skip-forced", action=argparse.BooleanOptionalAction, default=None,
                    help="Explicit recurrent-state behavior for legacy reports missing this setting")
