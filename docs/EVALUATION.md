@@ -715,3 +715,15 @@ Selection score (mean final area on the 128 selection scenarios, lower is better
 Held out, the branched policy burns 38.55 ha against 41.76 for `heuristic` and 38.70 for `hold_aware_heuristic`; against the latter it is better in 62 scenarios, equal in 161 and worse in 65 (D-84 policy: 30 / 141 / 117).
 
 Reading: with the same seed, data, features, reward and selection, replacing Monte Carlo/GAE advantages by branched ones gains about 2 ha on the held-out incident and closes the gap to `hold_aware_heuristic`, which the learned policies trailed by about 2 ha in every earlier run. This supports the diagnosis that the limit was the learning signal rather than the inputs or the action set. Limits: one seed; one held-out activation; the policy now ties the hold-aware rule rather than beating it, and remains below the one-step oracle of the headroom section.
+
+Seeds 43 and 44 (`run_43_44.sh`, same commit and recipe, 5 workers each, run in parallel, about 2 h 50 min) were selected at updates 200 and 250 (selection score 77.9 and 78.6 ha; D-84 seeds reached 82–83). Evaluation of their selected weights and of the D-84 seeds 43 and 44 on the same scenarios: `audit-eval-43-44.json`; three-seed summary (`three_seed.py`, per-scenario mean over the three seeds, then bootstrap over scenarios): `three-seed.json`.
+
+| Selected weights, 3 seeds | Held out: − heuristic | Held out: − hold-aware | Development sample: − heuristic | Development sample: − hold-aware |
+|---|---|---|---|---|
+| Branched advantages (D-85) | −3.09 [−4.52, −1.88] | −0.03 [−0.44, +0.35] | −2.96 [−4.75, −1.49] | +0.16 [−0.78, +1.14] |
+| Monte Carlo/GAE advantages (D-84 run) | −1.03 [−1.62, −0.53] | +2.02 [+1.04, +3.28] | −0.69 [−1.40, −0.06] | +2.42 [+1.06, +4.21] |
+| Branched − Monte Carlo, paired | −2.05 [−3.39, −1.06] | | −2.27 [−3.76, −1.09] | |
+
+Per seed (42, 43, 44), held out, branched − heuristic: −3.21, −3.27, −2.78; branched − hold-aware: −0.16, −0.21, +0.27; branched − Monte Carlo: −2.16, −2.41, −1.58. Every seed gains on its Monte Carlo counterpart on both evaluation sets.
+
+Reading: the seed 42 result holds across seeds. Branched advantages gain about 2 ha over Monte Carlo/GAE advantages with everything else fixed and bring the learned policy level with `hold_aware_heuristic`, but not past it. Limits: one held-out activation; three seeds.
