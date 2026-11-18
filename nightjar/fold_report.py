@@ -29,6 +29,8 @@ from .identity import audit_independence, content_hash, incident_group
 SCHEMA_VERSION = "nightjar-fold-report-0.2"
 SELECTION_SCHEMA = "nightjar-geographic-ppo-selection-0.1"
 BASELINES = ("heuristic", "containment_heuristic", "no_intervention")
+# Optional baseline, compared only when every loaded report scored it (older reports lack it).
+HOLD_AWARE = "hold_aware_heuristic"
 # Fields that define the experiment; reports that differ in any of them are not comparable.
 CONFIG_FIELDS = ("recurrent", "ppo", "input_mode", "action_mode", "include_ros", "include_thermal",
                  "fleet_size", "imagery_dir", "candidates_count", "slot_features", "skip_forced", "updates", "episodes_per_update",
@@ -62,7 +64,7 @@ def _config(report: dict[str, Any]) -> dict[str, Any]:
             {(e["scenario_id"], e["scenario_hash"]) for entries in splits.values() for e in entries}))
         config.pop("scenarios_dir")
         config["selection_sha256"] = content_hash(sorted(
-            (e["scenario_id"], e["scenario_hash"]) for e in splits.get("validation", [])))
+            (e["scenario_id"], e["scenario_hash"]) for e in splits.get("selection", splits.get("validation", []))))
     if dataset.get("imagery_content_sha256"):
         config["imagery_content_sha256"] = dataset["imagery_content_sha256"]
         config.pop("imagery_dir")
@@ -70,6 +72,13 @@ def _config(report: dict[str, Any]) -> dict[str, Any]:
     config["source_sha256"] = execution.get("source_sha256")
     config["runtime"] = {k: execution.get(k) for k in ("python", "packages")}
     return config
+
+
+def _baseline_names(reports: list[dict[str, Any]]) -> tuple[str, ...]:
+    """BASELINES, plus the hold-aware heuristic when every holdout row carries it."""
+    if all(f"{HOLD_AWARE}_ha" in row for report in reports for row in report["holdout"]["rows"]):
+        return (*BASELINES, HOLD_AWARE)
+    return BASELINES
 
 
 def check_comparable(reports: list[dict[str, Any]]) -> dict[str, Any]:
@@ -117,14 +126,14 @@ def _comparison(policy: np.ndarray, baseline: np.ndarray, strata_sizes: list[int
     }
 
 
-def _fold_rows(reports: list[dict[str, Any]]) -> tuple[list[str], np.ndarray, dict[str, np.ndarray], list[float]]:
+def _fold_rows(reports: list[dict[str, Any]], names: tuple[str, ...]) -> tuple[list[str], np.ndarray, dict[str, np.ndarray], list[float]]:
     """Scenario ids, seed-averaged policy area, baseline areas and per-seed policy means."""
     for report in reports:
         rows = report["holdout"]["rows"]
         if not rows or len({row["scenario_id"] for row in rows}) != len(rows):
             raise ValueError("empty or duplicate holdout scenario rows")
         if any(not np.isfinite(row.get(key, np.nan)) or row[key] < 0 for row in rows
-               for key in ("policy_ha", *(f"{n}_ha" for n in BASELINES))):
+               for key in ("policy_ha", *(f"{n}_ha" for n in names))):
             raise ValueError("holdout areas must be finite and nonnegative")
     by_seed = [{row["scenario_id"]: row for row in r["holdout"]["rows"]} for r in reports]
     ids = sorted(by_seed[0])
@@ -137,7 +146,7 @@ def _fold_rows(reports: list[dict[str, Any]]) -> tuple[list[str], np.ndarray, di
                 raise ValueError(f"scenario content differs between seeds: {sid}")
     policy = np.array([np.mean([rows[i]["policy_ha"] for rows in by_seed]) for i in ids])
     baselines = {}
-    for name in BASELINES:
+    for name in names:
         values = np.array([by_seed[0][i][f"{name}_ha"] for i in ids], dtype=float)
         for rows in by_seed[1:]:
             if not np.array_equal(values, [rows[i][f"{name}_ha"] for i in ids]):
@@ -192,9 +201,11 @@ def summarise(reports: list[dict[str, Any]], *, resamples: int = 10000, seed: in
     for report in sorted(reports, key=lambda r: (r["holdout_activation"], r["seed"])):
         folds.setdefault(incident_group(report["holdout_activation"]), []).append(report)
     ci = {"resamples": resamples, "seed": seed}
-    fold_summaries, pooled_policy, pooled_base, sizes = [], [], {n: [] for n in BASELINES}, []
+    names = _baseline_names(reports)
+    versus_names = tuple(n for n in names if n != "no_intervention")
+    fold_summaries, pooled_policy, pooled_base, sizes = [], [], {n: [] for n in names}, []
     for activation, fold in folds.items():
-        ids, policy, baselines, seed_means = _fold_rows(fold)
+        ids, policy, baselines, seed_means = _fold_rows(fold, names)
         fold_summaries.append({
             "holdout_activation": activation,
             "seeds": [r["seed"] for r in fold],
@@ -203,11 +214,11 @@ def summarise(reports: list[dict[str, Any]], *, resamples: int = 10000, seed: in
             "policy_seed_means_ha": [round(m, 4) for m in seed_means],
             "policy_seed_std_ha": round(float(np.std(seed_means, ddof=1)), 4) if len(seed_means) > 1 else None,
             "baselines_mean_ha": {n: round(float(v.mean()), 4) for n, v in baselines.items()},
-            "versus": {n: _comparison(policy, baselines[n], [len(ids)], **ci) for n in BASELINES[:2]},
+            "versus": {n: _comparison(policy, baselines[n], [len(ids)], **ci) for n in versus_names},
             "reports": [r["_path"] for r in fold],
         })
         pooled_policy.append(policy)
-        for n in BASELINES:
+        for n in names:
             pooled_base[n].append(baselines[n])
         sizes.append(len(ids))
     policy = np.concatenate(pooled_policy)
@@ -216,7 +227,7 @@ def summarise(reports: list[dict[str, Any]], *, resamples: int = 10000, seed: in
         "scenarios": int(policy.size),
         "policy_mean_ha": round(float(policy.mean()), 4),
         "baselines_mean_ha": {n: round(float(np.concatenate(v).mean()), 4) for n, v in pooled_base.items()},
-        "versus": {n: _comparison(policy, np.concatenate(pooled_base[n]), sizes, **ci) for n in BASELINES[:2]},
+        "versus": {n: _comparison(policy, np.concatenate(pooled_base[n]), sizes, **ci) for n in versus_names},
         "folds_policy_better_than_heuristic": sum(f["versus"]["heuristic"]["mean_difference_ha"] < 0
                                                   for f in fold_summaries),
     }
@@ -241,17 +252,23 @@ def summarise(reports: list[dict[str, Any]], *, resamples: int = 10000, seed: in
 
 def format_table(summary: dict[str, Any]) -> str:
     """Markdown table: one row per fold and a pooled row."""
-    lines = ["| Held-out incident | Seeds | Policy ha | Heuristic ha | Containment ha | "
-             "Policy - heuristic (95% CI) | Better / equal / worse |",
-             "|---|---|---|---|---|---|---|"]
+    hold_aware = HOLD_AWARE in summary["pooled"]["baselines_mean_ha"]
+    headers = ["Held-out incident", "Seeds", "Policy ha", "Heuristic ha", "Containment ha"]
+    if hold_aware:
+        headers.append("Hold-aware ha")
+    headers += ["Policy - heuristic (95% CI)", "Better / equal / worse"]
+    lines = ["| " + " | ".join(headers) + " |", "|" + "---|" * len(headers)]
 
     def row(name: str, seeds: str, entry: dict[str, Any]) -> str:
         h = entry["versus"]["heuristic"]
         relative = f"{h['relative_difference']:+.1%}" if h["relative_difference"] is not None else "n/a"
-        return (f"| {name} | {seeds} | {entry['policy_mean_ha']:.1f} | {entry['baselines_mean_ha']['heuristic']:.1f} | "
-                f"{entry['baselines_mean_ha']['containment_heuristic']:.1f} | {h['mean_difference_ha']:+.2f} "
-                f"[{h['ci95_ha'][0]:+.2f}, {h['ci95_ha'][1]:+.2f}] ({relative}) | "
-                f"{h['policy_better']} / {h['equal']} / {h['policy_worse']} |")
+        cells = [name, seeds, f"{entry['policy_mean_ha']:.1f}", f"{entry['baselines_mean_ha']['heuristic']:.1f}",
+                 f"{entry['baselines_mean_ha']['containment_heuristic']:.1f}"]
+        if hold_aware:
+            cells.append(f"{entry['baselines_mean_ha'][HOLD_AWARE]:.1f}")
+        cells += [f"{h['mean_difference_ha']:+.2f} [{h['ci95_ha'][0]:+.2f}, {h['ci95_ha'][1]:+.2f}] ({relative})",
+                  f"{h['policy_better']} / {h['equal']} / {h['policy_worse']}"]
+        return "| " + " | ".join(cells) + " |"
 
     for fold in summary["folds"]:
         lines.append(row(fold["holdout_activation"], ",".join(map(str, fold["seeds"])), fold))

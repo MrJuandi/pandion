@@ -16,6 +16,9 @@ Inputs come from ``policy_inputs.GeographicInputTensorizer``:
    from a 1x1 convolution over cell features conditioned on the latent. Cell
    logits are flattened row-major (index 2 + row * cols + col), matching
    ``ActionMapper`` in spatial mode.
+5. Parametric mode with ``action_feature_dim`` > 0 adds a per-action term: a small
+   MLP over (trunk features at the drop's target cell, per-action features, latent),
+   scaled by the action's valid flag. Its output layer is zero-initialised.
 """
 from __future__ import annotations
 
@@ -75,10 +78,13 @@ if HAS_TORCH:
             image_channels: int = 3,
             slot_raw_features: bool = False,
             drop_distances: tuple[int, ...] = (0,),
+            action_feature_dim: int = 0,
         ) -> None:
             super().__init__()
             if action_mode not in ("tactical", "spatial", "parametric"):
                 raise ValueError(f"Unknown action_mode: {action_mode}")
+            if action_feature_dim and action_mode != "parametric":
+                raise ValueError("action features belong to parametric actions")
             self.config = {k: v for k, v in locals().items() if k not in ("self", "__class__")}
             self.action_mode = action_mode
             self.grid_rows, self.grid_cols = grid_rows, grid_cols
@@ -93,6 +99,8 @@ if HAS_TORCH:
                 action_mode, 2 + grid_rows * grid_cols)
             # Parametric mode: the last MAX_SLOTS cell channels are focus-slot masks.
             self.slot_channels = MAX_SLOTS if action_mode == "parametric" else 0
+            self.action_feature_dim = action_feature_dim
+            self._actions: torch.Tensor | None = None
             # D-65: per-slot averages of the raw input channels (e.g. aircraft distance,
             # ROS, fuel) and slot area, alongside pooled trunk features.
             self.slot_raw_features = slot_raw_features
@@ -123,6 +131,11 @@ if HAS_TORCH:
                 extra = (cell_channels + 1) if slot_raw_features else 0
                 self.slot_actor_head = nn.Sequential(
                     nn.Linear(width + head_dim + 1 + extra, 64), nn.LeakyReLU(0.01), nn.Linear(64, len(ASPECTS) * len(self.drop_distances)))
+                if action_feature_dim:
+                    self.target_actor_head = nn.Sequential(
+                        nn.Linear(width + action_feature_dim + head_dim, 64), nn.LeakyReLU(0.01), nn.Linear(64, 1))
+                    nn.init.zeros_(self.target_actor_head[-1].weight)
+                    nn.init.zeros_(self.target_actor_head[-1].bias)
             else:
                 self.global_actor_head = nn.Linear(head_dim, 2)
                 self.cell_condition = nn.Linear(head_dim, width)
@@ -155,16 +168,18 @@ if HAS_TORCH:
                               for part in rgb.split(self.IMAGE_CHUNK)], dim=0)
 
         def _split(self, inputs: tuple) -> tuple:
-            expected = 3 if self.use_image else 2
+            expected = (3 if self.use_image else 2) + (1 if self.action_feature_dim else 0)
             if len(inputs) != expected:
                 raise ValueError(f"expected {expected} input tensors, got {len(inputs)}")
-            return inputs if self.use_image else (None,) + tuple(inputs)
+            tensors = tuple(inputs) if self.use_image else (None,) + tuple(inputs)
+            return tensors if self.action_feature_dim else tensors + (None,)
 
         def encode(self, *inputs: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-            """Inputs (rgb, cells, vector), or (cells, vector) without image.
+            """Inputs (rgb, cells, vector[, actions]), or (cells, vector[, actions]) without image.
 
             Returns (cell features [B, width, H, W], latent [B, hidden_dim])."""
-            rgb, cells, vector = self._split(inputs)
+            rgb, cells, vector, actions = self._split(inputs)
+            self._actions = actions
             if self.slot_channels:
                 self._slot_masks = cells[:, -self.slot_channels:]
                 self._raw_cells = cells
@@ -197,6 +212,14 @@ if HAS_TORCH:
                     parts += [raw, (area / 100.0)[..., None]]
                 slot_in = torch.cat(parts, dim=-1)
                 slot_logits = self.slot_actor_head(slot_in).flatten(1)
+                if self.action_feature_dim:
+                    actions = self._actions                                   # [B, A, 1 + F]
+                    feats = actions[..., 1:]
+                    flat = features.flatten(2)                                # [B, C, H*W]
+                    index = actions[..., 0].long().clamp(0, flat.shape[-1] - 1)
+                    gathered = torch.gather(flat, 2, index[:, None, :].expand(-1, flat.shape[1], -1)).transpose(1, 2)
+                    target_in = torch.cat([gathered, feats, h[:, None, :].expand(-1, feats.shape[1], -1)], dim=-1)
+                    slot_logits = slot_logits + self.target_actor_head(target_in).squeeze(-1) * feats[..., 0]
                 return torch.cat([self.global_actor_head(h), slot_logits], dim=-1), values
             conditioned = F.leaky_relu(features + self.cell_condition(h)[:, :, None, None], 0.01)
             cell_logits = self.cell_actor_head(conditioned).flatten(1)
@@ -236,6 +259,19 @@ if HAS_TORCH:
             """``evaluate_actions(*inputs, action_mask, actions)``; recurrent inputs are one
             episode [T, ...] (BPTT). Returns log-probs, entropies, values."""
             *inputs, action_mask, actions = inputs_mask_actions
+            dist, values = self._episode_distribution(inputs, action_mask, initial_state)
+            return dist.log_prob(actions), dist.entropy(), values
+
+        def evaluate_log_probs(self, *inputs_and_mask: torch.Tensor,
+                               initial_state: tuple[torch.Tensor, torch.Tensor] | None = None) -> tuple:
+            """``evaluate_log_probs(*inputs, action_mask)`` over one episode: log-probabilities of
+            every action [T, A], entropies and values; used for branched (vine) samples (D-85)."""
+            *inputs, action_mask = inputs_and_mask
+            dist, values = self._episode_distribution(inputs, action_mask, initial_state)
+            return dist.logits, dist.entropy(), values
+
+        def _episode_distribution(self, inputs: list, action_mask: torch.Tensor,
+                                  initial_state: tuple[torch.Tensor, torch.Tensor] | None) -> tuple:
             features, latents = self.encode(*inputs)
             if not self.recurrent:
                 logits, values = self._heads(features, latents)
@@ -246,8 +282,7 @@ if HAS_TORCH:
                     h, c = self.lstm(latents[t:t + 1], (h, c))
                     hs.append(h)
                 logits, values = self._heads(features, torch.cat(hs, dim=0))
-            dist = Categorical(logits=self._masked(logits, action_mask))
-            return dist.log_prob(actions), dist.entropy(), values
+            return Categorical(logits=self._masked(logits, action_mask)), values
 
 else:
 

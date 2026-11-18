@@ -164,6 +164,13 @@ class TestGeographicIntegrated(unittest.TestCase):
         self.assertEqual(cont["schema_version"], REPLAY_SCHEMA_VERSION)
         self.assertEqual(cont["aircraft_metrics"]["rejected_orders_count"], 0)
 
+    def test_hold_aware_heuristic_runs_without_rejected_orders_and_is_deterministic(self):
+        one = run_geographic_integrated(self.scenario, policy="hold_aware_heuristic")
+        two = run_geographic_integrated(self.scenario, policy="hold_aware_heuristic")
+        self.assertEqual(one["policy"], "hold_aware_heuristic")
+        self.assertEqual(one["aircraft_metrics"]["rejected_orders_count"], 0)
+        self.assertEqual(one["arrival_time_s"], two["arrival_time_s"])
+
     def test_deterministic_seed_replay(self):
         run1 = run_geographic_integrated(self.scenario, policy="random_valid", policy_seed=123)
         run2 = run_geographic_integrated(self.scenario, policy="random_valid", policy_seed=123)

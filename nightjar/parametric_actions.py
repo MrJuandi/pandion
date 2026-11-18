@@ -125,7 +125,14 @@ class ParametricActionMapper:
         self.num_actions = num_actions(self.distances)
 
     def targets(self, observation: dict) -> dict[int, tuple[int, int]]:
-        """Target cell of every currently valid drop action, keyed by action index.
+        """Target cell of every currently valid drop action, keyed by action index."""
+        return {i: (r, c) for i, (r, c, *_) in self.target_details(observation).items()}
+
+    def target_details(self, observation: dict) -> dict[int, tuple[int, int, int, int, int]]:
+        """For every currently valid drop action: (row, col, outward_row, outward_col, distance_cells).
+
+        (row, col) is the target cell; outward is the unit step from the fire to the front cell
+        (the direction a positive distance moves along).
 
         Distance 0 is the D-61 front cell for the slot and aspect. A positive
         distance steps that many cells from it away from the fire, along the
@@ -180,7 +187,7 @@ class ParametricActionMapper:
                                   and isinstance(cells[r][c], dict) and cells[r][c].get("fire_detected") is False
                                   and (r, c) not in blocked):
                         continue
-                    out[2 + k * per_slot + a * len(self.distances) + j] = (int(r), int(c))
+                    out[2 + k * per_slot + a * len(self.distances) + j] = (int(r), int(c), int(orow), int(ocol), int(d))
         return out
 
     def compute_mask(self, observation: dict) -> list[bool]:
