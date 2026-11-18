@@ -12,6 +12,8 @@ Splits each controller observation into three tensors:
 - ``vector`` [V]: quantities uniform over the grid: wind, station temperature
   and RH (with a validity flag), the six fuel moisture classes, aircraft water
   and phase, refill time remaining and elapsed time.
+- ``actions`` [A, 1 + F] (optional, with ``action_features``): per parametric drop
+  action, its flat target cell and F per-action features (``action_feature_array``).
 
 Everything is computed from the observation dict; nothing reads simulator truth.
 Fuel moisture is uniform in the current simulator; if it becomes per-cell it
@@ -27,7 +29,8 @@ import numpy as np
 from .environment import MOISTURE_KEYS
 from .geographic_integrated import DEFAULT_CAPACITY_L
 from .imagery_composite import compose_view, state_masks, thermal_view
-from .parametric_actions import MAX_SLOTS, slot_masks
+from .action_features import NUM_ACTION_FEATURES, ObservedFireBehavior, action_feature_array
+from .parametric_actions import MAX_SLOTS, ParametricActionMapper, slot_masks
 from .policies import stack_limit
 
 # Fuel families from Scott & Burgan (2005) code ranges and Anderson (1982) 1-13.
@@ -74,7 +77,8 @@ class GeographicInputTensorizer:
 
     def __init__(self, scenario: dict, base_image: np.ndarray | None, *, include_ros: bool = False,
                  explicit_fire: bool = False, include_thermal: bool = False,
-                 focus_slots: bool = False, fleet_features: bool = False) -> None:
+                 focus_slots: bool = False, fleet_features: bool = False,
+                 action_features: bool = False, drop_distances: Any = (0,)) -> None:
         """``base_image=None`` with ``explicit_fire=True`` is the no-image ablation:
         fire state enters as per-cell channels and ``extract`` returns (cells, vector)."""
         grid = scenario["grid"]
@@ -103,6 +107,13 @@ class GeographicInputTensorizer:
         self.image_channels = 4 if include_thermal else 3
         self.focus_slots = focus_slots
         self.fleet_features = fleet_features
+        if action_features and not focus_slots:
+            raise ValueError("action features belong to parametric actions (focus_slots)")
+        self.action_features = action_features
+        self.num_action_features = NUM_ACTION_FEATURES if action_features else 0
+        if action_features:
+            self._action_mapper = ParametricActionMapper(self.cell_size_m, drop_distances)
+            self._behavior = ObservedFireBehavior()
         self.num_vector_features = self.NUM_VECTOR_FEATURES + (self.FLEET_VECTOR if fleet_features else 0)
         self.num_cell_channels = (self.BASE_CELL_CHANNELS + (1 if include_ros else 0)
                                   + (self.FLEET_CHANNELS if fleet_features else 0)
@@ -246,7 +257,10 @@ class GeographicInputTensorizer:
         vector_array = np.asarray(vector, dtype=np.float32)
         if self.fleet_features:
             vector_array = np.concatenate([vector_array, self.fleet_vector(observation)]).astype(np.float32)
-        return (cells, vector_array) if rgb is None else (rgb, cells, vector_array)
+        arrays = [cells, vector_array] if rgb is None else [rgb, cells, vector_array]
+        if self.action_features:
+            arrays.append(action_feature_array(observation, self._action_mapper, self._behavior))
+        return tuple(arrays)
 
     def _others(self, observation: dict) -> list[dict]:
         ego = observation.get("aircraft_index", 0)

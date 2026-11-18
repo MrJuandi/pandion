@@ -38,11 +38,15 @@ class _Episode:
 
         self.options = options
         self.scenario = scenario
+        drop_distances = options.get("drop_distances", (0,))
         self.env = GeographicTrainingEnv(scenario, action_mode=options["action_mode"],
-                                         drop_bonus_per_cell=options["drop_bonus_per_cell"])
+                                         drop_bonus_per_cell=options["drop_bonus_per_cell"],
+                                         drop_distances=drop_distances,
+                                         reward_reference=options.get("reward_reference"))
         self.mapper = self.env.action_mapper()
         self.tensorizer = make_input_tensorizer(
-            scenario, **options["inputs"], focus_slots=options["action_mode"] == "parametric")
+            scenario, **options["inputs"], focus_slots=options["action_mode"] == "parametric",
+            action_features=options.get("action_features", False), drop_distances=drop_distances)
         self.rewards: list[float] = []
         self.decisions = 0
         self.observation = self.env.reset(seed=scenario.get("seed"))
@@ -121,12 +125,14 @@ class RolloutBackend:
     """
     def __init__(self, *, action_mode: str, input_options: dict,
                  workers: int = 0, drop_bonus_per_cell: float = 0.25,
-                 skip_forced: bool = False):
+                 skip_forced: bool = False, drop_distances: Any = (0,),
+                 action_features: bool = False, reward_reference: str | None = None):
         if workers < 0:
             raise ValueError("rollout_workers must be nonnegative")
         options = {"action_mode": action_mode, "inputs": input_options,
                    "drop_bonus_per_cell": drop_bonus_per_cell,
-                   "skip_forced": skip_forced}
+                   "skip_forced": skip_forced, "drop_distances": tuple(drop_distances),
+                   "action_features": action_features, "reward_reference": reward_reference}
         self.local = _LocalBackend(options) if workers == 0 else None
         self.connections: list[Any] = []
         self.processes: list[Any] = []
@@ -210,6 +216,7 @@ def rollout_geographic_batch(
     input_mode: str = "legacy", imagery_dir: Any = None,
     include_ros: bool = False, include_thermal: bool = False,
     backend: RolloutBackend | None = None,
+    reward_reference: str | None = None,
 ) -> tuple[list[list[dict]], list[dict]]:
     """Collect complete episodes with frozen weights and independent RNN states.
 
@@ -218,7 +225,9 @@ def rollout_geographic_batch(
     sampling consumes RNG differently from serial collection, so the same
     seed does not promise the same actions as serial mode. Active episodes
     whose input or mask shapes differ are evaluated in separate forward
-    passes. With a ``backend``, its own ``skip_forced`` and input options apply.
+    passes. With a ``backend``, its own ``skip_forced``, input, drop-distance,
+    action-feature and ``reward_reference`` options apply; the ``reward_reference``
+    argument is then ignored.
     """
     import torch
     from .geographic_ppo import returns_and_advantages
@@ -234,7 +243,10 @@ def rollout_geographic_batch(
     context = (nullcontext(backend) if backend is not None else RolloutBackend(
         action_mode=getattr(model, "action_mode", "tactical"), input_options=options,
         workers=min(rollout_workers, rollout_envs, len(scenarios)),
-        drop_bonus_per_cell=drop_bonus_per_cell, skip_forced=skip_forced))
+        drop_bonus_per_cell=drop_bonus_per_cell, skip_forced=skip_forced,
+        drop_distances=getattr(model, "drop_distances", (0,)),
+        action_features=getattr(model, "action_feature_dim", 0) > 0,
+        reward_reference=reward_reference))
     all_records: list[list[dict]] = [[] for _ in scenarios]
     metrics: list[Any] = [None for _ in scenarios]
     with context as owner:

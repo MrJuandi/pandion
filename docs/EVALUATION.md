@@ -363,6 +363,7 @@ Report reward for training diagnostics only. Report outcomes per scenario and by
 - No intervention: establishes scenario difficulty and marginal benefit.
 - Valid random controller: samples only actions available to the learned agent.
 - Transparent heuristic: uses the same observation, latency, and candidate set as the policy.
+- Hold-aware heuristic (geographic episodes, D-83): the transparent heuristic that also uses the stacked drops a front needs, from the same observation; the reference a learned policy should match before a gain over `heuristic` is read as target selection.
 - Informed dispatch or short-horizon planner, if available: use the same forecast inputs and disclose computation budget.
 - Two aircraft: independent heuristic, centralized assignment heuristic or auction, and a central learned controller.
 
@@ -546,3 +547,183 @@ One training run, same configuration as the D-73 sweep (two aircraft, parametric
 | Hold ×2, delay ×0 | 38.1 | 39.8 | 21.3 % | −1.72 |
 
 The hold limits dominate: halving or doubling them moves the share of growth the heuristic prevents between 11 % and 22 %. Removing the evaporation delay changes it by about half a point, so the D-78 term matters little. The heuristic beats containment in every variant, by 0.1 to 3.2 ha. Limits: 64 scenarios and no confidence intervals, so differences of a point or less are not established; the learned policy was not run under these variants; the sweep measures sensitivity to the parameters and does not validate their values against observed drops.
+
+## Headroom over the reference heuristic inside the action set (2026-11-10)
+
+Diagnostic, no training. Two aircraft, current drop physics (D-74, D-76, D-78), `runs/geographic-multi-ignition-family-d73-20261006`: the 24 validation scenarios and a seeded sample (seed 7) of 96 development scenarios from 40 incidents; reserved unopened. Two extra controllers were run next to the registered baselines:
+
+- **Hold-aware rule** (observation only): the downwind heuristic, except that it skips cells whose stacked water already suffices and ranks fronts a drop can hold (Rothermel fireline intensity from the observed fuel, terrain, wind and moisture against the D-74/D-76 limits) before fronts no drop can hold.
+- **One-step oracle** (privileged, not a controller): at each real decision every valid parametric action (D-61 with drop distances 0, 1, 2; D-79) is scored by finishing the episode in the simulator with the heuristic, and the best is taken; ties keep the heuristic's order. It is a one-step rollout improvement of the heuristic, so it bounds from below what the best policy in this action set achieves. It is never used as a training signal.
+
+Mean final burned area (ha); differences are paired, with 95 % percentile bootstrap intervals over scenarios.
+
+| Set | No intervention | Heuristic | Containment | Hold-aware − heuristic | Oracle − heuristic |
+|---|---|---|---|---|---|
+| Validation (24, EMSR590) | 31.62 | 28.25 | 29.42 | 27.71: −0.54 [−1.33, +0.17], better/equal/worse 9/10/5 | 24.29: −3.96 [−5.54, −2.54], 20/4/0 |
+| Development sample (96) | 44.79 | 37.47 | 38.08 | 34.71: −2.76 [−4.01, −1.73], 43/49/4 | 31.52: −5.95 [−7.90, −4.22], 51/45/0 |
+
+The validation baselines reproduce the values recorded on 2026-10-08. An episode has 12 real decisions on validation and 18 on the development sample (the rest are forced refills), so eight episodes per update give PPO about 100–150 decisions per update.
+
+Where the heuristic loses (oracle log, validation, 289 decisions): since D-76 a treated cell stays a candidate until it holds three drops and keeps its downwind rank, so the heuristic stacks three drops on every target; 56 of its 289 drops (19 %) went to a cell that needed one drop and already had it. The oracle deviated in 53 decisions (mean gain 1.8 ha each): 32 times to a fresh cell that one drop holds, 13 to a fresh cell that needs three, 7 times to waiting. Twelve of the 45 deviating drops used a distance of one cell beyond the front.
+
+Reading: the learned policies recorded so far (29.0 ha on validation, +0.7 to +1.8 ha against the heuristic) are far from what the action set allows, so the limit is learning, not the environment; and the quantity that separates good from bad targets is the hold requirement at the target cell, which the parametric head could not see (D-82). Limits: one seeded development sample; the oracle's continuation is the heuristic, so the optimum is lower still; the hold-aware rule was a diagnostic script on this date and is registered as `hold_aware_heuristic` under D-83, with identical outcomes on both sets; the oracle and the other scripts were run ad hoc and are not part of the package.
+
+### Action-target features and heuristic-relative rewards (D-81, D-82, 2026-11-10)
+
+One training run with the 2026-10-08 configuration (two aircraft, parametric actions with distances 0/1/2, thermal image with ROS, slot features, augmentation, `--gamma 1.0`, 4 epochs × 4 minibatches, GAE 0.95, reward scaling, entropy 0.05 → 0.005, 1,000 updates × 8 episodes, seed 42) plus `--reward-reference heuristic --action-features`; `runs/geographic-action-features-d82-20261110` (`run.sh`, base commit and working-tree patch stored with it). `--holdout-activation EMSR837_AOI06` now holds out the whole EMSR837 activation (D-68 grouping, 288 scenarios), so held-out numbers are not comparable with the 2026-10-08 table. Selection on validation: best 28.50 ha at update 400 (curve 28.5–29.9; heuristic 28.25). Selected weights, deterministic, paired differences with 95 % bootstrap intervals; the hold-aware rule is the diagnostic of the previous section:
+
+| Set | Policy | Heuristic | Hold-aware rule | Policy − heuristic | Better / equal / worse |
+|---|---|---|---|---|---|
+| Held out EMSR837 (288) | 42.80 | 41.76 | 38.70 | +1.05 [+0.25, +1.87] | 56 / 119 / 113 |
+| Validation (24) | 28.50 | 28.25 | 27.71 | +0.25 [−1.29, +1.83] | 9 / 3 / 12 |
+| Training maps (120, seeded sample) | 46.54 | 46.33 | 43.22 | +0.21 [−0.77, +1.22] | 33 / 52 / 35 |
+
+The change did not make the policy beat the heuristic. Inspecting the selected weights on 40 training-map scenarios (724 decisions) shows why the scores sit at the heuristic's level: the action distribution is close to uniform over the valid actions (mean entropy 3.17 nats against 3.4 for uniform over about 32 valid actions), so the deterministic policy follows small logit differences; a uniformly random valid policy is already within about 0.5 ha of the heuristic on validation. The earlier runs under the D-74 physics were not inspected this way.
+
+A 200-update probe with a constant entropy bonus of 0.003 (`run-low-entropy.sh`, otherwise identical) did sharpen the policy (mean entropy 2.05, top action probability 0.36) but towards the heuristic's behaviour: targets strongly downwind (0.48 against −0.08 for the average valid action), never beyond the front (distance 0 in every drop), and on cells whose water already suffices more often than chance (34 % against 8 %). Held out +0.44 ha [−0.16, +1.09], training maps +0.80 [−0.60, +2.50]. So the entropy schedule is one brake, but lowering it alone leads to the heuristic's local optimum; the policy has not learned the hold requirement although it is now an input of each action.
+
+Limits: one seed, one fold, and the probe is short.
+
+#### Larger batches with a low entropy bonus (2026-11-10)
+
+Same options, data, seed and held-out activation, but 32 episodes × 250 updates (the same 8,000 episodes; an episode has only 12–18 real decisions, so 8 episodes give about 100–150 samples per update) and entropy 0.01 → 0.001, selection every 25 updates; `runs/geographic-large-batch-d82-20261110`, 7–8 s per update on Apple MPS with six rollout workers. Selection on validation fell from 29.96 ha at update 25 to 28.21 at 175 and 26.92 at 225 (selected), then 28.71 at 250. Selected weights:
+
+| Set | Policy | Heuristic | Hold-aware rule | Policy − heuristic | Better / equal / worse |
+|---|---|---|---|---|---|
+| Held out EMSR837 (288) | **41.16** | 41.76 | 38.70 | −0.60 [−1.19, −0.07] | 80 / 140 / 68 |
+| Validation (24, used for selection) | **26.92** | 28.25 | 27.71 | −1.33 [−2.71, +0.12] | 14 / 5 / 5 |
+| Training maps (120, seeded sample) | **45.72** | 46.33 | 43.22 | −0.62 [−1.67, +0.52] | 43 / 59 / 18 |
+
+This is the first policy under the D-74 physics that is better than the heuristic on scenarios used neither for training nor for selection, by 0.6 ha (1.4 %) with an interval that excludes zero; the validation figure is optimistic because it chose the weights, and the single best checkpoint stands out from its neighbours (28.2–28.7 ha). The policy is sharper than with 8 episodes (mean entropy 2.53 nats, top probability 0.24) and uses the hold requirement: it prefers fronts that need three drops (37 % of its drops against 6 % of valid actions) and no longer favours cells whose water already suffices (12 % against 13 %), while staying downwind (0.50) and almost never aiming beyond the front. It is still 2.5 ha behind the hold-aware rule on the held-out and training sets, and further from the one-step oracle, so most of the headroom remains.
+
+Limits: one seed and one fold; the comparison with the 8-episode run uses the same number of episodes but a quarter of the optimizer steps. Batch size and entropy schedule are separated below.
+
+#### Batch size against entropy schedule (2026-11-10)
+
+Two more runs complete the 2 × 2 with the same options, data, seed and held-out activation (`runs/geographic-batch-entropy-split-d82-20261110`, run in parallel): 32 episodes × 250 updates with the old entropy schedule, and 8 episodes × 1,000 updates with the low one. Policy − heuristic (ha, 95 % bootstrap interval), selected weights; entropy is the mean over decisions on 40 training-map scenarios (uniform is about 3.4 nats).
+
+| Episodes × updates | Entropy bonus | Held out EMSR837 (288) | Training maps (120) | Validation (24, selection) | Policy entropy |
+|---|---|---|---|---|---|
+| 8 × 1,000 | 0.05 → 0.005 | +1.05 [+0.25, +1.87] | +0.21 [−0.77, +1.22] | +0.25 [−1.29, +1.83] | 3.17 |
+| 8 × 1,000 | 0.01 → 0.001 | −0.17 [−0.77, +0.38] | −0.50 [−1.48, +0.40] | +0.17 [−1.21, +1.62] | 2.17 |
+| 32 × 250 | 0.05 → 0.005 | −0.56 [−1.15, −0.06] | −0.15 [−0.91, +0.53] | +0.04 [−1.25, +1.08] | 2.87 |
+| 32 × 250 | 0.01 → 0.001 | −0.60 [−1.19, −0.07] | −0.62 [−1.67, +0.52] | −1.33 [−2.71, +0.12] | 2.53 |
+
+On the held-out activation both 32-episode runs beat the heuristic by about 0.6 ha with intervals that exclude zero, whatever the entropy schedule, and neither 8-episode run does; the low entropy bonus removes the loss of the 8-episode run (+1.05 → −0.17) but adds nothing measurable at 32 episodes (−0.56 → −0.60). Batch size is therefore the larger factor on unseen maps, for the same 8,000 episodes. The runs differ in what they learned: only the 32-episode, low-entropy policy prefers fronts that need three drops (37 % of its drops against 6 % of valid actions) and stopped favouring cells whose water already suffices; the 32-episode run with the old schedule still drops on such cells in 40 % of its drops (7 % of valid actions) and never aims beyond the front, so its gain comes from elsewhere (it is the most downwind of the four, 0.58). The −1.33 ha on validation of the last row is not repeated by any other run and comes from one checkpoint, consistent with selection noise on 24 scenarios.
+
+Limits: one seed per cell and one fold, so differences of a few tenths of a hectare between cells are not established; the two new runs shared the machine, which does not change their results but does their timings. All four remain 2.5–4 ha behind the hold-aware rule on the held-out set.
+
+#### Seeds and a larger batch (2026-11-10)
+
+`runs/geographic-seeds-batch64-d82-20261110` (three runs in parallel from a frozen copy of the package): the 32 × 250, entropy 0.01 → 0.001 recipe with seeds 43 and 44, and 64 episodes × 125 updates with seed 42 (again 8,000 episodes). Same data and held-out activation. `hold_aware_heuristic` (D-83) scores 38.70 ha on the held-out set, 43.22 on the training-map sample and 27.71 on validation. Selected weights; policy − reference in ha with 95 % bootstrap intervals over scenarios:
+
+| Run | Held out EMSR837 (288): − heuristic | Better / equal / worse | − hold-aware | Training maps (120): − heuristic | Validation (24): − heuristic |
+|---|---|---|---|---|---|
+| 32 × 250, seed 42 (above) | −0.60 [−1.19, −0.07] | 80 / 140 / 68 | +2.45 [+1.47, +3.67] | −0.62 [−1.67, +0.52] | −1.33 [−2.71, +0.12] |
+| 32 × 250, seed 43 | −1.34 [−1.99, −0.80] | 100 / 150 / 38 | +1.71 [+0.77, +2.92] | −0.59 [−1.51, +0.19] | +0.33 [−0.50, +1.33] |
+| 32 × 250, seed 44 | −1.29 [−1.98, −0.68] | 88 / 138 / 62 | +1.76 [+0.93, +2.83] | −1.07 [−1.88, −0.33] | +0.12 [−0.96, +1.21] |
+| Mean of the three seeds per scenario | −1.08 [−1.66, −0.58] | | +1.98 [+1.08, +3.12] | −0.76 [−1.49, −0.10] | −0.29 [−1.19, +0.75] |
+| 64 × 125, seed 42 | −0.89 [−1.61, −0.29] | 80 / 149 / 59 | +2.16 [+1.32, +3.24] | −0.26 [−1.02, +0.45] | −0.12 [−1.25, +0.83] |
+
+All three seeds of the recipe beat `heuristic` on the held-out activation, each with an interval that excludes zero, and their mean is 1.1 ha (2.6 %) better; on training maps the mean is 0.8 ha better. The gain over `heuristic` is therefore not a seed effect. Against `hold_aware_heuristic` every run is worse, by about 2 ha on the held-out set and 2.4 ha on training maps with intervals that exclude zero, so the learned policy does not yet match a rule that uses the same information. Validation does not separate anything: every run is within its interval of `heuristic`, and the −1.33 ha of seed 42 was not repeated. 64 episodes per update did not improve on 32 with the same seed and episode budget (−0.89 against −0.60 held out, −0.26 against −0.62 on training maps; half the optimizer steps).
+
+What the policies learned differs by seed. Mean entropy is 1.8–2.5 nats and all are strongly downwind (0.56–0.76 against about −0.1 for the average valid action) and never aim beyond the front. Only seed 42 stopped dropping on cells whose water already suffices; seeds 43 and 44 and the 64-episode run still do so in 24–37 % of their drops (7–12 % of valid actions), the habit the hold-aware rule removes. The gains over `heuristic` thus come mostly from which front and when, not from the hold requirement, which remains the main unused margin.
+
+Limits: one held-out activation (nine AOIs of EMSR837) and one fold; three seeds; runs in parallel share the machine, which affects timings only. Reserved scenarios unopened.
+
+#### What a redundant drop costs (2026-11-11)
+
+Diagnostic on the selected weights of seeds 43 and 44 (32 × 250), deterministic, on the 120 training-map scenarios of the tables above and a seeded sample of 120 held-out scenarios. A drop is redundant when its target already holds the stacked drops its front needs (the `sufficient` action feature, D-82). Each redundant decision was replaced, alone, by the choice of `hold_aware_heuristic` in that observation, with the policy deciding everything before and after; as a control one non-redundant drop per scenario got the same replacement. "All replaced" re-runs the episode replacing every redundant drop as it comes up.
+
+| Seed, set | Redundant drops | Replacing one: no effect / helps / hurts | Mean gain per replaced drop | Control (non-redundant): mean gain | All replaced (ha, 95 % interval) |
+|---|---|---|---|---|---|
+| 43, training maps | 452 of 1,962 (23 %) | 90 % / 8 % / 2 % | +0.45 ha | −0.09 | 45.74 → 44.68: −1.06 [−2.37, −0.21] |
+| 43, held out | 378 of 1,632 (23 %) | 86 % / 11 % / 3 % | +0.29 ha | +0.12 | 54.12 → 53.24: −0.88 [−1.77, −0.28] |
+| 44, training maps | 776 of 2,171 (36 %) | 89 % / 7 % / 3 % | +0.11 ha | +0.22 | 45.27 → 44.50: −0.77 [−1.33, −0.32] |
+| 44, held out | 559 of 1,717 (33 %) | 85 % / 11 % / 4 % | +0.30 ha | −0.02 | 53.72 → 51.71: −2.01 [−4.48, −0.38] |
+
+Nine redundant drops in ten cost nothing: the outcome is identical when the water goes elsewhere. They concentrate in fires that are already contained (scenarios ending at 10 ha or less: 33–49 % of drops redundant, 0.1–0.3 ha to gain by replacing all of them), where no better target exists. The cost sits in the remaining tenth, in fires that are still growing (scenarios above 10 ha: 5–17 % redundant, 1.6–4.7 ha to gain), where a single misplaced drop costs 1–5 ha. Replacing non-redundant drops by the rule's choice gives no consistent gain, so the effect is specific to redundancy.
+
+Reading: the policies' redundant drops explain roughly 1–2 ha of their 2 ha deficit against `hold_aware_heuristic`, but the learning signal for avoiding them is sparse and heavy-tailed: in about 90 % of the cases the policy receives no feedback that the drop was wasted, and the few costly cases arrive minutes later inside episode-level variance of several hectares. That is consistent with one seed in three learning to avoid them. Limits: two seeds; the held-out sample is 120 of 288 scenarios (hence a different mean than the full-set tables); replacing one decision changes the later trajectory, so single-drop gains do not add up to the all-replaced figure. Scripts were run ad hoc.
+
+#### Choosing weights on development incidents (D-84, 2026-11-17)
+
+`runs/geographic-selection-incidents-d84-20261117` (`run.sh`; code archived in `code.tar.gz`, data read from copies of the d73 family and px4 imagery): the 32 × 250, entropy 0.01 → 0.001 recipe with seeds 42, 43 and 44, EMSR837 held out, and `--selection-activations EMSR719 EMSR892 EMSR632 EMSR457`. The rule was fixed before training from the references on all 1,344 development scenarios (`incident_baselines.json`): single-AOI activations outside the held-out group, ranked by mean |`heuristic` − `hold_aware_heuristic`| per scenario; ranks 1–5 (EMSR522, EMSR375, EMSR597, EMSR458, EMSR704) stay in training and ranks 6–9 choose the weights. On those 128 scenarios no intervention scores 98.0 ha, `heuristic` 86.6 and `hold_aware_heuristic` 80.1 (on EMSR590 validation: 31.6, 28.3, 27.7), so target choice matters there. Training uses 928 scenarios instead of 1,056.
+
+Selection curves now separate checkpoints and seeds by 2–6 ha (seed 42: 88.7 at update 25 to 82.7 at 225; seed 43: 88.4 to 83.0 at 200; seed 44: 85.2 to 83.2 at 150), against tenths of a hectare on validation. Held-out EMSR837 (288 scenarios) and the seeded 120-scenario development sample of the earlier tables, policy − reference in ha, 95 % bootstrap intervals; "earlier" are the three validation-selected runs of 2026-11-10 evaluated on the same scenarios:
+
+| Weights | Held out: − heuristic | Held out: − hold-aware | Development sample: − heuristic |
+|---|---|---|---|
+| Selected on the four incidents, mean of three seeds | −1.03 [−1.62, −0.53] | +2.02 [+1.04, +3.28] | −0.69 [−1.38, −0.05] |
+| Last update of the same runs | −0.53 [−1.15, +0.05] | +2.53 [+1.41, +4.00] | −0.63 [−1.36, +0.06] |
+| Earlier runs, selected on validation | −1.08 [−1.66, −0.58] | +1.98 [+1.08, +3.12] | −0.76 [−1.49, −0.10] |
+
+Per seed on the held-out set: −1.05, −0.85 and −1.20 ha against `heuristic` (selected) and −0.55, −0.23 and −0.81 (last update).
+
+Selection on these incidents chooses weights that are better on unseen data: the selected checkpoints beat the last ones on the held-out activation by 0.51 ha [0.24, 0.81], consistently across the three seeds. With validation selection that comparison was possible for one seed only (seeds 43 and 44 kept their last weights): 0.12 ha. The end result, however, equals the earlier one (new minus earlier selected: +0.04 [−0.26, +0.39] held out): these runs ended worse than the earlier ones (last weights 41.23 against 40.68 ha), which may be seed variation or the 128 training scenarios given to selection, and the better selection recovers that difference. All runs stay about 2 ha behind `hold_aware_heuristic`. Limits: three seeds, one held-out activation; the selection incidents were chosen from reference outcomes on the development split, not from policy results.
+
+#### Where the learning signal goes (2026-11-17)
+
+Diagnostic on the selected weights of seed 42 of the D-84 run, on 96 seeded training scenarios (development split without the held-out group and the selection incidents), 1,784 real decisions. The policy is rolled out stochastically with the heuristic-relative reward, as in training. At every decision the simulator is branched: the action taken and three other valid actions, chosen uniformly, are each followed to the end four times by the same stochastic policy (prefix replayed; independent continuations). The mean of a branch is an estimate of Q(s, a) for the current policy; the spread between the four continuations of one action is the noise a single Monte Carlo return carries. Scripts `diag_signal.py` and `diag_analyse.py` were run ad hoc; output in `runs/geographic-signal-diagnostic-20261117`.
+
+| Quantity | Value |
+|---|---|
+| Critic: correlation of the value with the return-to-go; variance explained after a linear rescale | 0.25; 6 % |
+| Decisions where no scored action and no continuation changes the outcome | 47 % |
+| Variance between actions (signal) / variance between continuations of one action (noise), mean per decision | 0.81 / 2.31 ha² |
+| Share of the between-action variance in the top 10 % of decisions | 97 % |
+| Correlation of the Monte Carlo advantage that PPO uses (return-to-go − rescaled value) with the branched advantage of the taken action | 0.20 |
+| Same, on decisions where the branched advantage exceeds 0.05 ha in absolute value (50 %); sign agreement | 0.22; 51 % |
+| Probability on targets whose water already suffices, against their share of valid drop actions; mean logit gap | 31 % vs 15 %; +2.1 |
+| Branched Q(sufficient target) − Q(other targets), same decision | −0.01 ha (worse in 21 %, better in 16 %, equal in 63 %) |
+
+Reading: the policy gradient is close to noise. Half of the decisions have no effect at all; the effect of the others is concentrated in a few decisions per episode and is smaller than the spread caused by the policy's own later choices; the critic removes almost none of that spread. As a result the Monte Carlo advantage of a decision that matters has the sign of its branched advantage about as often as a coin. Under the current policy's continuation, preferring targets that already hold enough water costs little on average, which is why the policy has kept the preference: what separates it from `hold_aware_heuristic` is the few decisions that matter, and those are the ones the signal does not reach. This motivated branched advantages with common random numbers (D-85). Limits: one seed; the branched advantage is itself estimated from four independent continuations per action and is measured against the mean of four scored actions rather than the policy's value, so the correlations understate the agreement somewhat; the 51 % sign agreement is too low for that alone to explain.
+
+#### When a decision changes the burned area (2026-11-17)
+
+Same weights and the same 96 training scenarios as above (1,802 decisions). At every decision four actions are sampled from the policy and each is followed to the end by the same policy with common random numbers (`nightjar.vine`); the burned area of each branch is read from its replay's arrival times at fixed minutes after the decision, so branches are compared at equal simulated times. Each pair of distinct sampled actions gives a difference curve d(τ) and a final difference at the 60-minute horizon. Scripts `diag_window.py` and `window_analyse.py`, output in `runs/geographic-signal-diagnostic-20261117`.
+
+A third of the decisions (560 of 1,697 with two distinct sampled actions) change the area at some point; 17 % of action pairs end with a different final area (median 1 ha, 90th percentile 3, maximum 15) and 5 % differ only temporarily.
+
+| Minutes after the decision | 0 | 5 | 10 | 15 | 20 | 30 | 40 | 50 | horizon |
+|---|---|---|---|---|---|---|---|---|---|
+| Pairs whose final difference is already visible (same sign) | 0 % | 9 % | 21 % | 32 % | 45 % | 67 % | 83 % | 92 % | 100 % |
+| Variance of the final difference explained by d(τ) | 0 | 0.02 | 0.10 | 0.18 | 0.32 | 0.63 | 0.82 | 0.94 | 1 |
+| Decisions of the episode inside the window (mean) | 0 | 0.9 | 2.6 | 4.0 | 5.4 | 7.8 | 9.7 | 11.0 | 11.6 |
+
+| Decision made at minute | Pairs with a final difference | Mean final difference | Minutes to 90 % of it: median, 90th percentile |
+|---|---|---|---|
+| 0–15 | 28 % | 2.0 ha | 50, 60 |
+| 15–30 | 23 % | 1.8 ha | 30, 40 |
+| 30–45 | 15 % | 1.2 ha | 20, 27 |
+| 45–60 | 5 % | 1.2 ha | 9, 13 |
+
+Reading: almost nothing shows in the first five minutes, because water only changes the outcome when the front reaches the treated cell; the median effect needs 30 minutes, about eight later decisions, to appear, and early decisions, which matter most, need until the end of the episode. A return truncated to a short window would miss most of the effect of the decisions that matter, so branched returns run to the horizon. Late decisions rarely matter, partly because the fixed 60-minute horizon cuts their consequences: the episode ends before the front reaches their water. Limits: one seed; differences are between actions the policy samples, not the best and worst actions; times are bounded by the horizon.
+
+#### Branched advantages (D-85, 2026-11-17)
+
+`runs/geographic-vine-d85-20261117` (`run.sh`, code in `code.tar.gz`): the D-84 recipe with seed 42 (32 episodes × 250 updates, entropy 0.01 → 0.001, `--reward-reference heuristic --action-features`, EMSR837 held out, weights chosen on EMSR719, EMSR892, EMSR632 and EMSR457) plus `--vine-states 4 --vine-actions 4`: four decisions of every episode branched, four policy-sampled actions each, continuations with common random numbers. 9 CPU workers; 20–31 s per update (15–24 s of it branching), 2 h 10 min in all, against about 12 s per update without branching.
+
+Selection score (mean final area on the 128 selection scenarios, lower is better) fell from 84.3 ha at update 25 to 77.6 at update 175 (selected); seed 42 of the D-84 run reached 82.7 at best. Held-out EMSR837 (288 scenarios) and the 120-scenario development sample of the earlier tables, policy − reference in ha with 95 % bootstrap intervals, evaluated with `eval_ckpt.py`:
+
+| Selected weights, seed 42 | Held out: − heuristic | Held out: − hold-aware | Development sample: − heuristic | Development sample: − hold-aware |
+|---|---|---|---|---|
+| Branched advantages (D-85) | −3.21 [−4.64, −1.99] | −0.16 [−0.59, +0.27] | −2.95 [−5.12, −1.19] | +0.17 [−0.75, +1.14] |
+| Monte Carlo/GAE advantages (D-84 run) | −1.05 [−1.82, −0.40] | +2.01 [+1.08, +3.09] | −1.12 [−1.99, −0.26] | +2.00 [+0.56, +3.86] |
+| Branched − Monte Carlo, paired | −2.16 [−3.39, −1.18] | | −1.83 [−3.76, −0.33] | |
+
+Held out, the branched policy burns 38.55 ha against 41.76 for `heuristic` and 38.70 for `hold_aware_heuristic`; against the latter it is better in 62 scenarios, equal in 161 and worse in 65 (D-84 policy: 30 / 141 / 117).
+
+Reading: with the same seed, data, features, reward and selection, replacing Monte Carlo/GAE advantages by branched ones gains about 2 ha on the held-out incident and closes the gap to `hold_aware_heuristic`, which the learned policies trailed by about 2 ha in every earlier run. This supports the diagnosis that the limit was the learning signal rather than the inputs or the action set. Limits: one seed; one held-out activation; the policy now ties the hold-aware rule rather than beating it, and remains below the one-step oracle of the headroom section.
+
+Seeds 43 and 44 (`run_43_44.sh`, same commit and recipe, 5 workers each, run in parallel, about 2 h 50 min) were selected at updates 200 and 250 (selection score 77.9 and 78.6 ha; D-84 seeds reached 82–83). Evaluation of their selected weights and of the D-84 seeds 43 and 44 on the same scenarios: `audit-eval-43-44.json`; three-seed summary (`three_seed.py`, per-scenario mean over the three seeds, then bootstrap over scenarios): `three-seed.json`.
+
+| Selected weights, 3 seeds | Held out: − heuristic | Held out: − hold-aware | Development sample: − heuristic | Development sample: − hold-aware |
+|---|---|---|---|---|
+| Branched advantages (D-85) | −3.09 [−4.52, −1.88] | −0.03 [−0.44, +0.35] | −2.96 [−4.75, −1.49] | +0.16 [−0.78, +1.14] |
+| Monte Carlo/GAE advantages (D-84 run) | −1.03 [−1.62, −0.53] | +2.02 [+1.04, +3.28] | −0.69 [−1.40, −0.06] | +2.42 [+1.06, +4.21] |
+| Branched − Monte Carlo, paired | −2.05 [−3.39, −1.06] | | −2.27 [−3.76, −1.09] | |
+
+Per seed (42, 43, 44), held out, branched − heuristic: −3.21, −3.27, −2.78; branched − hold-aware: −0.16, −0.21, +0.27; branched − Monte Carlo: −2.16, −2.41, −1.58. Every seed gains on its Monte Carlo counterpart on both evaluation sets.
+
+Reading: the seed 42 result holds across seeds. Branched advantages gain about 2 ha over Monte Carlo/GAE advantages with everything else fixed and bring the learned policy level with `hold_aware_heuristic`, but not past it. Limits: one held-out activation; three seeds.
