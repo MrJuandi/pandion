@@ -136,8 +136,20 @@
     $('export-png').addEventListener('click', exportPng);
     document.querySelectorAll('.nav-link,.brand').forEach((link) => link.addEventListener('click', (e) => { e.preventDefault(); setView(link.hash.slice(1)); }));
     document.addEventListener('keydown', globalKey);
+    // Imagery decodes asynchronously: repaint once it is available.
+    window.addEventListener('nightjar-imagery-ready', () => { for (const r of REPLAYS) if (r.__painter) r.__painter.key = ''; updateTime(); });
+    // Back/forward and edited fragments switch views like the navigation links.
+    window.addEventListener('hashchange', () => {
+      const view = location.hash.slice(1);
+      if (['mapa', 'condiciones', 'comparacion', 'datos'].includes(view) && view !== activeView) setView(view);
+    });
+    // Section fragments are view selectors, not scroll targets: keep the header controls in view on load.
+    const toTop = () => { if (window.scrollY) window.scrollTo(0, 0); };
+    if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
+    window.addEventListener('load', () => requestAnimationFrame(toTop), {once: true});
     if (window.matchMedia('(max-width: 640px)').matches) $('legend').open = false;
-    fillPolicies(); updateCompare(); setView(activeView);
+    if ('ResizeObserver' in window) new ResizeObserver(() => drawTimelineGrowth()).observe($('timeline-growth'));
+    fillPolicies(); updateCompare(); setView(activeView); toTop();
     requestAnimationFrame(loop);
   }
   function fillPolicies() {
@@ -153,7 +165,7 @@
     ui.comparePolicy.replaceChildren();
     peers.forEach(({r, i}) => { const o = document.createElement('option'); o.value = String(i); o.textContent = policyLabel(r); ui.comparePolicy.append(o); });
     ui.comparePolicy.value = String(comparisonReference);
-    $('compare-policy-field').hidden = !compare;
+    $('compare-policy-field').hidden = !compare || activeView !== 'comparacion';
     ui.compare.setAttribute('aria-pressed', String(compare));
     ui.compare.disabled = episodeGroup().length < 2;
     ui.compare.querySelector('b').textContent = compare ? 'Salir de la comparación' : 'Comparar dos políticas';
@@ -281,6 +293,7 @@
     $('compare-card').hidden = episodeGroup().length < 2 && activeView !== 'comparacion';
     if (!document.querySelector('.workspace').hidden) rebuildPanels(displayGroup());
     updateFleetSelector(r);
+    updateImageryOption(r);
     updateHeading(r); updateFinalMetrics(r); updateDecisionList(r); updateProvenance(r); updateTicks();
     updateComparisonResults();
     updateTime();
@@ -298,9 +311,13 @@
       el.classList.toggle('current', !!selected);
       if (selected) el.setAttribute('aria-current', 'step'); else el.removeAttribute('aria-current');
     });
-    const style = ui.style.value, key = $('terrain-color-key'), f = facts(r);
+    const style = ui.style.value, key = $('terrain-color-key'), f = facts(r), img = Fire.imageryFor(r);
     key.hidden = style === 'fuel'; key.dataset.style = style;
-    key.textContent = style === 'elevation' ? `Altitud: ${fmt(f.minElev, 0)}–${fmt(f.maxElev, 0)} m · huella oculta` : 'Pendiente: 0–45° · huella oculta';
+    key.textContent = style === 'elevation' ? `Altitud: ${fmt(f.minElev, 0)}–${fmt(f.maxElev, 0)} m · huella oculta`
+      : style === 'imagery' ? `Sentinel-2 L2A previa al incendio · ${(img?.primary_datetime_utc || '').slice(0, 10) || 'fecha no indicada'}${img?.scenes_used > 1 ? ` · composición de ${img.scenes_used} escenas` : ''} · solo representación`
+      : 'Pendiente: 0–45° · huella oculta';
+    const attribution = $('map-attribution');
+    attribution.hidden = !(style === 'imagery' && img); attribution.textContent = img ? `${img.attribution || 'Copernicus Sentinel data'} · ${img.collection || 'Sentinel-2'}` : '';
     if (style !== 'fuel' && f.minElev === null) { ui.style.value = 'fuel'; key.hidden = true; }
     if (!document.querySelector('.workspace').hidden) {
       for (const v of views) pushState(v);
@@ -401,6 +418,9 @@
     };
     label(v.renderer, $('map-scale'));
     $('map-scale').hidden = views.length > 1;
+    // Keep comparison panel titles clear of the terrain HUD, whose height follows its text.
+    const terrain = $('hud-terrain');
+    ui.panels.style.setProperty('--panel-title-top', `${Math.max(96, terrain.offsetParent ? terrain.offsetTop + terrain.offsetHeight + 8 : 0)}px`);
     for (const view of views) if (view.scale) label(view.renderer, view.scale);
   }
   function updateTicks() {
@@ -408,6 +428,22 @@
     if (!H || isStatic(r)) return;
     for (const d of r.decisions || []) { const i = document.createElement('i'); i.style.left = `${Number(d.time_s) / H * 100}%`; box.append(i); }
     for (const d of facts(r).drops) { const i = document.createElement('i'); i.className = 'drop'; i.style.left = `${d.time_s / H * 100}%`; box.append(i); }
+    drawTimelineGrowth();
+  }
+  // Reached-area profile of the primary episode behind the scrubber: shows where growth happens in time.
+  function drawTimelineGrowth() {
+    const canvas = $('timeline-growth'); if (!canvas || !canvas.offsetParent) return;
+    const {ctx, w, h} = prepareCanvas(canvas), r = current(), H = horizon();
+    if (!r || isStatic(r) || !H) return;
+    const RH = Number(r.horizon_s) || 0, a0 = areaAt(r, 0), a1 = areaAt(r, RH), span = a1 - a0;
+    if (!(span > 0)) return;
+    const steps = Math.max(40, Math.min(240, Math.round(w / 3)));
+    ctx.beginPath(); ctx.moveTo(0, h);
+    for (let i = 0; i <= steps; i++) { const t = H * i / steps; ctx.lineTo(w * i / steps, h - (areaAt(r, Math.min(t, RH)) - a0) / span * (h - 1)); }
+    ctx.lineTo(w, h); ctx.closePath(); ctx.fillStyle = 'rgba(249,115,22,.22)'; ctx.fill();
+    ctx.beginPath();
+    for (let i = 0; i <= steps; i++) { const t = H * i / steps, y = h - (areaAt(r, Math.min(t, RH)) - a0) / span * (h - 1); i ? ctx.lineTo(w * i / steps, y) : ctx.moveTo(0, y); }
+    ctx.strokeStyle = 'rgba(251,146,60,.85)'; ctx.lineWidth = 1.2; ctx.stroke();
   }
 
   // ---------------------------------------------------------------------------
@@ -455,6 +491,11 @@
       }
       body.append(tr);
     }
+  }
+  function updateImageryOption(r) {
+    const option = ui.style.querySelector('[value=imagery]'), available = displayGroup().every((x) => !!Fire.imageryFor(x));
+    option.hidden = option.disabled = !available;
+    if (!available && ui.style.value === 'imagery') ui.style.value = 'fuel';
   }
   function updateFleetSelector(r) {
     const select = $('fleet-select'), indices = facts(r).fleet.map(u => u.index);
@@ -537,7 +578,7 @@
     let lo = Math.min(...values), hi = Math.max(...values);
     const span = Math.max(hi - lo, hi * 0.02, 0.5); lo = Math.max(0, lo - span * 0.12); hi = hi + span * 0.12;
     const L = 44, R = 10, T = 10, B = 22, x = (t) => L + t / H * (w - L - R), y = (a) => h - B - (a - lo) / (hi - lo) * (h - T - B);
-    ctx.font = '10px ui-monospace, SFMono-Regular, Menlo, monospace'; ctx.fillStyle = '#64748b'; ctx.strokeStyle = '#1d2a3c'; ctx.lineWidth = 1;
+    ctx.font = '10px ui-monospace, SFMono-Regular, Menlo, monospace'; ctx.fillStyle = '#7a8aa0'; ctx.strokeStyle = '#1d2a3c'; ctx.lineWidth = 1;
     for (let i = 0; i <= 4; i++) { const a = lo + (hi - lo) * i / 4, yy = y(a); ctx.beginPath(); ctx.moveTo(L, yy); ctx.lineTo(w - R, yy); ctx.stroke(); ctx.textAlign = 'right'; ctx.fillText(fmt(a, a < 10 ? 1 : 0), L - 5, yy + 3); }
     ctx.textAlign = 'center';
     for (let i = 0; i <= 4; i++) { const t = H * i / 4; ctx.fillText(`${fmt(t / 60, 0)}′`, x(t), h - 7); }
@@ -554,12 +595,12 @@
     });
     ctx.setLineDash([4, 3]); ctx.strokeStyle = '#f87171'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(x(Math.min(now, H)), T); ctx.lineTo(x(Math.min(now, H)), h - B); ctx.stroke(); ctx.setLineDash([]);
     ctx.fillStyle = '#38bdf8'; ctx.textAlign = 'right'; ctx.fillText(`t = +${fmt(now / 60, 1)} min`, w - R, T + 8);
-    ctx.textAlign = 'left'; ctx.fillStyle = '#64748b'; ctx.fillText('ha', 4, T + 8);
+    ctx.textAlign = 'left'; ctx.fillStyle = '#7a8aa0'; ctx.fillText('ha', 4, T + 8);
   }
   function drawProfile(r) {
     const canvas = $('chart-profile'); if (!canvas.offsetParent) return;
     const {ctx, w, h} = prepareCanvas(canvas), f = facts(r), t = episodeTime(r);
-    if (f.minElev === null) { ctx.fillStyle = '#64748b'; ctx.font = '11px ui-sans-serif, system-ui'; ctx.fillText('Sin DEM en este escenario', 12, h / 2); $('profile-foot').textContent = '—'; return; }
+    if (f.minElev === null) { ctx.fillStyle = '#7a8aa0'; ctx.font = '11px ui-sans-serif, system-ui'; ctx.fillText('Sin DEM en este escenario', 12, h / 2); $('profile-foot').textContent = '—'; return; }
     const W = f.cols * f.size, Hm = f.rows * f.size;
     const fire = Fire.fireState(r, t), centre = fire.frontCentroid || fire.burnedCentroid || [W / 2, Hm / 2];
     const wind = windAt(r, t), dir = wind && wind.speed > 0 ? [wind.east / wind.speed, wind.north / wind.speed] : [1, 0];
@@ -583,7 +624,7 @@
     }
     const es = samples.map((p) => p.e), lo = Math.min(...es), hi = Math.max(...es), pad = Math.max(10, (hi - lo) * 0.15);
     const L = 44, R = 10, T = 10, B = 20, X = (s) => L + (s - tmin) / (tmax - tmin) * (w - L - R), Y = (e) => h - B - (e - (lo - pad)) / (hi + pad - (lo - pad)) * (h - T - B);
-    ctx.font = '10px ui-monospace, SFMono-Regular, Menlo, monospace'; ctx.fillStyle = '#64748b'; ctx.strokeStyle = '#1d2a3c';
+    ctx.font = '10px ui-monospace, SFMono-Regular, Menlo, monospace'; ctx.fillStyle = '#7a8aa0'; ctx.strokeStyle = '#1d2a3c';
     for (const e of [lo, (lo + hi) / 2, hi]) { ctx.beginPath(); ctx.moveTo(L, Y(e)); ctx.lineTo(w - R, Y(e)); ctx.stroke(); ctx.textAlign = 'right'; ctx.fillText(`${fmt(e, 0)} m`, L - 5, Y(e) + 3); }
     const grad = ctx.createLinearGradient(0, T, 0, h - B); grad.addColorStop(0, 'rgba(56,189,248,.45)'); grad.addColorStop(1, 'rgba(56,189,248,.03)');
     ctx.beginPath(); ctx.moveTo(X(samples[0].s), h - B); samples.forEach((p) => ctx.lineTo(X(p.s), Y(p.e))); ctx.lineTo(X(samples.at(-1).s), h - B); ctx.closePath(); ctx.fillStyle = grad; ctx.fill();
@@ -595,7 +636,7 @@
     const ec = elevAt(centre[0], centre[1]);
     ctx.beginPath(); ctx.arc(X(0), Y(ec), 4, 0, Math.PI * 2); ctx.fillStyle = fire.frontCentroid ? '#f87171' : '#fbbf24'; ctx.fill(); ctx.strokeStyle = '#fff'; ctx.lineWidth = 1; ctx.stroke();
     ctx.fillStyle = '#fca5a5'; ctx.textAlign = 'center'; ctx.fillText(`${fire.frontCentroid ? 'FRENTE' : 'CENTRO'} · ${fmt(ec, 0)} m`, clampNum(X(0), 60, w - 60), Math.max(T + 8, Y(ec) - 8));
-    ctx.fillStyle = '#64748b'; ctx.textAlign = 'left'; ctx.fillText('0', L, h - 6); ctx.textAlign = 'right'; ctx.fillText(`${fmt((tmax - tmin) / 1000, 1)} km`, w - R, h - 6);
+    ctx.fillStyle = '#7a8aa0'; ctx.textAlign = 'left'; ctx.fillText('0', L, h - 6); ctx.textAlign = 'right'; ctx.fillText(`${fmt((tmax - tmin) / 1000, 1)} km`, w - R, h - 6);
     let rise = 0; for (let k = 1; k < samples.length; k++) rise += Math.abs(samples[k].e - samples[k - 1].e);
     const bearing = (Math.atan2(dir[0], dir[1]) * 180 / Math.PI + 360) % 360;
     $('profile-label').textContent = `${compass(bearing + 180)} → ${compass(bearing)}`;
@@ -675,6 +716,8 @@
       ['Fuente', sourceSummary(m), m.acquired_at_utc ? `Adquirido: ${m.acquired_at_utc}` : 'Época de adquisición no indicada'],
       ['Escenario', m.name || r.scenario_id || '—', `Partición: ${splitNames[m.split] || m.split || '—'} · Semilla: ${m.seed ?? '—'}`],
       ['Relieve', terrain.label || 'Sin capa de elevación', terrainSummary(terrain)],
+      ...(Fire.imageryFor(r) ? [(() => { const i = Fire.imageryFor(r); return ['Imagen base (solo visual)', `Sentinel-2 L2A previa · ${(i.primary_datetime_utc || '').slice(0, 10)}`,
+        `${i.attribution || ''} · ${i.scenes_used} escena(s) · ${i.pixel_size_m} m/px · SHA-256 ${(i.array_sha256 || '').slice(0, 12)}. No la usa el simulador.`]; })()] : []),
       ['Modelo de política', training.label || policyLabel(r), trainingSummary(training, m)],
       ...(training.checkpoint_name ? [['Checkpoint', training.checkpoint_name, `Fold ${training.fold || '—'} · SHA-256 ${(training.checkpoint_sha256 || '').slice(0, 12)}`]] : []),
       ...(training.checkpoint_report_binding ? [['Procedencia del modelo', training.checkpoint_report_binding === 'verified' ? 'Pesos e informe vinculados por hash' : 'Asociación legacy indicada al cargar', (training.warnings || []).join(' ')]] : []),
