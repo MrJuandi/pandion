@@ -644,6 +644,7 @@ def train_geographic_ppo(
     eval_every: int = 0,
     history: list[dict[str, Any]] | None = None,
     rollout_envs: int = 1,
+    gamma: float = 1.0,
 ) -> tuple[Any, list[float]]:
     """Train a geographic policy (legacy SpatialActorCritic or D-49 ImageActorCritic).
 
@@ -662,6 +663,7 @@ def train_geographic_ppo(
     ``rollout_envs`` batches policy inference over independent episodes;
     ``rollout_workers`` optionally moves CPU environments into persistent
     spawned processes. Policy weights stay fixed throughout collection.
+    ``gamma`` discounts returns per decision (D-80); 1.0, the default, optimises the final burned area.
     Serial collection remains the default for seeded trajectory compatibility.
     """
     _require_torch()
@@ -726,7 +728,7 @@ def train_geographic_ppo(
             history.append({"update": update_number, "mean_final_burned_ha": round(score, 4), "best": improved})
         print(f"  [Select @ {update_number}] mean burned {score:.2f} ha{' (best)' if improved else ''}", flush=True)
 
-    scaler = RewardScaler() if reward_scaling else None
+    scaler = RewardScaler(gamma) if reward_scaling else None
     # Legacy defaults keep per-episode advantage normalization; the improved
     # update normalizes over the batch instead.
     batch_normalized = ppo_epochs > 1 or minibatches > 1 or gae_lambda is not None or reward_scaling
@@ -746,7 +748,7 @@ def train_geographic_ppo(
         for update_idx in range(updates):
             started = time.monotonic()
             batch_records = []
-            rollout_kwargs = {"gae_lambda": gae_lambda, "normalize_advantages": not batch_normalized,
+            rollout_kwargs = {"gae_lambda": gae_lambda, "normalize_advantages": not batch_normalized, "gamma": gamma,
                               "skip_forced": skip_forced, "drop_bonus_per_cell": drop_bonus_per_cell,
                               **input_options}
             chosen = [random.choice(dev_scenarios) for _ in range(episodes_per_update)]
@@ -779,7 +781,7 @@ def train_geographic_ppo(
                     scaler.update([r["reward"] for r in records])
                 for records in batch_records:
                     returns, advantages = returns_and_advantages(
-                        [r["reward"] * scaler.scale for r in records], [r["value"] for r in records],
+                        [r["reward"] * scaler.scale for r in records], [r["value"] for r in records], gamma,
                         gae_lambda=gae_lambda, normalize=False)
                     returns, advantages = returns.to(device), advantages.to(device)
                     for record, ret, adv in zip(records, returns, advantages):
@@ -870,6 +872,8 @@ def main() -> None:
                         help="CPU workers; with --rollout-envs > 1 they own environments with central device inference")
     parser.add_argument("--skip-forced", action="store_true",
                         help="do not query or train on single-action steps (D-64); applies to evaluation too")
+    parser.add_argument("--gamma", type=float, default=1.0,
+                        help="discount per decision (D-80); 1.0 optimises the final burned area")
     parser.add_argument("--entropy-coef-final", type=float,
                         help="decay the entropy bonus linearly to this value over the updates")
     parser.add_argument("--checkpoint-every", type=int, default=0,
@@ -901,14 +905,14 @@ def main() -> None:
                    "skip_forced": args.skip_forced, "drop_bonus_per_cell": args.drop_bonus,
                    "rollout_workers": args.rollout_workers, "augment": args.augment,
                    "slot_features": args.slot_features, "eval_every": args.eval_every,
-                   "image_checkpoint_chunk": args.image_checkpoint_chunk}
+                   "image_checkpoint_chunk": args.image_checkpoint_chunk, "gamma": args.gamma}
     train_options = {**model_options, **ppo_options,
                      "checkpoint_path": args.checkpoint, "checkpoint_every": args.checkpoint_every,
                      "rollout_envs": args.rollout_envs, "rollout_workers": args.rollout_workers}
     config_report = {"ppo": {"epochs": args.ppo_epochs, "minibatches": args.minibatches,
                              "gae_lambda": args.gae_lambda, "reward_scaling": args.reward_scaling,
                              "target_kl": args.target_kl, "entropy_coef": args.entropy_coef,
-                             "entropy_coef_final": args.entropy_coef_final}, "input_mode": args.input_mode, "action_mode": args.action_mode, "include_ros": args.ros, "include_thermal": args.thermal, "fleet_size": args.fleet_size, "holdout_activation": args.holdout_activation,
+                             "entropy_coef_final": args.entropy_coef_final, "gamma": args.gamma}, "input_mode": args.input_mode, "action_mode": args.action_mode, "include_ros": args.ros, "include_thermal": args.thermal, "fleet_size": args.fleet_size, "holdout_activation": args.holdout_activation,
                      "drop_distances": list(args.drop_distances),
                      "imagery_dir": str(args.imagery_dir) if args.imagery_dir else None,
                      "collection": {"rollout_envs": args.rollout_envs, "rollout_workers": args.rollout_workers},
