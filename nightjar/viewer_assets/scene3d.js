@@ -89,6 +89,23 @@
     ctx.putImageData(img, 0, 0); noisePattern = c; return c;
   }
 
+  // Display-only Sentinel-2 base images, embedded once per grid by the bundler (IMAGERY global).
+  const imageryCache = new Map();
+  function imageryFor(r) {
+    const all = typeof IMAGERY === 'object' && IMAGERY ? IMAGERY : {}, id = r?.display_imagery_id;
+    return id && all[id] ? {id, ...all[id]} : null;
+  }
+  function imageryImage(info) {
+    if (!info) return null;
+    let entry = imageryCache.get(info.id);
+    if (!entry) {
+      entry = {img: new Image(), ready: false}; imageryCache.set(info.id, entry);
+      entry.img.onload = () => { entry.ready = true; window.dispatchEvent(new CustomEvent('nightjar-imagery-ready', {detail: info.id})); };
+      entry.img.src = info.png_data_uri;
+    }
+    return entry.ready ? entry.img : null;
+  }
+
   class TexturePainter {
     constructor(r) {
       this.r = r;
@@ -116,8 +133,34 @@
       const gx = (e(row, col + 1) - e(row, col - 1)) / (2 * this.size), gy = (e(row + 1, col) - e(row - 1, col)) / (2 * this.size);
       return Math.atan(Math.hypot(gx, gy)) * 180 / Math.PI;
     }
+    imageryBase() {
+      const img = imageryImage(imageryFor(this.r));
+      if (!img) return null;   // still decoding: callers fall back to the fuel base until it is ready
+      const {rows, cols, r} = this;
+      const out = document.createElement('canvas'); out.width = this.color.width; out.height = this.color.height;
+      const ctx = out.getContext('2d'); ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(img, 0, 0, out.width, out.height);
+      // Gentle hillshade so relief still reads under flat-lit imagery.
+      const shade = document.createElement('canvas'); shade.width = cols; shade.height = rows;
+      const sctx = shade.getContext('2d'), data = sctx.createImageData(cols, rows);
+      for (let row = 0; row < rows; row++) for (let col = 0; col < cols; col++) {
+        const v = clamp(this.shade(row, col), 0, 1) * 255, i = ((rows - 1 - row) * cols + col) * 4;
+        data.data[i] = data.data[i + 1] = data.data[i + 2] = v; data.data[i + 3] = 255;
+      }
+      sctx.putImageData(data, 0, 0);
+      ctx.globalCompositeOperation = 'soft-light'; ctx.globalAlpha = 0.45; ctx.drawImage(shade, 0, 0, out.width, out.height);
+      ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 0.4;
+      this.cellLayer((c, row, col) => r.water_mask?.[row]?.[col] === true ? '#1b5f84' : null);
+      ctx.drawImage(this.cell, 0, 0, out.width, out.height); ctx.globalAlpha = 1;
+      return out;
+    }
     base(style) {
       if (this.bases.has(style)) return this.bases.get(style);
+      if (style === 'imagery') {
+        const out = this.imageryBase();
+        if (!out) return this.base('fuel');
+        this.bases.set(style, out); return out;
+      }
       const {rows, cols, px, r} = this, range = Math.max(1, this.maxElev - this.minElev);
       // Smooth 1 px/cell layer scaled up: soft cartographic transitions between cells.
       const small = document.createElement('canvas'); small.width = cols; small.height = rows;
@@ -163,7 +206,7 @@
       const ctx = this.color.getContext('2d'), g = this.glow.getContext('2d'), {px, rows, cols} = this;
       ctx.drawImage(this.base(style), 0, 0);
       g.fillStyle = '#000'; g.fillRect(0, 0, this.glow.width, this.glow.height);
-      const terrainOnly = style !== 'fuel';
+      const terrainOnly = style === 'elevation' || style === 'slope';
       if (mode === 'observation') {
         const set = new Set((state.reports || []).map(c => `${c[0]},${c[1]}`));
         this.cellLayer((c, row, col) => set.has(`${row},${col}`) ? 'rgba(239,120,48,.62)' : null);
@@ -171,24 +214,43 @@
       } else if (!terrainOnly) {
         const historical = mode === 'historical';
         if (layers.burn) {
-          this.cellLayer((c, row, col) => fire.burned[row * cols + col] ? (historical ? 'rgba(122,52,26,.86)' : 'rgba(46,38,33,.8)') : null);
-          ctx.drawImage(this.cell, 0, 0, this.color.width, this.color.height);
+          // Burn scar as a tint, not a cover: desaturate, then darken, so hillshade and contours stay readable.
+          // Recently reached cells keep a warm char tone; older ones turn to ash.
+          this.cellLayer((c, row, col) => {
+            if (!fire.burned[row * cols + col]) return null;
+            if (historical) return '#a0583a';
+            // The initial footprint (arrival at t <= 0) is cumulative, not recent burning: always ash.
+            const arrival = r.arrival_time_s[row][col], age = arrival <= 0 ? Infinity : now - arrival;
+            return age < 600 ? '#8a5a42' : age < 1800 ? '#7f7064' : '#7b7875';
+          });
+          ctx.save();
+          ctx.globalCompositeOperation = 'saturation'; ctx.globalAlpha = 0.85; ctx.drawImage(this.cell, 0, 0, this.color.width, this.color.height);
+          ctx.globalCompositeOperation = 'multiply'; ctx.globalAlpha = 1; ctx.drawImage(this.cell, 0, 0, this.color.width, this.color.height);
+          ctx.restore();
         }
         if (layers.front && fire.front.length) {
-          this.cellLayer((c, row, col) => null);
-          const cctx = this.cell.getContext('2d');
-          for (const f of fire.front) { cctx.fillStyle = f.age < 900 ? '#e4561b' : '#9c3b17'; cctx.fillRect(f.col * 4, (rows - 1 - f.row) * 4, 4, 4); }
-          ctx.drawImage(this.cell, 0, 0, this.color.width, this.color.height);
-          g.globalCompositeOperation = 'lighter';
+          // Fire line along the burned/unburned boundary instead of filled squares.
+          const edges = [];
           for (const f of fire.front) {
             const heat = historical ? 0.45 : clamp(1 - f.age / 1800, 0.38, 1);
-            const [x, y] = [(f.col + 0.5) * px, (rows - 1 - f.row + 0.5) * px];
-            const grad = g.createRadialGradient(x, y, px * 0.05, x, y, px * 0.95);
-            grad.addColorStop(0, `rgba(255,236,160,${0.8 * heat})`); grad.addColorStop(0.4, `rgba(255,112,24,${0.5 * heat})`);
-            grad.addColorStop(1, 'rgba(160,30,0,0)');
-            g.fillStyle = grad; g.fillRect(x - px, y - px, px * 2, px * 2);
+            const x = f.col * px, y = (rows - 1 - f.row) * px;
+            for (const [dr, dc, x0, y0, x1, y1] of [[1, 0, x, y, x + px, y], [-1, 0, x, y + px, x + px, y + px], [0, -1, x, y, x, y + px], [0, 1, x + px, y, x + px, y + px]]) {
+              const nr = f.row + dr, nc = f.col + dc;
+              if (nr < 0 || nc < 0 || nr >= rows || nc >= cols || fire.burned[nr * cols + nc] || !isBurnable(r, nr, nc)) continue;
+              edges.push({x0, y0, x1, y1, heat});
+            }
           }
-          g.globalCompositeOperation = 'source-over';
+          const stroke = (c2d, width, style) => { for (const e of edges) { c2d.strokeStyle = style(e.heat); c2d.lineWidth = width; c2d.beginPath(); c2d.moveTo(e.x0, e.y0); c2d.lineTo(e.x1, e.y1); c2d.stroke(); } };
+          ctx.save(); ctx.lineCap = 'round';
+          stroke(ctx, px * 0.32, (h) => `rgba(214,72,18,${0.55 + 0.35 * h})`);
+          stroke(ctx, px * 0.08, (h) => `rgba(255,190,105,${0.35 + 0.55 * h})`);
+          ctx.restore();
+          g.save(); g.globalCompositeOperation = 'lighter'; g.lineCap = 'round';
+          g.shadowColor = 'rgba(255,96,16,.9)'; g.shadowBlur = px * 0.9;
+          stroke(g, px * 0.45, (h) => `rgba(255,104,20,${0.45 * h})`);
+          g.shadowBlur = 0;
+          stroke(g, px * 0.1, (h) => `rgba(255,200,120,${0.6 * h})`);
+          g.restore();
         }
       }
       if (layers.drops && !terrainOnly) {
@@ -201,7 +263,7 @@
       }
       if (layers.reports && mode !== 'simulator' && !terrainOnly && (state.reports || []).length) {
         const set = new Set(state.reports.map(c => `${c[0]},${c[1]}`));
-        ctx.save(); ctx.strokeStyle = '#ffe28a'; ctx.lineWidth = Math.max(1.5, px * 0.08); ctx.setLineDash([px * 0.22, px * 0.14]); ctx.beginPath();
+        ctx.save(); ctx.strokeStyle = 'rgba(255,226,138,.75)'; ctx.lineWidth = Math.max(1, px * 0.05); ctx.setLineDash([px * 0.34, px * 0.22]); ctx.beginPath();
         for (const [row, col] of state.reports) {
           if (row < 0 || col < 0 || row >= rows || col >= cols) continue;
           const [x, y] = this.cellRect(row, col);
@@ -284,6 +346,8 @@
       });
       texture.needsUpdate = true;
       sprite.userData.aspect = canvas.width / canvas.height;
+      // Drawn box as a fraction of the sprite, used to fade labels that collide on screen.
+      sprite.userData.box = {w: width / canvas.width, h: (h + 8) / canvas.height};
     }
     return {sprite, set};
   }
@@ -309,9 +373,23 @@
   function skyTexture() {
     const c = document.createElement('canvas'); c.width = 4; c.height = 256;
     const ctx = c.getContext('2d'), g = ctx.createLinearGradient(0, 0, 0, 256);
-    g.addColorStop(0, '#060a12'); g.addColorStop(0.55, '#0d1624'); g.addColorStop(1, '#1d2a38');
+    g.addColorStop(0, '#03060a'); g.addColorStop(0.6, '#08101a'); g.addColorStop(1, '#101a26');
     ctx.fillStyle = g; ctx.fillRect(0, 0, 4, 256);
     const t = new T.CanvasTexture(c); t.encoding = T.sRGBEncoding; return t;
+  }
+  /** Ground plane around the model: dark table with a reference grid that fades out radially (no hard horizon). */
+  function floorTexture(span, step) {
+    const n = 2048, c = document.createElement('canvas'); c.width = c.height = n;
+    const ctx = c.getContext('2d'), lines = Math.round(span / step), d = n / lines;
+    ctx.fillStyle = '#0b121b'; ctx.fillRect(0, 0, n, n);
+    ctx.strokeStyle = 'rgba(120,150,180,.11)'; ctx.lineWidth = 1.5; ctx.beginPath();
+    for (let i = 0; i <= lines; i++) { const p = Math.round(i * d) + 0.5; ctx.moveTo(p, 0); ctx.lineTo(p, n); ctx.moveTo(0, p); ctx.lineTo(n, p); }
+    ctx.stroke();
+    ctx.globalCompositeOperation = 'destination-in';
+    const fade = ctx.createRadialGradient(n / 2, n / 2, n * 0.04, n / 2, n / 2, n / 2);
+    fade.addColorStop(0, 'rgba(0,0,0,1)'); fade.addColorStop(0.25, 'rgba(0,0,0,.8)'); fade.addColorStop(0.7, 'rgba(0,0,0,0)');
+    ctx.fillStyle = fade; ctx.fillRect(0, 0, n, n);
+    const t = new T.CanvasTexture(c); t.encoding = T.sRGBEncoding; t.anisotropy = 8; return t;
   }
 
   // ---------------------------------------------------------------------------
@@ -323,7 +401,7 @@
       const renderer = new T.WebGLRenderer({antialias: true, preserveDrawingBuffer: true, powerPreference: 'high-performance'});
       if (!renderer.getContext()) throw new Error('WebGL unavailable');
       this.renderer = renderer;
-      renderer.outputEncoding = T.sRGBEncoding; renderer.toneMapping = T.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.2;
+      renderer.outputEncoding = T.sRGBEncoding; renderer.toneMapping = T.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.05;
       renderer.shadowMap.enabled = true; renderer.shadowMap.type = T.PCFSoftShadowMap;
       renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
       this.canvas = renderer.domElement; this.canvas.tabIndex = 0; this.canvas.dataset.renderer = 'webgl';
@@ -332,13 +410,13 @@
       this.canvas.addEventListener('webglcontextlost', (e) => { e.preventDefault(); this.lost = true; });
 
       const scene = this.scene = new T.Scene();
-      scene.background = skyTexture(); scene.fog = new T.Fog(0x111b28, 1e4, 4e4);
+      scene.background = skyTexture(); scene.fog = new T.Fog(0x0a111a, 1e4, 4e4);
       this.persp = new T.PerspectiveCamera(40, 1, 1, 1e6);
       this.ortho = new T.OrthographicCamera(-1, 1, 1, -1, 1, 1e6);
       this.camera = this.persp;
-      scene.add(new T.HemisphereLight(0xdde8ff, 0x2b2a22, 0.62));
-      scene.add(new T.AmbientLight(0xffffff, 0.06));
-      this.sun = new T.DirectionalLight(0xffedd5, 1.55);
+      scene.add(new T.HemisphereLight(0xc4d4ec, 0x1c1a15, 0.55));
+      scene.add(new T.AmbientLight(0xffffff, 0.05));
+      this.sun = new T.DirectionalLight(0xffe9cf, 1.85);
       this.sun.castShadow = true; this.sun.shadow.mapSize.set(2048, 2048); this.sun.shadow.bias = -0.0004; this.sun.shadow.normalBias = 1.5;
       scene.add(this.sun, this.sun.target);
       this.fireLight = new T.PointLight(0xff7a2a, 0, 1, 2); scene.add(this.fireLight);
@@ -354,7 +432,9 @@
       this.nadir.rotation.x = -Math.PI / 2; this.nadir.visible = false; scene.add(this.nadir);
       this.trailMax = 4096;
       const trailGeometry = new T.BufferGeometry(); trailGeometry.setAttribute('position', new T.Float32BufferAttribute(new Float32Array(this.trailMax * 3), 3));
-      this.trail = new T.Line(trailGeometry, new T.LineBasicMaterial({color: 0x7dd3fc, transparent: true, opacity: 0.8}));
+      trailGeometry.setAttribute('color', new T.Float32BufferAttribute(new Float32Array(this.trailMax * 3), 3));
+      // Vertex colours act as a brightness ramp (the material colour carries the unit accent): older track fades out.
+      this.trail = new T.Line(trailGeometry, new T.LineBasicMaterial({color: 0x7dd3fc, vertexColors: true, transparent: true, opacity: 0.95}));
       this.trail.frustumCulled = false; scene.add(this.trail);
       this.groundTrack = new T.Line(trailGeometry.clone(), new T.LineDashedMaterial({color: 0xbfe9ff, dashSize: 30, gapSize: 24, transparent: true, opacity: 0.35, depthWrite: false}));
       this.groundTrack.frustumCulled = false; scene.add(this.groundTrack);
@@ -363,7 +443,7 @@
       this.dropGroup = new T.Group(); scene.add(this.dropGroup);
       this.markerGroup = new T.Group(); scene.add(this.markerGroup);
       this.water = makeParticles(420, 0xd8f3ff, 0.9); scene.add(this.water);
-      this.smoke = makeParticles(520, 0xc4beb6, 0.16); scene.add(this.smoke);
+      this.smoke = makeParticles(640, 0xb3aba1, 0.11); scene.add(this.smoke);
       this.smokeSources = [];
 
       this.controls = new T.OrbitControls(this.persp, this.canvas);
@@ -412,7 +492,8 @@
       this.nadir.scale.setScalar(this.symbol * 0.32);
       this.leader.material.dashSize = this.symbol * 0.09; this.leader.material.gapSize = this.symbol * 0.06;
       this.groundTrack.material.dashSize = this.symbol * 0.25; this.groundTrack.material.gapSize = this.symbol * 0.2;
-      this.sun.position.set(-extent * 0.7, extent * 1.05 + relief, -extent * 0.55);
+      // Low north-west sun (same azimuth as the baked hillshade): raking light makes the relief legible.
+      this.sun.position.set(-extent * 0.95, extent * 0.62 + relief, -extent * 0.6);
       Object.assign(this.sun.shadow.camera, {left: -extent * 0.85, right: extent * 0.85, top: extent * 0.85, bottom: -extent * 0.85, near: 1, far: extent * 4});
       this.sun.shadow.camera.updateProjectionMatrix();
       this.scene.fog.near = extent * 2.6; this.scene.fog.far = extent * 9;
@@ -472,7 +553,7 @@
       const relief = (maxElev - minElev) * exaggeration;
       const baseY = -Math.max(size * 1.5, relief * 0.16, extent * 0.028);
       // Base walls: show the sampled extent; not a geological section.
-      const wall = [], wallColors = [], top = new T.Color(0x5a5145), bottom = new T.Color(0x14110e);
+      const wall = [], wallColors = [], top = new T.Color(0x3b342c), bottom = new T.Color(0x0b0a09);
       const edge = (k1, k2) => {
         const p = (k) => [positions[k * 3], positions[k * 3 + 1], positions[k * 3 + 2]];
         const a = p(k1), b = p(k2);
@@ -486,13 +567,20 @@
       wallGeometry.computeVertexNormals();
       const walls = new T.Mesh(wallGeometry, new T.MeshStandardMaterial({vertexColors: true, roughness: 1, side: T.DoubleSide}));
       walls.receiveShadow = true; group.add(walls);
-      // Regional floor and 1 km reference grid for scale beyond the modelled extent.
-      const span = Math.ceil(extent * 12 / 1000) * 1000;
-      const floor = new T.Mesh(new T.PlaneGeometry(span, span), new T.MeshStandardMaterial({color: 0x0d141c, roughness: 1}));
-      floor.rotation.x = -Math.PI / 2; floor.position.y = baseY - 1; floor.receiveShadow = true; group.add(floor);
+      // Cut line along the top edge of the model: marks where the modelled grid ends.
+      const rim = [];
+      const rimAt = (vi, vj) => { const k = vi * (NC + 1) + vj; rim.push(positions[k * 3], positions[k * 3 + 1] + size * 0.02, positions[k * 3 + 2]); };
+      for (let vj = 0; vj <= NC; vj++) rimAt(0, vj);
+      for (let vi = 1; vi <= NR; vi++) rimAt(vi, NC);
+      for (let vj = NC - 1; vj >= 0; vj--) rimAt(NR, vj);
+      for (let vi = NR - 1; vi >= 0; vi--) rimAt(vi, 0);
+      const rimGeometry = new T.BufferGeometry(); rimGeometry.setAttribute('position', new T.Float32BufferAttribute(rim, 3));
+      group.add(new T.Line(rimGeometry, new T.LineBasicMaterial({color: 0xe8eef5, transparent: true, opacity: 0.28, depthWrite: false})));
+      // Regional floor with a reference grid (1 km / 500 m / 100 m) that fades with distance, for scale beyond the modelled extent.
       const step = extent > 6000 ? 1000 : extent > 1500 ? 500 : 100;
-      const grid = new T.GridHelper(span, Math.round(span / step), 0x253445, 0x182431);
-      grid.position.y = baseY - 0.5; grid.material.transparent = true; grid.material.opacity = 0.55; group.add(grid);
+      const span = Math.ceil(extent * 8 / step) * step;
+      const floor = new T.Mesh(new T.PlaneGeometry(span, span), new T.MeshStandardMaterial({map: floorTexture(span, step), transparent: true, roughness: 1, depthWrite: false}));
+      floor.rotation.x = -Math.PI / 2; floor.position.y = baseY - 1; floor.renderOrder = -1; group.add(floor);
       // Contours: true equal-elevation intersections of the displayed surface.
       const rawStep = Math.max(1, (maxElev - minElev) / 12), power = 10 ** Math.floor(Math.log10(rawStep));
       const contourStep = (rawStep / power >= 5 ? 5 : rawStep / power >= 2 ? 2 : 1) * power;
@@ -513,7 +601,7 @@
         const g = new T.BufferGeometry(); g.setAttribute('position', new T.Float32BufferAttribute(data, 3));
         return new T.LineSegments(g, new T.LineBasicMaterial({color: 0xf1f5e8, transparent: true, opacity, depthWrite: false}));
       };
-      const contours = new T.Group(); contours.add(lines(minor, 0.13), lines(major, 0.3)); group.add(contours);
+      const contours = new T.Group(); contours.add(lines(minor, 0.16), lines(major, 0.36)); group.add(contours);
       return {group, mesh, contours, contourStep, heights, NR, NC, s, W, H, size, extent, relief, baseY, minElev, maxElev, rows, cols};
     }
 
@@ -538,7 +626,7 @@
       if (this.painter.paint(state, fire)) { this.colorTexture.needsUpdate = true; this.glowTexture.needsUpdate = true; }
       const L = state.layers;
       this.terrain.contours.visible = L.contours;
-      const frontOn = L.front && state.style === 'fuel' && state.mode !== 'observation' && fire.front.length > 0;
+      const frontOn = L.front && (state.style === 'fuel' || state.style === 'imagery') && state.mode !== 'observation' && fire.front.length > 0;
       if (frontOn && fire.frontCentroid) {
         const c = this.world(...fire.frontCentroid, this.extent * 0.05);
         this.fireLight.position.copy(c); this.fireLight.distance = this.extent * 0.7;
@@ -590,13 +678,19 @@
       const agl = S * 1.35;
       const trail = show ? state.trail : [];
       const pos = visual.trail.geometry.attributes.position, gpos = visual.groundTrack.geometry.attributes.position;
+      const col = visual.trail.geometry.attributes.color;
       const n = Math.min(this.trailMax, trail.length);
       for (let i = 0; i < n; i++) {
         const [x, y] = trail[trail.length - n + i], g = this.heightAt(x, y) ?? this.baseY;
         pos.setXYZ(i, x - this.W / 2, g + agl, this.H / 2 - y); gpos.setXYZ(i, x - this.W / 2, g + S * 0.04, this.H / 2 - y);
+        // Brightness ramp over the last part of the track; earlier legs stay as a faint trace.
+        const recent = n > 1 ? i / (n - 1) : 1, k = 0.1 + 0.9 * Math.pow(clamp((recent - 0.55) / 0.45, 0, 1), 1.6);
+        col.setXYZ(i, k, k, k);
       }
-      visual.trail.geometry.setDrawRange(0, n); visual.groundTrack.geometry.setDrawRange(0, n);
-      pos.needsUpdate = true; gpos.needsUpdate = true; visual.groundTrack.computeLineDistances();
+      // The projected ground track only follows the recent leg.
+      const g0 = Math.max(0, n - 60);
+      visual.trail.geometry.setDrawRange(0, n); visual.groundTrack.geometry.setDrawRange(g0, n - g0);
+      pos.needsUpdate = true; gpos.needsUpdate = true; col.needsUpdate = true; visual.groundTrack.computeLineDistances();
       if (!show) return;
       const ground = this.world(a.position[0], a.position[1]);
       const p = ground.clone(); p.y += agl;
@@ -666,7 +760,25 @@
         this.transition = {position: target.clone().addScaledVector(dir, this.extent * 0.5), target};
       }
     }
-    allSprites() { const out = [this.label.sprite]; this.markerGroup.traverse(o => { if (o.isSprite) out.push(o); }); return out; }
+    aircraftSprites() { return [...this.aircraftVisuals.values()].map(v => v.label.sprite); }
+    markerSprites() { const out = []; this.markerGroup.traverse(o => { if (o.isSprite) out.push(o); }); return out; }
+    allSprites() { return [...this.aircraftSprites(), ...this.markerSprites()]; }
+    // Fade static marker labels (refill, water) that an aircraft label covers on screen.
+    declutterLabels() {
+      const markers = this.markerSprites(), craft = this.aircraftSprites().filter(s => s.visible);
+      if (!markers.length || !this.size) return;
+      const ratio = this.size[1] / this.size[0];
+      const box = (s) => {
+        const p = s.position.clone().project(this.camera), h = 0.116 * (s.userData.small ? 0.78 : 1);
+        const b = s.userData.box || {w: 1, h: 1}, w = h * (s.userData.aspect || 3.7) * ratio * b.w;
+        return {x0: p.x - w / 2, x1: p.x + w / 2, y0: p.y + h * (1 - b.h), y1: p.y + h};
+      };
+      const covers = craft.map(box);
+      for (const m of markers) {
+        const b = box(m), hit = covers.some(a => a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1);
+        m.material.opacity = hit ? 0.15 : 1;
+      }
+    }
     resetCamera(immediate = false, keepMode = false) {
       if (!this.extent) return;
       if (!keepMode && this.mode !== '2d') this.mode = '3d';
@@ -772,6 +884,8 @@
         const h = 0.058 * (sprite.userData.small ? 0.78 : 1) * worldPerScreen;
         sprite.scale.set(h * (sprite.userData.aspect || 3.7), h, 1);
       }
+      this.camera.updateMatrixWorld();
+      this.declutterLabels();
       this.renderer.render(this.scene, this.camera);
     }
     animateSmoke(wall) {
@@ -780,14 +894,15 @@
       const pos = geo.attributes.position, alpha = geo.attributes.aAlpha, size = geo.attributes.aSize;
       const w = this.wind && finite(this.wind.east) ? this.wind : {east: 0.3, north: 0.3};
       const wl = Math.hypot(w.east, w.north) || 1, drift = clamp(wl / 6, 0.25, 1.5);
-      const height = this.extent * 0.16, spread = this.extent * 0.22 * drift, S = this.extent * 0.008;
+      // Soft plumes: puffs are born small and faint at the front, then rise, widen and bend downwind.
+      const height = this.extent * 0.2, spread = this.extent * 0.26 * drift, S = this.extent * 0.018;
       const t = wall * 0.00004;
       for (let i = 0; i < pos.count; i++) {
         const src = this.smokeSources[i % n], age = (hash(i) + t * (0.8 + hash(i + 7) * 0.6)) % 1;
-        const jitter = (hash(i + 3) - 0.5) * S * 2 * (1 + age * 6), jz = (hash(i + 5) - 0.5) * S * 2 * (1 + age * 6);
-        pos.setXYZ(i, src.x + w.east / wl * spread * age * age + jitter, src.y + height * Math.pow(age, 0.7), src.z - w.north / wl * spread * age * age + jz);
-        alpha.setX(i, Math.sin(Math.PI * Math.min(1, age * 1.15)) * (0.55 + hash(i + 9) * 0.45));
-        size.setX(i, S * (1 + age * 5));
+        const jitter = (hash(i + 3) - 0.5) * S * (1 + age * 5), jz = (hash(i + 5) - 0.5) * S * (1 + age * 5);
+        pos.setXYZ(i, src.x + w.east / wl * spread * age * age + jitter, src.y + S * 0.5 + height * Math.pow(age, 0.75), src.z - w.north / wl * spread * age * age + jz);
+        alpha.setX(i, Math.pow(Math.sin(Math.PI * Math.min(1, age * 1.05)), 1.4) * (0.5 + hash(i + 9) * 0.5));
+        size.setX(i, S * (0.8 + age * 4.5));
       }
       pos.needsUpdate = alpha.needsUpdate = size.needsUpdate = true;
     }
@@ -878,7 +993,7 @@
     dispose() { this.canvas.remove(); }
   }
 
-  window.NightjarFire = {fireState, isBurnable};
+  window.NightjarFire = {fireState, isBurnable, imageryFor};
   window.NightjarScene3D = NightjarScene3D;
   window.NightjarFlatMap = NightjarFlatMap;
 })();

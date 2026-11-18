@@ -9,7 +9,7 @@
 </head>
 <body>
   <header class="topbar">
-    <a class="brand" href="#mapa" aria-label="Nightjar, inicio"><span class="brand-mark" aria-hidden="true">N</span><span class="brand-text"><span class="brand-name">nightjar<span class="brand-dot">.</span> <span class="brand-version">3D</span></span><span class="brand-context">Estación de análisis de incendios y decisiones aéreas</span></span></a>
+    <a class="brand" href="#mapa" aria-label="Nightjar, inicio" title="Estación de análisis de incendios y decisiones aéreas"><span class="brand-mark" aria-hidden="true">N</span><span class="brand-text"><span class="brand-name">nightjar<span class="brand-dot">.</span></span><span class="brand-context">Incendios y decisiones aéreas</span></span></a>
     <nav class="main-nav" aria-label="Secciones">
       <a class="nav-link active" href="#mapa">Mapa 3D</a>
       <a class="nav-link" href="#comparacion">Comparación</a>
@@ -21,9 +21,6 @@
       <div class="context-field scenario-field"><label for="scenario-select">Escenario</label><select id="scenario-select"></select></div>
       <div class="context-field policy-field"><label for="policy-select">Política <span id="policy-count">0</span></label><select id="policy-select"></select></div>
       <div class="context-field compare-policy-field" id="compare-policy-field" hidden><label for="compare-policy-select">Comparar con</label><select id="compare-policy-select"></select></div>
-      <div class="context-field speed-field"><label for="speed-select">Velocidad</label><select id="speed-select"><option value="5">5×</option><option value="15">15×</option><option value="30" selected>30×</option><option value="60">60×</option><option value="120">120×</option></select></div>
-      <button id="btn-play" class="btn btn-primary" aria-label="Reproducir" title="Reproducir / pausar [Espacio]">Reproducir</button>
-      <button id="btn-reset" class="btn" title="Volver al inicio del episodio [R]" aria-label="Volver al inicio">Reiniciar</button>
     </div>
   </header>
 
@@ -39,11 +36,19 @@
           <span class="terrain-note" id="terrain-note" hidden></span>
         </div>
 
+        <div class="map-rail">
         <div class="cam-dock" role="group" aria-label="Cámara">
           <button id="view-3d" class="cam-btn selected" aria-pressed="true" title="Perspectiva táctica 3D">3D Táctica</button>
           <button id="view-2d" class="cam-btn" aria-pressed="false" title="Vista ortográfica cenital">2D Orto</button>
           <button id="cam-chase" class="cam-btn" aria-pressed="false" title="Seguir la aeronave">Persecución</button>
           <button id="cam-front" class="cam-btn" aria-pressed="false" title="Centrar el frente activo">Frente</button>
+        </div>
+        <div class="view-tools" role="group" aria-label="Zoom del mapa">
+          <button id="zoom-in" aria-label="Acercar mapa" title="Acercar [+]">+</button>
+          <button id="zoom-out" aria-label="Alejar mapa" title="Alejar [−]">−</button>
+          <button id="camera-reset" aria-label="Restablecer cámara" title="Restablecer cámara [Inicio]">⟲</button>
+          <button id="export-png" aria-label="Exportar imagen PNG" title="Exportar imagen PNG">⤓</button>
+        </div>
         </div>
 
         <div class="hud hud-clock">
@@ -56,17 +61,10 @@
           <span id="compass-wind-label">—</span>
         </div>
 
-        <div class="view-tools" role="group" aria-label="Zoom del mapa">
-          <button id="zoom-in" aria-label="Acercar mapa" title="Acercar [+]">+</button>
-          <button id="zoom-out" aria-label="Alejar mapa" title="Alejar [−]">−</button>
-          <button id="camera-reset" aria-label="Restablecer cámara" title="Restablecer cámara [Inicio]">⟲</button>
-          <button id="export-png" aria-label="Exportar imagen PNG" title="Exportar imagen PNG">⤓</button>
-        </div>
-
         <details class="hud legend" id="legend" open>
           <summary>Simbología y capas</summary>
           <div class="legend-controls">
-            <label>Color <select id="terrain-style"><option value="fuel">Combustible</option><option value="elevation">Altitud</option><option value="slope">Pendiente</option></select></label>
+            <label>Color <select id="terrain-style"><option value="imagery">Imagen Sentinel-2</option><option value="fuel">Combustible</option><option value="elevation">Altitud</option><option value="slope">Pendiente</option></select></label>
             <label>Estado <select id="state-select"><option value="combined">Combinado</option><option value="simulator">Simulador</option><option value="observation">Observación entregada</option><option value="historical">Cartografía histórica</option></select></label>
             <label>Relieve <select id="relief-scale"><option value="1">1× real</option><option value="1.5" selected>1,5×</option><option value="2">2×</option><option value="3">3×</option></select></label>
           </div>
@@ -85,13 +83,19 @@
         </details>
 
         <div class="hud-hint" id="camera-hint">Arrastrar: orbitar · Clic dcho o Mayús: desplazar · Rueda: zoom · Doble clic: enfocar · Espacio: reproducir</div>
+        <div class="map-attribution" id="map-attribution" hidden></div>
         <div class="map-scale" id="map-scale"><i></i><span>—</span></div>
         <div class="renderer-status" id="renderer-status" role="status" hidden></div>
         <div class="map-tooltip" id="map-tooltip"></div>
 
         <div class="timeline" id="timeline">
+          <div class="transport" role="group" aria-label="Reproducción">
+            <button id="btn-play" class="btn btn-primary btn-play" aria-label="Reproducir" title="Reproducir / pausar [Espacio]">Reproducir</button>
+            <button id="btn-reset" class="btn btn-icon" title="Volver al inicio del episodio [R]" aria-label="Volver al inicio"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3v10M13 3.5 6 8l7 4.5z"/></svg></button>
+            <select id="speed-select" aria-label="Velocidad de reproducción" title="Velocidad de reproducción"><option value="5">5×</option><option value="15">15×</option><option value="30" selected>30×</option><option value="60">60×</option><option value="120">120×</option></select>
+          </div>
           <div class="time-now"><span>T</span><strong id="time-display">00:00</strong><em>/ <b id="time-end">00:00</b></em></div>
-          <div class="slider-wrap"><div class="ticks" id="timeline-ticks"></div><input id="time-slider" aria-label="Tiempo del episodio" type="range" min="0" max="0" value="0" step="1"></div>
+          <div class="slider-wrap"><canvas class="growth-strip" id="timeline-growth" aria-hidden="true"></canvas><div class="ticks" id="timeline-ticks"></div><input id="time-slider" aria-label="Tiempo del episodio" type="range" min="0" max="0" value="0" step="1"></div>
           <div class="time-step" id="time-step">—</div>
         </div>
       </section>
@@ -122,13 +126,13 @@
 
         <section class="card">
           <div class="card-head"><h2>Dinámica de crecimiento A(t)</h2><span class="pill">Raster de llegada</span></div>
-          <canvas class="chart" id="chart-growth" aria-label="Área afectada frente al tiempo"></canvas>
+          <canvas class="chart" id="chart-growth" role="img" aria-label="Área afectada frente al tiempo"></canvas>
           <div class="chart-legend" id="growth-legend"></div>
         </section>
 
         <section class="card">
           <div class="card-head"><h2>Perfil topográfico</h2><span class="pill" id="profile-label">Corte</span></div>
-          <canvas class="chart" id="chart-profile" aria-label="Perfil de elevación"></canvas>
+          <canvas class="chart" id="chart-profile" role="img" aria-label="Perfil de elevación"></canvas>
           <div class="chart-foot" id="profile-foot">—</div>
         </section>
 
@@ -140,7 +144,7 @@
 
         <section class="card">
           <div class="card-head"><h2>Flota</h2><span class="pill" id="fleet-count">1 unidad</span></div>
-          <label>Aeronave para seguimiento <select id="fleet-select" aria-label="Aeronave para seguimiento"></select></label>
+          <label class="fleet-picker">Aeronave para seguimiento <select id="fleet-select" aria-label="Aeronave para seguimiento"></select></label>
           <table class="fleet-table"><thead><tr><th>Indicativo</th><th>Tipo</th><th>Fase</th><th>Depósito</th></tr></thead><tbody id="fleet-body"></tbody></table>
           <p class="card-note">Posición registrada en el replay e interpolada entre muestras. Altitud y tamaño del símbolo son solo de representación.</p>
         </section>
@@ -177,6 +181,6 @@
       </ul></div>
       <details class="technical-details"><summary>Detalles técnicos de fuente, conjuntos y huellas</summary><div id="technical-provenance"></div></details><p class="generated">Vista generada <span id="generated-at">__GENERATED_AT__</span> · Nightjar Replay Viewer</p></section>
   </main>
-  <script>const REPLAYS = __REPLAYS__;</script><script>__JS__</script>
+  <script>const REPLAYS = __REPLAYS__; const IMAGERY = __IMAGERY__;</script><script>__JS__</script>
 </body>
 </html>
