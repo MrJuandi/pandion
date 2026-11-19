@@ -742,3 +742,24 @@ Question: can a learned model assign each decision its share of the outcome, wit
 | Non-recurrent Q(h, a) regression, same data | 0.05 | 52 % |
 
 Reading: negative. The learned decomposition does not recover which action is better: its advantages are uncorrelated with the branched reference and agree in sign as often as a coin, like the Monte Carlo advantage of the 2026-11-17 diagnostic (51 %). The cause is the same: on about 14,000 decisions the outcome differences between actions are small and rare against the spread of later choices, and a model fitted to returns learns the state value but not the action differences. Training with the combination was therefore not run (criterion not met); D-85 stays as is. The predeclared sign metric counts a zero branched advantage as a disagreement, which understates single vine (integer-hectare returns give exact ties); the correlation shows the same ranking. Limits: one policy, one model size and data volume; a fixed policy is the favourable case, since during training the decomposition would also have to follow a changing policy.
+
+#### Where D-85 differs from the hold-aware rule (2026-11-19)
+
+On held-out EMSR837 the three D-85 seeds tie `hold_aware_heuristic` on average (−0.03 ha). Diagnostic of where that tie comes from, without training: `runs/geographic-d85-behaviour-20261119` (`behaviour.py`; decision log `log.json`; per-scenario results `perscen.json`, taken from `audit-eval.json` and `audit-eval-43-44.json` of the D-85 run, which the log reproduces exactly). The selected weights of seeds 42, 43 and 44 were rolled out deterministically on the 288 held-out scenarios (22,253 real decisions). At every decision the log keeps the chosen action, the D-82 features of its target and the target `hold_aware_heuristic` would choose in the same observation.
+
+| Quantity | Value |
+|---|---|
+| Scenarios where all three seeds are within 1 ha of `hold_aware_heuristic` | 177 of 288 |
+| All three seeds worse by > 1 ha / better by > 1 ha | 19 (+88 ha in all; 8 of them in AOI07, +44) / 17 (−116 ha) |
+| Spread between seeds in one scenario, fires > 40 ha without intervention (s.d.) | 3.1 ha |
+| Decisions: HOLD / drop / voluntary refill | 51 % / 49 % / 0 % |
+| Decisions in scenarios where all seeds tie (fires already small or held); HOLD there | 74 %; 62 % |
+| Drops at distance > 0 (D-79) | 12 of 10,980 |
+| Drops on head / flanks / rear | 79 % / 18 % / 3 % |
+| Drops on targets whose water already suffices (always with an insufficient one available) | 18 % (26 % in tied scenarios, 6 % in decisive ones) |
+| Drops on fronts no water can hold; `hold_aware_heuristic` chose a holdable one instead | 2.6 %, 72 % of them in AOI07 |
+| Same focus / same cell as `hold_aware_heuristic` | 52 % / 39 % |
+
+Losses are not one repeated mistake. In the 19 consistent losses the policy drops more often on fronts that need three stacked drops (43 % against 29 % in the consistent wins) and on fronts that cannot be held (16 % against 2 %): they are higher-intensity fires, eight of them in AOI07, which burns 420–495 ha with any policy. Focus triage does not explain the losses in general: pairs of seeds that start on the same two foci end as far apart (5.1 ha) as pairs that start differently (4.4 ha), although single scenarios do turn on it (EMSR837_AOI06 scenario 03, three foci: 4 ha for the seed that starts on focus 1, 33–34 for the two that start on focus 2; the rule, 5 ha). In the two replays compared in detail (`replays/`, `viewer.html`; scenarios AOI16-07 and AOI15-02, policy 8 and 10 ha against 4) the drops occur at the same times as the rule's and only the targets differ: in AOI16-07 the policy works focus 3 first and puts three consecutive drops on cells that already hold, while the rule works focus 1 throughout.
+
+Reading: of the earlier defects, redundant drops fell (18 % of drops against 23–36 % before D-85) and now sit mostly where they cost nothing; drop distances beyond the front are still not used. HOLD is chosen in about half the decisions while the rule would always drop, but almost only once the fire is small or held, and the number of HOLDs in large fires is unrelated to the result (correlation 0.00). The remaining differences from the rule are scenario-specific and of both signs, and outcomes in large fires are sensitive to small changes in target choice (3 ha between seeds). For training this means that three quarters of the decisions, and therefore of the branched decisions, fall in scenarios where no choice changes the outcome; this agrees with the 72 % of branched comparisons with identical returns in the RUDDER measurement above. Limits: deterministic evaluation of three seeds on one held-out activation; the rule's choice is evaluated in the policy's states, not along its own trajectory.
