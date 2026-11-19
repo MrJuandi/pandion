@@ -727,3 +727,18 @@ Seeds 43 and 44 (`run_43_44.sh`, same commit and recipe, 5 workers each, run in 
 Per seed (42, 43, 44), held out, branched − heuristic: −3.21, −3.27, −2.78; branched − hold-aware: −0.16, −0.21, +0.27; branched − Monte Carlo: −2.16, −2.41, −1.58. Every seed gains on its Monte Carlo counterpart on both evaluation sets.
 
 Reading: the seed 42 result holds across seeds. Branched advantages gain about 2 ha over Monte Carlo/GAE advantages with everything else fixed and bring the learned policy level with `hold_aware_heuristic`, but not past it. Limits: one held-out activation; three seeds.
+
+#### Learned return decomposition against branched advantages (2026-11-19)
+
+Question: can a learned model assign each decision its share of the outcome, without simulating branches, well enough to grade the decisions that branched advantages (D-85) leave without a learning signal (all but four per episode)? The model is RUDDER-style return decomposition (Arjona-Medina et al., 2019): an LSTM reads the episode decision by decision (the policy's LSTM state and an embedding of the action taken: focus-slot features, aspect × distance and the D-82 action-target features) and predicts the episode return at every step; the change in its prediction when one action is swapped for another is that action's credit. Criterion written before any run (`CRITERION.md`): go on to training with branched advantages plus RUDDER credit at the other decisions only if RUDDER's sign agreement with a reference advantage is at least 70 % and no more than 10 points below single-branch vine.
+
+`runs/geographic-rudder-diagnostic-20261119` (`collect.py`, `analyse.py`, output `result.json`): D-85 seed 42 selected weights, fixed; development split without EMSR837 and the four selection incidents (928 scenarios), one stochastic episode per scenario. RUDDER was trained on 728 scenarios (14,225 decisions, plus the vine branch returns of four decisions per episode in the primary variant) and scored on the other 200. At four decisions of each test episode four actions were sampled from the policy, as in D-85, and each was followed to the end with four common-random-number continuations. Reference advantage: leave-one-out over the mean of continuations 1–3. Single vine (the D-85 training signal): continuation 0 alone. 749 scored decisions, 2,996 (decision, action) pairs; 849 with |reference| > 0.05 ha.
+
+| Advantage estimate | Correlation with reference | Sign agreement, \|reference\| > 0.05 ha |
+|---|---|---|
+| Single-branch vine (D-85) | 0.71 | 53 % (83 % where it is not zero; zero in 35 %) |
+| RUDDER, episodes and branch returns (primary) | 0.07 | 52 % |
+| RUDDER, episodes only | 0.08 | 51 % |
+| Non-recurrent Q(h, a) regression, same data | 0.05 | 52 % |
+
+Reading: negative. The learned decomposition does not recover which action is better: its advantages are uncorrelated with the branched reference and agree in sign as often as a coin, like the Monte Carlo advantage of the 2026-11-17 diagnostic (51 %). The cause is the same: on about 14,000 decisions the outcome differences between actions are small and rare against the spread of later choices, and a model fitted to returns learns the state value but not the action differences. Training with the combination was therefore not run (criterion not met); D-85 stays as is. The predeclared sign metric counts a zero branched advantage as a disagreement, which understates single vine (integer-hectare returns give exact ties); the correlation shows the same ranking. Limits: one policy, one model size and data volume; a fixed policy is the favourable case, since during training the decomposition would also have to follow a changing policy.
