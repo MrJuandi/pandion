@@ -8,7 +8,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from nightjar.environment_family import (
+from pandion.environment_family import (
     SCENARIO_SCHEMA_VERSION,
     SCHEMA_VERSION,
     _assert_family_grids,
@@ -16,7 +16,7 @@ from nightjar.environment_family import (
     _validate_grid,
     build_environment_family,
 )
-from nightjar.geographic_family import canonical_hash
+from pandion.geographic_family import canonical_hash
 
 
 def _scenario(activation: str, split: str, index: int = 0) -> dict:
@@ -103,7 +103,7 @@ class TestEnvironmentFamily(unittest.TestCase):
             (input_dir / "manifest.json").write_text(json.dumps(manifest))
             for filename in ("emsr578.asc", "emsr590.asc", "emsr592.asc", "emsr600.asc"):
                 _write_ascii(dem_dir / filename, [[10, 11, 12], [0, 8, 9]])
-            with patch("nightjar.environment_family.load_geographic_split",
+            with patch("pandion.environment_family.load_geographic_split",
                        side_effect=lambda split, *_a, **_kw: deepcopy(splits[split])):
                 result = build_environment_family(input_dir, dem_dir, out_dir)
             saved_manifest = json.loads((out_dir / "manifest.json").read_text())
@@ -164,7 +164,7 @@ class TestEnvironmentFamily(unittest.TestCase):
                     "resampling": "nearest-neighbor",
                 }
             (dem_dir / "sources.json").write_text(json.dumps(sources))
-            with patch("nightjar.environment_family.load_geographic_split",
+            with patch("pandion.environment_family.load_geographic_split",
                        side_effect=lambda split, *_a, **_kw: deepcopy(splits[split])):
                 result = build_environment_family(input_dir, dem_dir, out_dir)
             saved_manifest = json.loads((out_dir / "manifest.json").read_text())
@@ -194,8 +194,8 @@ class TestEnvironmentFamily(unittest.TestCase):
                 _read_dem(path, grid, "EMSR578", {**valid, "crs": "EPSG:25830"})
 
     def test_station_environment_contract_is_scoped_and_causal(self):
-        from nightjar.environment_family import _enrich_scenario
-        from nightjar.pilot_terrain import scenario_sha256
+        from pandion.environment_family import _enrich_scenario
+        from pandion.pilot_terrain import scenario_sha256
 
         dev = _scenario("EMSR578", "development")
         origin = "2022-06-17T10:06:00Z"

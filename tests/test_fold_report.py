@@ -8,7 +8,7 @@ import unittest
 
 import numpy as np
 
-from nightjar.fold_report import bootstrap_ci, format_table, load_reports, summarise
+from pandion.fold_report import bootstrap_ci, format_table, load_reports, summarise
 
 
 def report(activation, seed, policy, heuristic, containment=None, **config):

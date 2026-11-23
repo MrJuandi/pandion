@@ -1,7 +1,7 @@
 """Fetch and audit three CEMS EMSR578 AOI01 burned-area snapshots.
 
 The snapshots are independent observations for a future validation protocol.
-This module does not compare them to a Nightjar simulation.
+This module does not compare them to a Pandion simulation.
 """
 
 from __future__ import annotations
@@ -86,7 +86,7 @@ def report(directory: Path) -> dict:
         "limitations": [
             "Cumulative photo-interpreted burned area, not an active-fire perimeter at every time step.",
             "Vegetation is not established as FM1 short grass; suppression and weather history are not represented here.",
-            "This audit is not a physical validation of Nightjar fire spread.",
+            "This audit is not a physical validation of Pandion fire spread.",
         ],
     }
 

@@ -4,7 +4,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from nightjar.pilot_weather import VARIABLES, audit_weather
+from pandion.pilot_weather import VARIABLES, audit_weather
 
 
 class PilotWeatherTests(unittest.TestCase):

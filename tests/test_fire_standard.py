@@ -10,7 +10,7 @@ try:
 except ImportError:
     pyretechnics = None
 
-from nightjar.fire_standard import run_fire_standard
+from pandion.fire_standard import run_fire_standard
 
 
 @unittest.skipIf(pyretechnics is None, "install requirements-standard.txt")

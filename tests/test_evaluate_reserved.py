@@ -9,7 +9,7 @@ try:
 except ImportError:
     HAS_TORCH = False
 
-from nightjar.evaluate_reserved import (
+from pandion.evaluate_reserved import (
     _extract_metrics,
     _paired_comparison,
     run_reserved_evaluation,
@@ -64,7 +64,7 @@ class EvaluateReservedTests(unittest.TestCase):
         self.assertLessEqual(result["reduction_95_ci"][0], result["reduction_95_ci"][1])
 
     def test_bootstrap_ci(self):
-        from nightjar.evaluate_reserved import _bootstrap_ci
+        from pandion.evaluate_reserved import _bootstrap_ci
         # Deterministic with seed
         ci1 = _bootstrap_ci([1.0, 2.0, 3.0, 4.0, 5.0], n_resamples=1000, seed=42)
         ci2 = _bootstrap_ci([1.0, 2.0, 3.0, 4.0, 5.0], n_resamples=1000, seed=42)
@@ -116,9 +116,9 @@ class EvaluateReservedTests(unittest.TestCase):
                 ckpt_path,
             )
 
-            with patch("nightjar.evaluate_reserved.SpatialActorCritic") as mock_sac, \
-                 patch("nightjar.evaluate_reserved._rollout_ppo_with_replay", side_effect=mock_rollout), \
-                 patch("nightjar.evaluate_reserved.run_integrated", side_effect=mock_baseline):
+            with patch("pandion.evaluate_reserved.SpatialActorCritic") as mock_sac, \
+                 patch("pandion.evaluate_reserved._rollout_ppo_with_replay", side_effect=mock_rollout), \
+                 patch("pandion.evaluate_reserved.run_integrated", side_effect=mock_baseline):
                 mock_model = MagicMock()
                 mock_sac.return_value = mock_model
 

@@ -27,11 +27,11 @@ The [IGN WCS description](https://servicios.idee.es/wcs-inspire/mdt?service=WCS&
 
 ## Implemented interfaces
 
-`nightjar.pilot_terrain` ingests local ESRI ASCII, checks shape/origin/cell size against the scenario, reverses north-first file rows to Nightjar's south-to-north rows, and emits `nightjar-pilot-terrain-0.1`. Hashes bind raw bytes and canonical scenario content; source/CRS/unit/UTC timestamp and deterministic null seed are recorded. NODATA stays null with a separate validity mask; a zero-metre elevation is valid. Without a NODATA header, that mask means numeric validity, not a verified source footprint. The origin comes from the existing scenario metadata rounded to 0.1 m; original fuel-raster sampling before rounding can differ by up to 0.05 m per axis. Service resampling and that convention remain numerical limits.
+`pandion.pilot_terrain` ingests local ESRI ASCII, checks shape/origin/cell size against the scenario, reverses north-first file rows to Pandion's south-to-north rows, and emits `nightjar-pilot-terrain-0.1`. Hashes bind raw bytes and canonical scenario content; source/CRS/unit/UTC timestamp and deterministic null seed are recorded. NODATA stays null with a separate validity mask; a zero-metre elevation is valid. Without a NODATA header, that mask means numeric validity, not a verified source footprint. The origin comes from the existing scenario metadata rounded to 0.1 m; original fuel-raster sampling before rounding can differ by up to 0.05 m per axis. Service resampling and that convention remain numerical limits.
 
 `pilot_simulation run --terrain` rejects artifacts for another scenario, wrong grid orientation/alignment, and missing/nonfinite heights. It records terrain artifact/raw hashes and source/coverage metadata. Omission of `--terrain` retains the explicitly synthetic 350 m flat grid. Wind and moisture are still constant exploratory parameters in either case; the weather audit is **not** engine forcing.
 
-`nightjar.pilot_weather` reads local station/variable/measurement JSON exports and emits `nightjar-pilot-weather-audit-0.1`. It audits the 98 forward intervals overlapping t0–t2, preserves quality flags and explicit gaps without filling, checks station identity, units, cadence and duplicate readings, and binds all three raw hashes plus the scenario hash. It has no controller or engine dependency and does not supply future observations to a policy.
+`pandion.pilot_weather` reads local station/variable/measurement JSON exports and emits `nightjar-pilot-weather-audit-0.1`. It audits the 98 forward intervals overlapping t0–t2, preserves quality flags and explicit gaps without filling, checks station identity, units, cadence and duplicate readings, and binds all three raw hashes plus the scenario hash. It has no controller or engine dependency and does not supply future observations to a policy.
 
 `pilot_simulation evaluate` emits `nightjar-pilot-comparison-0.1` with CRS, source/scenario hashes, UTC creation time, deterministic null seed, `growth_only`, `initial_only_baseline` and `timing`. Comparison-image time is identified by the actual ZIP digest in the reviewed EMSR578 catalog, not its filename. Unknown products are explicitly time-unknown; legacy simulations without a scenario hash cannot establish scenario binding. Spatial metrics are exploratory even when elapsed time matches.
 
@@ -45,33 +45,33 @@ curl -fsSL --max-time 30 'https://analisi.transparenciacatalunya.cat/resource/yq
 curl -fsSL --max-time 30 'https://analisi.transparenciacatalunya.cat/resource/4fb2-n3yi.json?$limit=1000' -o data/raw/pilot-environment/variables.json
 curl -fsSL --max-time 30 'https://analisi.transparenciacatalunya.cat/resource/nzvn-apee.json?$where=codi_estacio%3D%27X6%27%20AND%20data_lectura%20between%20%272022-06-16T00:00:00%27%20and%20%272022-06-20T00:00:00%27&$limit=5000&$order=data_lectura,codi_variable' -o data/raw/pilot-environment/baldomar-measurements.json
 curl -fsSL --max-time 50 'https://servicios.idee.es/wcs-inspire/mdt?service=WCS&version=1.0.0&request=GetCoverage&coverage=Elevacion25830_25&crs=EPSG:25831&response_crs=EPSG:25831&bbox=326636.4,4636071.6,342236.4,4651271.6&width=156&height=152&format=ArcGrid' -o data/raw/pilot-environment/terrain.asc
-.venv/bin/python -m nightjar.pilot_terrain \
+.venv/bin/python -m pandion.pilot_terrain \
   --scenario runs/emsr578-pilot-scenario.json \
   --ascii-grid data/raw/pilot-environment/terrain.asc --crs EPSG:25831 \
   --source-url 'https://servicios.idee.es/wcs-inspire/mdt?service=WCS&version=1.0.0&request=GetCoverage&coverage=Elevacion25830_25&crs=EPSG:25831&response_crs=EPSG:25831&bbox=326636.4,4636071.6,342236.4,4651271.6&width=156&height=152&format=ArcGrid' \
   --provider IGN/CNIG --dataset Elevacion25830_25 --native-resolution-m 25 \
   --vertical-reference orthometric --resampling nearest-neighbor \
   --output runs/pilot-environment-source-audit/terrain.json
-.venv/bin/python -m nightjar.pilot_weather \
+.venv/bin/python -m pandion.pilot_weather \
   --scenario runs/emsr578-pilot-scenario.json \
   --stations data/raw/pilot-environment/stations.json \
   --variables data/raw/pilot-environment/variables.json \
   --measurements data/raw/pilot-environment/baldomar-measurements.json \
   --output runs/pilot-environment-source-audit/weather.json
-.venv/bin/python -m nightjar.pilot_simulation run \
+.venv/bin/python -m pandion.pilot_simulation run \
   --scenario runs/emsr578-pilot-scenario.json \
   --terrain runs/pilot-environment-source-audit/terrain.json --horizon-s 88860 \
   --output runs/pilot-environment-source-audit/simulation-t1.json
-.venv/bin/python -m nightjar.pilot_simulation evaluate \
+.venv/bin/python -m pandion.pilot_simulation evaluate \
   --simulation runs/pilot-environment-source-audit/simulation-t1.json \
   --comparison-zip data/raw/emsr578/monit01.zip \
   --scenario runs/emsr578-pilot-scenario.json \
   --output runs/pilot-environment-source-audit/comparison-t1.json
-.venv/bin/python -m nightjar.pilot_simulation run \
+.venv/bin/python -m pandion.pilot_simulation run \
   --scenario runs/emsr578-pilot-scenario.json \
   --terrain runs/pilot-environment-source-audit/terrain.json --horizon-s 174960 \
   --output runs/pilot-environment-source-audit/simulation-t2.json
-.venv/bin/python -m nightjar.pilot_simulation evaluate \
+.venv/bin/python -m pandion.pilot_simulation evaluate \
   --simulation runs/pilot-environment-source-audit/simulation-t2.json \
   --comparison-zip data/raw/emsr578/monit02.zip \
   --scenario runs/emsr578-pilot-scenario.json \

@@ -2,14 +2,14 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from nightjar.annaburroo_compare import compare
+from pandion.annaburroo_compare import compare
 
 
 class AnnaburrooCompareTests(unittest.TestCase):
     def test_audited_table_and_no_fit_record_count(self):
         table = Path("data/raw/annaburroo/Plot_Average_Data.csv")
         if not table.exists():
-            self.skipTest("external source table unavailable; fetch with nightjar.annaburroo")
+            self.skipTest("external source table unavailable; fetch with pandion.annaburroo")
         result = compare(table)
         self.assertEqual(result["source_rows"], 121)
         self.assertEqual(result["included"], 120)

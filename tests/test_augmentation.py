@@ -4,7 +4,7 @@ import unittest
 
 import numpy as np
 
-from nightjar.augmentation import (
+from pandion.augmentation import (
     NUM_TRANSFORMS,
     augment_image,
     augment_scenario,
@@ -12,8 +12,8 @@ from nightjar.augmentation import (
     transform_point,
     transform_vector,
 )
-from nightjar.geographic_family import build_synthetic_cems_fixture, canonical_hash, generate_geographic_scenario
-from nightjar.geographic_integrated import run_geographic_integrated
+from pandion.geographic_family import build_synthetic_cems_fixture, canonical_hash, generate_geographic_scenario
+from pandion.geographic_integrated import run_geographic_integrated
 
 
 def scenario():

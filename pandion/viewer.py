@@ -1,4 +1,4 @@
-"""Build the self-contained Spanish 3D replay viewer used by the geographic workspace."""
+"""Build the self-contained offline 3D replay viewer used by the geographic workspace."""
 from __future__ import annotations
 
 import argparse
@@ -87,7 +87,7 @@ def attach_display_imagery(replays: Sequence[dict], imagery_dirs: Sequence[Path]
     return payloads
 
 
-def build_viewer_html(replays: Sequence[dict], title: str = "Nightjar Replay Viewer",
+def build_viewer_html(replays: Sequence[dict], title: str = "Pandion Replay Viewer",
                       imagery_dirs: Sequence[Path] | None = None) -> str:
     """Build a complete offline viewer. Replay inputs are normalized at the boundary."""
     if not replays:
@@ -116,7 +116,7 @@ def write_viewer_html(replays: Sequence[dict], output_path: Path, title: str | N
         raise ValueError("at least one replay is required to generate viewer HTML")
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    page_title = title or ((replays[0].get("scenario_id") or "Nightjar") + " · visor")
+    page_title = title or ((replays[0].get("scenario_id") or "Pandion") + " · viewer")
     output_path.write_text(build_viewer_html(replays, title=page_title, imagery_dirs=imagery_dirs), encoding="utf-8")
 
 
@@ -135,7 +135,7 @@ def main() -> None:
             parser.error(f"replay file not found: {replay_path}")
         replays.append(json.loads(replay_path.read_text(encoding="utf-8")))
     write_viewer_html(replays, args.output, title=args.title, imagery_dirs=args.imagery)
-    print(f"Generated Nightjar 3D viewer at: {args.output}")
+    print(f"Generated Pandion 3D viewer at: {args.output}")
 
 
 if __name__ == "__main__":

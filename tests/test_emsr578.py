@@ -6,7 +6,7 @@ import unittest
 from unittest.mock import patch
 from zipfile import ZipFile
 
-from nightjar import emsr578
+from pandion import emsr578
 
 
 class CEMSProductAuditTests(unittest.TestCase):

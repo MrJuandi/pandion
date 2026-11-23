@@ -6,16 +6,16 @@ from unittest.mock import patch
 
 import numpy as np
 
-from nightjar import cems_catalog
-from nightjar.cems_catalog import (
+from pandion import cems_catalog
+from pandion.cems_catalog import (
     ACTIVATIONS,
     SCOOPING_SOURCES,
     _extract_water_waypoints,
     incidents_for_split,
     scooping_point,
 )
-from nightjar.geodesy import utm_to_wgs84
-from nightjar.geographic_family import (
+from pandion.geodesy import utm_to_wgs84
+from pandion.geographic_family import (
     build_synthetic_cems_fixture,
     generate_geographic_scenario,
     select_scooping_source,

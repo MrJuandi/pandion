@@ -6,11 +6,11 @@ import math
 from pathlib import Path
 import unittest
 
-from nightjar.aircraft import CAPACITY_L
-from nightjar.integrated import run_integrated
-from nightjar.model import ActionMapper, HAS_TORCH, ObservationTensorizer, SpatialActorCritic, TacticalActionMapper, TACTICAL_ACTION_NAMES
-from nightjar.policies import candidate_cells
-from nightjar.training_env import IntegratedTrainingEnv, valid_actions
+from pandion.aircraft import CAPACITY_L
+from pandion.integrated import run_integrated
+from pandion.model import ActionMapper, HAS_TORCH, ObservationTensorizer, SpatialActorCritic, TacticalActionMapper, TACTICAL_ACTION_NAMES
+from pandion.policies import candidate_cells
+from pandion.training_env import IntegratedTrainingEnv, valid_actions
 
 EXAMPLE_PATH = Path(__file__).resolve().parent.parent / "examples" / "synthetic_integrated.json"
 

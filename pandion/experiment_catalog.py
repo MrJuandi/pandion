@@ -105,13 +105,13 @@ def write_catalog(catalog: dict, output: Path, html_output: Path | None = None) 
                   entry.get("seed", "—"), entry["sha256"][:12]]
         cells = "".join(f"<td>{html.escape(str(v))}</td>" for v in fields)
         details = html.escape(json.dumps(entry, indent=2, ensure_ascii=False))
-        rows.append(f"<tr>{cells}<td><details><summary>Ver ficha</summary><pre>{details}</pre></details></td></tr>")
+        rows.append(f"<tr>{cells}<td><details><summary>View record</summary><pre>{details}</pre></details></td></tr>")
     html_output.parent.mkdir(parents=True, exist_ok=True)
-    html_output.write_text('''<!doctype html><html lang="es"><meta charset="utf-8"><title>Nightjar · Experimentos</title>
+    html_output.write_text('''<!doctype html><html lang="en"><meta charset="utf-8"><title>Pandion · Experiments</title>
 <style>body{font:15px system-ui;margin:32px;background:#101923;color:#e7eef5}input{padding:12px;width:50%;margin-bottom:24px}table{border-collapse:collapse;width:100%}th,td{text-align:left;padding:10px;border-bottom:1px solid #344455;vertical-align:top}pre{max-width:55vw;max-height:500px;overflow:auto;white-space:pre-wrap}summary{cursor:pointer}th{color:#9ac9ed}</style>
-<h1>Nightjar · Catálogo de experimentos</h1><p>Artefactos existentes, configuración, resultados y procedencia.</p>
-<input id="search" aria-label="Buscar artefactos" placeholder="Buscar incidente, archivo, modelo, hash…">
-<table><thead><tr><th>Tipo</th><th>Archivo</th><th>Asociación</th><th>Entradas</th><th>Acciones</th><th>Flota</th><th>Semilla</th><th>Hash</th><th>Detalles</th></tr></thead><tbody>''' + "".join(rows) + '''</tbody></table>
+<h1>Pandion · Experiment catalog</h1><p>Existing artifacts, configuration, results and provenance.</p>
+<input id="search" aria-label="Search artifacts" placeholder="Search incident, file, model, hash…">
+<table><thead><tr><th>Type</th><th>File</th><th>Binding</th><th>Inputs</th><th>Actions</th><th>Fleet</th><th>Seed</th><th>Hash</th><th>Details</th></tr></thead><tbody>''' + "".join(rows) + '''</tbody></table>
 <script>document.querySelector('#search').addEventListener('input',e=>{const q=e.target.value.toLowerCase();document.querySelectorAll('tbody tr').forEach(r=>r.hidden=!r.textContent.toLowerCase().includes(q));});</script></html>''')
 
 

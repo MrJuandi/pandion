@@ -8,7 +8,7 @@ import unittest
 
 import numpy as np
 
-from nightjar.imagery_acquire import (
+from pandion.imagery_acquire import (
     SCHEMA_VERSION,
     acquire_imagery,
     best_available_pixel,

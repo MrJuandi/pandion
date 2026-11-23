@@ -41,7 +41,7 @@ Limits: TCI is a display product and not radiometrically calibrated reflectance.
 
 ## Multi-focus, shifting-wind family (D-60)
 
-`python3 -m nightjar.multi_ignition_family --scenarios-dir PARENT --output-dir OUT` derives, for each parent scenario, scenarios with 2–4 separated foci inside the CEMS burned area and synthetic wind that shifts every 900 s. The wind is stored as `weather_mode: "synthetic_intervals"` forcing, validated to be continuous, to cover the horizon and to be known at each interval's start. Parents with measured station intervals keep them. The viewer labels the mode "Viento sintético variable".
+`python3 -m pandion.multi_ignition_family --scenarios-dir PARENT --output-dir OUT` derives, for each parent scenario, scenarios with 2–4 separated foci inside the CEMS burned area and synthetic wind that shifts every 900 s. The wind is stored as `weather_mode: "synthetic_intervals"` forcing, validated to be continuous, to cover the horizon and to be known at each interval's start. Parents with measured station intervals keep them. The viewer labels the mode "Viento sintético variable".
 
 ## Physics and observation separation
 
@@ -72,7 +72,7 @@ Checks run on 2026-10-01:
 
 ```sh
 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 .venv/bin/python -m unittest discover -s tests -v
-NIGHTJAR_PYTHON=.venv/bin/python node tests/viewer_browser.cjs
+PANDION_PYTHON=.venv/bin/python node tests/viewer_browser.cjs
 ```
 
 Python: 216 tests passed, no skips. Browser: scenario/policy boundaries, rectangular 2D/3D, altitude/slope colors, delivered-weather timing, distinct current/completed intervals, synthetic-weather blanks, comparisons, static controls, orbit/playback and 390 px overflow checks passed. The browser command requires resolvable Playwright/Chromium; local verification used bundled Node 24.19.0 and Playwright Chromium 151.0.7922.34, and the same test passed with system Chrome. Actual workspace inspection at 1440 and 390 px reported zero page errors and zero horizontal overflow. Fixtures are deterministic and do not establish statistical policy performance. Missing/nonfinite/misaligned heights, variable gaps/units/quality, duplicate weather rows and premature delivery are rejected by focused tests.

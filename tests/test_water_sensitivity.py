@@ -2,8 +2,8 @@
 
 import unittest
 
-from nightjar import geographic_integrated as gi
-from nightjar import water_sensitivity as ws
+from pandion import geographic_integrated as gi
+from pandion import water_sensitivity as ws
 
 
 class WaterSensitivityTests(unittest.TestCase):

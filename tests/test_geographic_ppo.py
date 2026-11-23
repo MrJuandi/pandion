@@ -8,11 +8,11 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from nightjar.geographic_family import (
+from pandion.geographic_family import (
     build_synthetic_cems_fixture,
     generate_geographic_scenario,
 )
-from nightjar.geographic_ppo import (
+from pandion.geographic_ppo import (
     HAS_TORCH,
     load_geographic_split,
     ppo_update_geographic,
@@ -21,7 +21,7 @@ from nightjar.geographic_ppo import (
     rollout_geographic,
     train_geographic_ppo,
 )
-from nightjar.model import SpatialActorCritic, TACTICAL_ACTION_NAMES
+from pandion.model import SpatialActorCritic, TACTICAL_ACTION_NAMES
 
 if HAS_TORCH:
     import torch
@@ -29,7 +29,7 @@ if HAS_TORCH:
 
 class TestGeographicLoader(unittest.TestCase):
     def _write_development_family(self, root, num_dev=1):
-        from nightjar.geographic_family import build_geographic_family
+        from pandion.geographic_family import build_geographic_family
         family = build_geographic_family(num_dev=num_dev, num_val=1, num_res=2, synthetic=True)
         (root / "manifest.json").write_text(json.dumps(family["manifest"]))
         (root / "development").mkdir()
@@ -62,8 +62,8 @@ class TestGeographicLoader(unittest.TestCase):
 
     def test_source_product_metadata_must_match_registered_stage(self):
         from copy import deepcopy
-        from nightjar.cems_catalog import ACTIVATIONS
-        from nightjar.geographic_family import canonical_hash
+        from pandion.cems_catalog import ACTIVATIONS
+        from pandion.geographic_family import canonical_hash
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             family = self._write_development_family(root)
@@ -102,17 +102,17 @@ class TestGeographicLoader(unittest.TestCase):
                         load_geographic_split("development", root)
 
     def test_smoke_report_identifies_only_its_training_pool(self):
-        from nightjar.geographic_ppo import main
+        from pandion.geographic_ppo import main
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             family = self._write_development_family(root, num_dev=3)
             output = root / "smoke.json"
             with patch("sys.argv", ["geographic_ppo", "--smoke", "--synthetic",
                                     "--scenarios-dir", str(root), "--output", str(output)]), \
-                 patch("nightjar.geographic_ppo._require_torch"), \
-                 patch("nightjar.geographic_ppo.torch"), \
-                 patch("nightjar.geographic_ppo.train_geographic_ppo", return_value=(object(), [0.0])) as train, \
-                 patch("nightjar.geographic_ppo.rollout_geographic", return_value=([], {})):
+                 patch("pandion.geographic_ppo._require_torch"), \
+                 patch("pandion.geographic_ppo.torch"), \
+                 patch("pandion.geographic_ppo.train_geographic_ppo", return_value=(object(), [0.0])) as train, \
+                 patch("pandion.geographic_ppo.rollout_geographic", return_value=([], {})):
                 main()
             expected = [s["scenario_id"] for s in family["scenarios"]["development"][:2]]
             self.assertEqual([s["scenario_id"] for s in train.call_args.args[0]], expected)
@@ -124,7 +124,7 @@ class TestGeographicLoader(unittest.TestCase):
     def test_selection_candidate_seeds_derive_from_cli_seed(self):
         if not HAS_TORCH:
             self.skipTest("PyTorch not installed")
-        from nightjar.geographic_ppo import main
+        from pandion.geographic_ppo import main
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             family = self._write_development_family(root)
@@ -142,9 +142,9 @@ class TestGeographicLoader(unittest.TestCase):
             with patch("sys.argv", [
                 "geographic_ppo", "--select", "--synthetic", "--scenarios-dir", str(root),
                 "--output", str(output), "--candidates", "2", "--seed", "123",
-            ]), patch("nightjar.geographic_ppo.load_geographic_split", side_effect=lambda split, *_args, **_kwargs: loaded[split]), \
-                 patch("nightjar.geographic_ppo.train_geographic_ppo", side_effect=fake_train), \
-                 patch("nightjar.geographic_ppo.evaluate_geographic_policy", return_value=[{"final_burned_ha": 1.0, "drops_count": 0}]):
+            ]), patch("pandion.geographic_ppo.load_geographic_split", side_effect=lambda split, *_args, **_kwargs: loaded[split]), \
+                 patch("pandion.geographic_ppo.train_geographic_ppo", side_effect=fake_train), \
+                 patch("pandion.geographic_ppo.evaluate_geographic_policy", return_value=[{"final_burned_ha": 1.0, "drops_count": 0}]):
                 main()
 
             report = json.loads(output.read_text())
@@ -166,7 +166,7 @@ class TestGeographicLoader(unittest.TestCase):
                 load_geographic_split("development", root)
 
     def test_explicit_synthetic_family_load_and_integrity(self):
-        from nightjar.geographic_family import build_geographic_family
+        from pandion.geographic_family import build_geographic_family
         family = build_geographic_family(num_dev=1, num_val=1, num_res=2, synthetic=True)
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -201,7 +201,7 @@ class TestGeographicLoader(unittest.TestCase):
             damaged = json.loads(json.dumps(original))
             damaged["source_kind"] = "copernicus_cems"
             damaged["provenance"]["source_zip_sha256"] = "f" * 64
-            from nightjar.geographic_family import canonical_hash
+            from pandion.geographic_family import canonical_hash
             damaged["scenario_hash"] = canonical_hash({k: v for k, v in damaged.items() if k != "scenario_hash"})
             manifest = json.loads((root / "manifest.json").read_text())
             entry = manifest["scenarios"]["development"][0]
@@ -231,7 +231,7 @@ class TestGeographicPPO(unittest.TestCase):
         )
 
     def test_load_geographic_split(self):
-        from nightjar.geographic_family import build_geographic_family
+        from pandion.geographic_family import build_geographic_family
         family = build_geographic_family(num_dev=1, num_val=1, num_res=2, synthetic=True)
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -272,7 +272,7 @@ class TestGeographicPPO(unittest.TestCase):
         self.assertTrue(torch.isfinite(torch.tensor(loss)))
 
     def test_reward_reference_sums_to_reference_minus_policy_final_area(self):
-        from nightjar.geographic_integrated import run_geographic_integrated
+        from pandion.geographic_integrated import run_geographic_integrated
         # 40x40 fixture with a 3600 s horizon: the fire spreads, so the reference differs from the policy.
         fixture = build_synthetic_cems_fixture("EMSR578", rows=40, cols=40)
         scenario = generate_geographic_scenario(fixture, index=0, split="development",
@@ -342,7 +342,7 @@ class TestGeographicPPO(unittest.TestCase):
         self.assertTrue(all(torch.isfinite(torch.tensor(l)) for l in losses))
 
     def test_gamma_reaches_returns_in_rollouts_and_reward_scaling(self):
-        import nightjar.geographic_ppo as ppo
+        import pandion.geographic_ppo as ppo
         seen = []
         original = ppo.returns_and_advantages
 
@@ -366,8 +366,8 @@ class TestGeographicPPO(unittest.TestCase):
         self.assertEqual(inspect.signature(train_geographic_ppo).parameters["gamma"].default, 1.0)
 
     def test_with_fleet_rehashes_copies(self):
-        from nightjar.geographic_ppo import with_fleet
-        from nightjar.geographic_family import canonical_hash
+        from pandion.geographic_ppo import with_fleet
+        from pandion.geographic_family import canonical_hash
         self.assertIs(with_fleet([self.scenario], 1)[0], self.scenario)
         two = with_fleet([self.scenario], 2)[0]
         self.assertEqual(two["aircraft"]["fleet_size"], 2)
@@ -414,8 +414,8 @@ class TestGeographicPPO(unittest.TestCase):
             self.assertAlmostEqual(metrics["final_burned_ha"], best, places=4)
 
     def test_batched_training_combines_augmentation_slots_and_best_selection(self):
-        from nightjar.geographic_ppo import with_fleet
-        from nightjar.geographic_rollouts import rollout_geographic_batch
+        from pandion.geographic_ppo import with_fleet
+        from pandion.geographic_rollouts import rollout_geographic_batch
         real = rollout_geographic_batch
         calls = []
 
@@ -430,7 +430,7 @@ class TestGeographicPPO(unittest.TestCase):
                 calls.clear()
                 history = []
                 checkpoint = Path(tmp) / "model.pt"
-                with patch("nightjar.geographic_rollouts.rollout_geographic_batch", side_effect=collect):
+                with patch("pandion.geographic_rollouts.rollout_geographic_batch", side_effect=collect):
                     model, losses = train_geographic_ppo(
                         scenarios, updates=2, episodes_per_update=2,
                         input_mode="cells", action_mode="parametric", slot_features=True,
@@ -451,7 +451,7 @@ class TestGeographicPPO(unittest.TestCase):
                     torch.testing.assert_close(value, saved[key], rtol=0, atol=0)
 
     def test_holdout_evaluation_reports_policy_and_baselines(self):
-        from nightjar.geographic_ppo import holdout_evaluation
+        from pandion.geographic_ppo import holdout_evaluation
         torch.manual_seed(0)
         model = SpatialActorCritic(grid_rows=15, grid_cols=15, action_dim=len(TACTICAL_ACTION_NAMES), recurrent=True)
         report = holdout_evaluation(model, [self.scenario])
@@ -470,7 +470,7 @@ class TestGeographicPPO(unittest.TestCase):
         def spy(*args, **kwargs):
             seen.append(kwargs["entropy_coef"])
             return real(*args, **kwargs)
-        with patch("nightjar.geographic_ppo.ppo_update_geographic", side_effect=spy):
+        with patch("pandion.geographic_ppo.ppo_update_geographic", side_effect=spy):
             train_geographic_ppo([self.scenario], updates=3, episodes_per_update=1,
                                  entropy_coef=0.05, entropy_coef_final=0.01)
         self.assertEqual([round(x, 6) for x in seen], [0.05, 0.03, 0.01])
@@ -524,8 +524,8 @@ class TestGeographicPPO(unittest.TestCase):
                 self.assertTrue(torch.equal(expected, resumed.state_dict()[name]), name)
 
     def test_smoke_cli_trains_saves_and_reloads_reproducibly(self):
-        from nightjar.geographic_family import build_synthetic_cems_fixture
-        from nightjar.geographic_ppo import main
+        from pandion.geographic_family import build_synthetic_cems_fixture
+        from pandion.geographic_ppo import main
 
         fixture = build_synthetic_cems_fixture("EMSR578", rows=25, cols=25)
         scenarios = [
@@ -549,7 +549,7 @@ class TestGeographicPPO(unittest.TestCase):
                     "geographic_ppo", "--smoke", "--synthetic",
                     "--scenarios-dir", str(root), "--output", str(output),
                     "--checkpoint", str(checkpoint), "--seed", "137",
-                ]), patch("nightjar.geographic_ppo.load_geographic_split", return_value=scenarios) as loader:
+                ]), patch("pandion.geographic_ppo.load_geographic_split", return_value=scenarios) as loader:
                     main()
                 loader.assert_called_once_with("development", root, synthetic=True)
                 report = json.loads(output.read_text())
@@ -583,8 +583,8 @@ class TestGeographicPPO(unittest.TestCase):
 
 
     def test_select_cli_chooses_weights_on_selection_incidents(self):
-        from nightjar.geographic_family import build_synthetic_cems_fixture
-        from nightjar.geographic_ppo import main
+        from pandion.geographic_family import build_synthetic_cems_fixture
+        from pandion.geographic_ppo import main
 
         fixture = build_synthetic_cems_fixture("EMSR578", rows=25, cols=25)
         scenarios = []
@@ -600,7 +600,7 @@ class TestGeographicPPO(unittest.TestCase):
                 "geographic_ppo", "--select", "--synthetic", "--candidates", "1", "--updates", "1",
                 "--scenarios-dir", str(root), "--output", str(output), "--seed", "7",
                 "--selection-activations", "EMSR583", "--holdout-activation", "EMSR625_AOI01",
-            ]), patch("nightjar.geographic_ppo.load_geographic_split", return_value=scenarios) as loader:
+            ]), patch("pandion.geographic_ppo.load_geographic_split", return_value=scenarios) as loader:
                 main()
             # The validation split is never loaded: selection uses the named development incident.
             loader.assert_called_once_with("development", root, synthetic=True)

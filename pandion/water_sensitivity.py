@@ -2,7 +2,7 @@
 
 Runs the no-intervention, heuristic and containment policies on a seeded sample
 of geographic scenarios while the drop hold limits and the evaporation delay of
-``nightjar.geographic_integrated`` are varied. It measures how much the
+``pandion.geographic_integrated`` are varied. It measures how much the
 heuristic's benefit depends on those parameters; it does not validate them.
 No training is involved and nothing is read from validation or reserved splits
 unless the caller points ``--scenarios-dir`` at them.

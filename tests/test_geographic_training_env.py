@@ -3,15 +3,15 @@
 from copy import deepcopy
 import unittest
 
-from nightjar.geographic_family import (
+from pandion.geographic_family import (
     build_synthetic_cems_fixture,
     generate_geographic_scenario,
 )
-from nightjar.geographic_integrated import geographic_episode, run_geographic_integrated
-from nightjar.geographic_training_env import GeographicTrainingEnv, valid_geographic_actions
-from nightjar.model import ActionMapper
-from nightjar.parametric_actions import ParametricActionMapper
-from nightjar.policies import choose_order
+from pandion.geographic_integrated import geographic_episode, run_geographic_integrated
+from pandion.geographic_training_env import GeographicTrainingEnv, valid_geographic_actions
+from pandion.model import ActionMapper
+from pandion.parametric_actions import ParametricActionMapper
+from pandion.policies import choose_order
 
 
 class TestGeographicTrainingEnv(unittest.TestCase):
@@ -163,7 +163,7 @@ class TestGeographicTrainingEnv(unittest.TestCase):
         self.assertAlmostEqual(sum(rewards), -(env.replay["affected_area_ha"] - initial), delta=1e-6)
 
     def test_invalid_reward_reference_raises_value_error(self):
-        from nightjar.geographic_training_env import reference_area_curve
+        from pandion.geographic_training_env import reference_area_curve
         with self.assertRaises(ValueError):
             GeographicTrainingEnv(self.scenario, reward_reference="random_valid")
         with self.assertRaises(ValueError):
