@@ -66,7 +66,7 @@ These are research gates, not claims that any stage is complete. The detailed pl
 - [REFERENCES.md](docs/REFERENCES.md) — related research and official data sources.
 - [PUBLICATION_CHECKLIST.md](docs/PUBLICATION_CHECKLIST.md) — checks before creating and publishing the GitHub repository.
 - [MAINTENANCE.md](docs/MAINTENANCE.md) — documentation ownership and change review rules.
-- [site/](site/index.html) — static project page. Serve the repository root with `python3 -m http.server` and open `/site/`. Its replay is copied, not recomputed, from a built workspace by `python3 site/extract_episode.py <workspace>/index.html`, which writes `site/data/`.
+- [site/](site/index.html) — static project page. Serve the repository root with `python3 -m http.server` and open `/site/`. Its replay is copied, not recomputed, from a built workspace by `python3 site/extract_episode.py <workspace>/index.html`, which writes `site/data/` and `site/viewer.html`, the offline 3D viewer for the same scenario that the page links to.
 
 ## Development and use
 

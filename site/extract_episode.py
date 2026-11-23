@@ -3,9 +3,10 @@
 Usage: python3 site/extract_episode.py runs/workspace-vine-d85-20261120/index.html
 
 Writes site/data/episode.js (replays of one scenario under three controllers plus a
-per-scenario summary of the whole workspace) and site/data/basemap.png (the pre-fire
-Sentinel-2 display image already embedded in the viewer). Values are copied, not
-recomputed, so the page shows exactly what the simulator recorded.
+per-scenario summary of the whole workspace), site/data/basemap.png (the pre-fire
+Sentinel-2 display image already embedded in the viewer) and site/viewer.html (the
+offline 3D viewer with every controller recorded for that scenario). Values are copied,
+not recomputed, so the pages show exactly what the simulator recorded.
 """
 from __future__ import annotations
 
@@ -15,6 +16,9 @@ import json
 import re
 import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from pandion.viewer import build_viewer_html  # noqa: E402
 
 SCENARIO = "geographic-dev-emsr837_aoi07-06-mf00"
 POLICIES = {"PPO geográfico": "learned", "Geographic PPO": "learned", "heuristic": "heuristic", "no_intervention": "none"}
@@ -61,6 +65,10 @@ def main(viewer: Path) -> None:
     (OUT / "episode.js").write_text(f"window.PANDION_EPISODE={payload};\n", encoding="utf-8")
     png = image["png_data_uri"].split(",", 1)[1]
     (OUT / "basemap.png").write_bytes(base64.b64decode(png))
+    scenario_runs = [r for r in replays if r["scenario_id"] == SCENARIO]
+    page = build_viewer_html(scenario_runs, title=f"{base['metadata']['name']} · Pandion viewer",
+                             imagery={base["display_imagery_id"]: image})
+    OUT.parent.joinpath("viewer.html").write_text(page, encoding="utf-8")
 
 
 if __name__ == "__main__":
