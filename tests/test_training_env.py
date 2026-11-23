@@ -3,8 +3,8 @@ import json
 from pathlib import Path
 import unittest
 
-from nightjar.training_env import IntegratedTrainingEnv
-from nightjar.integrated import run_integrated
+from pandion.training_env import IntegratedTrainingEnv
+from pandion.integrated import run_integrated
 
 
 SCENARIO = Path(__file__).resolve().parents[1] / "examples" / "synthetic_integrated.json"

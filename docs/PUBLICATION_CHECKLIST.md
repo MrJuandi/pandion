@@ -4,7 +4,7 @@ The owner will decide when to publish the repository after reviewing it. Git his
 
 ## Ownership and rights
 
-- [x] Confirm project name: Nightjar.
+- [x] Confirm project name: Pandion.
 - [ ] Confirm owner identity.
 - [ ] Choose a software license; include the actual `LICENSE` file.
 - [ ] Confirm rights for any code or assets reused from the old prototype.

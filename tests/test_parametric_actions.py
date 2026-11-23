@@ -4,8 +4,8 @@ import unittest
 
 import numpy as np
 
-from nightjar.model import HAS_TORCH, ActionMapper
-from nightjar.parametric_actions import (
+from pandion.model import HAS_TORCH, ActionMapper
+from pandion.parametric_actions import (
     ASPECTS,
     MAX_SLOTS,
     NUM_ACTIONS,
@@ -15,7 +15,7 @@ from nightjar.parametric_actions import (
     num_actions,
     slot_masks,
 )
-from nightjar.policies import candidate_cells
+from pandion.policies import candidate_cells
 
 
 def observation(burning, burned=(), rows=12, cols=12, wind=(2.0, 0.0), water=6137, phase="idle", pos=(0.0, 0.0)):
@@ -154,7 +154,7 @@ class ParametricActionTests(unittest.TestCase):
         import sys, os
         sys.path.insert(0, os.path.dirname(__file__))
         from test_geographic_integrated import growing_fire_scenario
-        from nightjar.geographic_training_env import GeographicTrainingEnv
+        from pandion.geographic_training_env import GeographicTrainingEnv
         env = GeographicTrainingEnv(growing_fire_scenario(), action_mode="parametric", drop_distances=(0, 1, 2))
         obs = env.reset()
         mapper = env.action_mapper()
@@ -173,7 +173,7 @@ class ParametricActionTests(unittest.TestCase):
     @unittest.skipUnless(HAS_TORCH, "PyTorch not installed")
     def test_head_outputs_one_logit_per_aspect_and_distance(self):
         import torch
-        from nightjar.image_model import ImageActorCritic
+        from pandion.image_model import ImageActorCritic
         model = ImageActorCritic(cell_channels=2 + MAX_SLOTS, vector_dim=3, px_per_cell=1, grid_rows=6,
                                  grid_cols=6, action_mode="parametric", use_image=False, recurrent=False,
                                  width=8, hidden_dim=16, drop_distances=(0, 1, 2))
@@ -184,7 +184,7 @@ class ParametricActionTests(unittest.TestCase):
     @unittest.skipUnless(HAS_TORCH, "PyTorch not installed")
     def test_slot_logits_follow_slot_masks(self):
         import torch
-        from nightjar.image_model import ImageActorCritic
+        from pandion.image_model import ImageActorCritic
         torch.manual_seed(0)
         model = ImageActorCritic(cell_channels=2 + MAX_SLOTS, vector_dim=3, px_per_cell=1, grid_rows=6,
                                  grid_cols=6, action_mode="parametric", use_image=False, recurrent=False,
@@ -202,7 +202,7 @@ class ParametricActionTests(unittest.TestCase):
     @unittest.skipUnless(HAS_TORCH, "PyTorch not installed")
     def test_slot_raw_features_see_slot_averages(self):
         import torch
-        from nightjar.image_model import ImageActorCritic
+        from pandion.image_model import ImageActorCritic
         torch.manual_seed(0)
         model = ImageActorCritic(cell_channels=2 + MAX_SLOTS, vector_dim=3, px_per_cell=1, grid_rows=6,
                                  grid_cols=6, action_mode="parametric", use_image=False, recurrent=False,

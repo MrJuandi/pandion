@@ -1,8 +1,8 @@
 # Candidate independent observations: EMSR578 AOI01
 
-**Status:** source audit, 2026-09-27. This is **not** a validation result for the Nightjar fire model.
+**Status:** source audit, 2026-09-27. This is **not** a validation result for the Pandion fire model.
 
-[Copernicus Emergency Management Service activation EMSR578](https://mapping.emergency.copernicus.eu/activations/EMSR578/) covers the June 2022 Artesa de Segre wildfire in Catalonia. Its AOI01 delineation products include cumulative, photo-interpreted burned-area polygons. The acquisition times below come from each product's map PDF; areas come from the `observedEventA` GeoJSON inside its vector package. Download URLs and SHA-256 digests are encoded in `nightjar/emsr578.py` and reproduced by the audit report.
+[Copernicus Emergency Management Service activation EMSR578](https://mapping.emergency.copernicus.eu/activations/EMSR578/) covers the June 2022 Artesa de Segre wildfire in Catalonia. Its AOI01 delineation products include cumulative, photo-interpreted burned-area polygons. The acquisition times below come from each product's map PDF; areas come from the `observedEventA` GeoJSON inside its vector package. Download URLs and SHA-256 digests are encoded in `pandion/emsr578.py` and reproduced by the audit report.
 
 | Product | Post-event image acquired (UTC) | Reported cumulative area (ha) | Change from previous (ha) |
 |---|---|---:|---:|
@@ -14,8 +14,8 @@ Reproduce the **source audit** from the repository root:
 
 ```sh
 mkdir -p runs
-python3 -m nightjar.emsr578 fetch
-python3 -m nightjar.emsr578 report --output runs/emsr578-aoi01.json
+python3 -m pandion.emsr578 fetch
+python3 -m pandion.emsr578 report --output runs/emsr578-aoi01.json
 ```
 
 The script downloads three public versioned ZIP packages to the Git-ignored `data/raw/emsr578/` directory, verifies their reviewed SHA-256 digests, checks the polygon layer and reported area, and writes the dates and source links. If a provider replaces a package, the hash check fails so that its version must be reviewed deliberately. The map PDFs were inspected separately for image acquisition times; **delivery time is not used as observation time**.
@@ -24,7 +24,7 @@ The [CEMS On-Demand Mapping terms](https://mapping.emergency.copernicus.eu/terms
 
 ## Why these observations do not pass the physical-validation gate
 
-- The mapped burn is in woods and bushes according to the activation description; there is no justified crosswalk from those fuels to Nightjar's FM1 short-grass model.
+- The mapped burn is in woods and bushes according to the activation description; there is no justified crosswalk from those fuels to Pandion's FM1 short-grass model.
 - Burned-area boundaries are cumulative snapshots from satellite imagery, not a continuously observed active front. The image acquisition intervals are about a day and the polygons have mapping uncertainty.
 - Suppression actions, ignitions or spotting, and weather history during those intervals are not represented in the current unmitigated, constant-wind model.
 - The first mapped polygon already exceeds 1,500 ha. A validation run would need to start from that perimeter, not a single ignition cell, and use time-aligned fuel, terrain, moisture, and midflame wind inputs.
@@ -34,7 +34,7 @@ Before any model-versus-observation score is reported, build a provenance-preser
 
 ## Geographic pilot pipeline and fuel crosswalk (Stage 0 Increment)
 
-Under Decision **D-32**, `nightjar.pilot_emsr578` implements the first real geographic input and evaluation pipeline over the EMSR578 AOI01 vector package:
+Under Decision **D-32**, `pandion.pilot_emsr578` implements the first real geographic input and evaluation pipeline over the EMSR578 AOI01 vector package:
 
 1. **Geodesy and Projection:**
    Copernicus source coordinates are in WGS84 geographic degrees (`EPSG:4326`). The pipeline converts them to **ETRS89 / UTM Zone 31N** (`EPSG:25831`, central meridian $3^\circ\text{ E}$, scale factor $0.9996$, false easting $500,000\text{ m}$) using exact sub-millimeter transverse Mercator series. The bounding box spans $X \in [326,636.4, 342,209.4]\text{ m}$ and $Y \in [4,636,071.6, 4,651,196.9]\text{ m}$ ($15.57\text{ km} \times 15.13\text{ km}$).
@@ -77,18 +77,18 @@ From the repository root:
 
 ```sh
 # 1. Export the complete fuel crosswalk
-python3 -m nightjar.pilot_emsr578 crosswalk --format markdown
+python3 -m pandion.pilot_emsr578 crosswalk --format markdown
 
 # 2. Build the full georeferenced scenario manifest in EPSG:25831
-python3 -m nightjar.pilot_emsr578 manifest --output runs/emsr578-pilot-scenario.json
+python3 -m pandion.pilot_emsr578 manifest --output runs/emsr578-pilot-scenario.json
 
 # 3. Compute spatial overlap metrics between satellite observations
-python3 -m nightjar.pilot_emsr578 compare-perimeters --scenario runs/emsr578-pilot-scenario.json --comparison-zip data/raw/emsr578/monit01.zip
+python3 -m pandion.pilot_emsr578 compare-perimeters --scenario runs/emsr578-pilot-scenario.json --comparison-zip data/raw/emsr578/monit01.zip
 ```
 
 ## Exploratory spread simulation and spatial comparison (Decision D-33)
 
-Under Decision **D-33**, `nightjar.pilot_simulation` couples the Rothermel surface-fire formulation via Pyretechnics and Scott & Burgan 40 models to the geographic pilot scenario, simulating shortest-arrival propagation from the initial perimeter ($t_0$) across the 23,712 ha landscape.
+Under Decision **D-33**, `pandion.pilot_simulation` couples the Rothermel surface-fire formulation via Pyretechnics and Scott & Burgan 40 models to the geographic pilot scenario, simulating shortest-arrival propagation from the initial perimeter ($t_0$) across the 23,712 ha landscape.
 
 ### Environmental Configuration
 - **Fuel moisture fractions:** Exploratory fixed fractions. No independently sourced incident measurements or drought-percentile calculation establishes these values:
@@ -126,13 +126,13 @@ Computation time is machine-dependent and is stored per run; it is not a validat
 
 ```sh
 # Run the historical one-hour exploratory diagnostic (not matching MONIT01 time)
-python3 -m nightjar.pilot_simulation run \
+python3 -m pandion.pilot_simulation run \
   --scenario runs/emsr578-pilot-scenario.json \
   --horizon-s 3600 \
   --output runs/emsr578-simulation-t1.json
 
 # Report overlap and the elapsed-time mismatch against Copernicus MONIT01
-python3 -m nightjar.pilot_simulation evaluate \
+python3 -m pandion.pilot_simulation evaluate \
   --simulation runs/emsr578-simulation-t1.json \
   --comparison-zip data/raw/emsr578/monit01.zip \
   --scenario runs/emsr578-pilot-scenario.json \

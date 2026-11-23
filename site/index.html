@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>pandion</title>
+  <meta name="description" content="Pandion learns where to send firefighting aircraft, on real terrain, and tests every decision against rules written by people.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 28'%3E%3Crect width='40' height='28' rx='5' fill='%230a0e13'/%3E%3Cpath d='M5 15 Q10 7 16 11 L20 17 L24 11 Q30 7 35 15' fill='none' stroke='%23e9ece6' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='M7 22 H17 M23 22 H33' stroke='%234cc3e0' stroke-width='2.6' stroke-linecap='round'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="landing.css">
+</head>
+<body>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="mark" viewBox="0 0 40 28"><path d="M3 15 Q9 5 15.5 9.5 L20 16 L24.5 9.5 Q31 5 37 15" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 23 H17 M23 23 H36" stroke="#4cc3e0" stroke-width="2.2" stroke-linecap="round"/></symbol>
+  </svg>
+
+  <header class="bar">
+    <a class="brand" href="#top" aria-label="pandion"><svg class="brand-mark" aria-hidden="true"><use href="#mark"/></svg><span>pandion</span></a>
+    <a class="bar-link" href="https://github.com/MrJuandi/pandion">GitHub</a>
+  </header>
+
+  <main id="top">
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="hero-scene" aria-hidden="true">
+        <div class="hero-plane"><canvas id="hero-map"></canvas></div>
+      </div>
+      <div class="hero-shade" aria-hidden="true"></div>
+
+      <div class="hero-copy">
+        <h1 id="hero-title">Where should<br>the next drop go?</h1>
+        <p class="lede">Pandion learns where to send firefighting aircraft, on real terrain, and tests every decision against rules written by people.</p>
+        <div class="cta">
+          <a class="btn btn-water" href="#compare">Watch the same fire three ways</a>
+          <a class="btn btn-ghost" href="https://github.com/MrJuandi/pandion">Read the code</a>
+        </div>
+      </div>
+
+      <div class="hero-telemetry" aria-hidden="true">
+        <span>Plasencia, Spain</span>
+        <span class="mono"><b id="h-time">00:00</b> elapsed</span>
+        <span class="mono"><b id="h-area">0</b> ha burned</span>
+        <span class="mono"><i class="dot"></i>learned policy · recorded replay</span>
+      </div>
+    </section>
+
+    <section class="compare" id="compare" aria-labelledby="compare-title">
+      <header class="compare-head">
+        <h2 id="compare-title">Same fire. Same clock.<br><span>Three decisions.</span></h2>
+        <p>Two water bombers, one hour, a fire the policy never trained on. Only the controller changes.</p>
+      </header>
+
+      <div class="panels">
+        <figure class="panel panel-learned">
+          <canvas data-run="learned" role="img" aria-label="Fire under the learned policy"></canvas>
+          <figcaption><span class="who">Learned policy</span><span class="live"><b data-live="learned">0</b> ha</span></figcaption>
+        </figure>
+        <figure class="panel">
+          <canvas data-run="heuristic" role="img" aria-label="Fire under the downwind rule"></canvas>
+          <figcaption><span class="who">Downwind rule</span><span class="live"><b data-live="heuristic">0</b> ha</span></figcaption>
+        </figure>
+        <figure class="panel panel-none">
+          <canvas data-run="none" role="img" aria-label="Fire with no aircraft"></canvas>
+          <figcaption><span class="who">No aircraft</span><span class="live"><b data-live="none">0</b> ha</span></figcaption>
+        </figure>
+      </div>
+
+      <div class="transport">
+        <button class="play" id="play" aria-label="Pause replay"><svg viewBox="0 0 16 16" aria-hidden="true"><path class="i-pause" d="M4 3h3v10H4zM9 3h3v10H9z"/><path class="i-play" d="M4 2.5v11l9-5.5z"/></svg></button>
+        <div class="scrub">
+          <canvas id="curves" aria-hidden="true"></canvas>
+          <input type="range" id="scrub" min="0" max="3600" step="1" value="0" aria-label="Replay time">
+        </div>
+        <span class="clock mono" id="clock">00:00</span>
+      </div>
+    </section>
+
+    <section class="claim" aria-labelledby="claim-title">
+      <h2 id="claim-title">Trained on 42 Spanish wildfires.<br><span>Tested on one it never saw.</span></h2>
+      <dl class="figures">
+        <div><dd>1,344</dd><dt>scenarios built from Copernicus EMS fire maps</dt></div>
+        <div><dd>288</dd><dt>held-out scenarios from the unseen fire</dt></div>
+        <div class="win"><dd>−3.1 ha</dd><dt>burned on average, against the downwind rule</dt></div>
+      </dl>
+    </section>
+
+    <section class="outro" aria-labelledby="outro-title">
+      <h2 id="outro-title" class="wordmark"><svg aria-hidden="true"><use href="#mark"/></svg>pandion</h2>
+      <div class="outro-row">
+        <p>Open research on aerial wildfire response. A simulator, not an operational tool.</p>
+        <a class="btn btn-water" href="https://github.com/MrJuandi/pandion">GitHub</a>
+      </div>
+      <p class="credits">Contains modified Copernicus Sentinel data 2025 and Copernicus EMS products. Elevation © IGN/CNIG. Fuel from CORINE Land Cover 2018. Wind and ignitions are synthetic.</p>
+    </section>
+  </main>
+
+  <script src="data/episode.js"></script>
+  <script src="landing.js"></script>
+</body>
+</html>

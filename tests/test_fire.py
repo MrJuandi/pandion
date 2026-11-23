@@ -3,7 +3,7 @@ import json
 import unittest
 from pathlib import Path
 
-from nightjar.fire import run_fire
+from pandion.fire import run_fire
 
 
 EXAMPLE = Path(__file__).resolve().parents[1] / "examples" / "synthetic_fire.json"

@@ -7,7 +7,7 @@ from contextlib import redirect_stderr
 from io import StringIO
 
 
-from nightjar.geographic_family import (
+from pandion.geographic_family import (
     FAMILY_SCHEMA_VERSION,
     build_geographic_family,
     build_synthetic_cems_fixture,
@@ -84,7 +84,7 @@ class TestGeographicFamily(unittest.TestCase):
     def test_family_parent_hash_matches_unmodified_source_base(self):
         from contextlib import ExitStack
         from unittest.mock import patch
-        from nightjar.cems_catalog import ACTIVATIONS
+        from pandion.cems_catalog import ACTIVATIONS
 
         bases = {}
         expected_hashes = {}
@@ -157,7 +157,7 @@ class TestGeographicFamily(unittest.TestCase):
             build_geographic_family({"EMSR578": base}, synthetic=True)
 
     def test_real_bases_reject_conflicting_explicit_source_kind(self):
-        from nightjar.cems_catalog import ACTIVATIONS
+        from pandion.cems_catalog import ACTIVATIONS
         bases = {
             activation_id: build_synthetic_cems_fixture(
                 activation_id, 31 if activation_id == "EMSR578" else 30
@@ -215,7 +215,7 @@ class TestGeographicFamily(unittest.TestCase):
             build_geographic_family(bases, num_dev=0)
 
     def test_cli_requires_local_products_and_explicit_synthetic(self):
-        from nightjar.geographic_family import main
+        from pandion.geographic_family import main
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             stderr = StringIO()
@@ -234,7 +234,7 @@ class TestGeographicFamily(unittest.TestCase):
             self.assertFalse((root / "out").exists())
 
     def test_cli_explicit_synthetic_output_and_nonempty_guard(self):
-        from nightjar.geographic_family import main
+        from pandion.geographic_family import main
         import sys
         with tempfile.TemporaryDirectory() as temp:
             output = Path(temp) / "family"

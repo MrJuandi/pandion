@@ -72,7 +72,7 @@ def fm1_directional_rate(moisture_fraction: float, wind_to_m_s: tuple[float, flo
     """Rate in a ray direction from an ignition point, using Andrews sec. 6.
 
     The 2-D grid applies this local elliptical-ignition rate to edges. That
-    coupling is a Nightjar numerical approximation, not part of Rothermel's
+    coupling is a Pandion numerical approximation, not part of Rothermel's
     original one-dimensional equation.
     """
     wind_speed = hypot(*wind_to_m_s)

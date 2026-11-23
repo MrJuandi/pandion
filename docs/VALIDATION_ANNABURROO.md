@@ -4,13 +4,13 @@
 
 ## Source and reproduction
 
-The [CSIRO Annaburroo collection](https://data.csiro.au/collection/csiro:58746), collection version 1, file ID `64873323`, contains the [1986 experimental grassland fire data described by Gould et al. (2024)](https://connectsci.au/wf/article/33/5/WF23100/22126/The-1986-Annaburroo-experimental-grassland-fires). The collection's downloadable archive is 593,231,549 bytes and marked CC BY 4.0. `nightjar.annaburroo` retrieves only the two CSV members by HTTP byte range; it requires `curl`. Raw tables and generated reports remain in ignored `data/raw/` and `runs/`.
+The [CSIRO Annaburroo collection](https://data.csiro.au/collection/csiro:58746), collection version 1, file ID `64873323`, contains the [1986 experimental grassland fire data described by Gould et al. (2024)](https://connectsci.au/wf/article/33/5/WF23100/22126/The-1986-Annaburroo-experimental-grassland-fires). The collection's downloadable archive is 593,231,549 bytes and marked CC BY 4.0. `pandion.annaburroo` retrieves only the two CSV members by HTTP byte range; it requires `curl`. Raw tables and generated reports remain in ignored `data/raw/` and `runs/`.
 
 The [B111 source assessment](ANNABURROO_B111_ASSESSMENT.md), dated 2026-09-30, additionally inspects timed photographs, progression/fuel maps, wind samples, and original publications. It identifies a development candidate, not an implemented spatial comparison or a confirmed intervention-free observation window. The original 1993 publication explicitly records suppression within the experimental area; the experiment's description as free-burning must not be interpreted as absence of all human intervention.
 
 ```sh
-python3 -m nightjar.annaburroo --output runs/annaburroo-source.json
-python3 -m nightjar.annaburroo_compare --output runs/annaburroo-fm1-diagnostic.json
+python3 -m pandion.annaburroo --output runs/annaburroo-source.json
+python3 -m pandion.annaburroo_compare --output runs/annaburroo-fm1-diagnostic.json
 ```
 
 The audited `Plot_Average_Data.csv` is 8,669 bytes, SHA-256 `4425d11fe970e263d400b7a9d089b8eea70bda4de4a1e29cbeedea28bc727934`; `Burn_Period_Data.csv` is 84,062 bytes, SHA-256 `bdd5bc1354b7b9e72e17616aa733b5bc869fa3b86686ea102dcb73846761ca0d`. The retrieval checks archive size and response byte ranges, and the comparison refuses a changed plot-table checksum. Archive membership, file identity, and license should be rechecked if CSIRO revises the collection.

@@ -9,7 +9,7 @@ try:
 except ImportError:
     HAS_TORCH = False
 
-from nightjar.ppo import _baseline_metrics, _selection_key, returns_and_advantages, train_select, train_smoke
+from pandion.ppo import _baseline_metrics, _selection_key, returns_and_advantages, train_select, train_smoke
 
 
 @unittest.skipUnless(HAS_TORCH, "PyTorch is optional")
@@ -63,7 +63,7 @@ class PPOTests(unittest.TestCase):
             return {"scenario_id": scenario["scenario_id"], "affected_area_ha": 1.0,
                     "aircraft_metrics": {"rejected_orders": 0}}
 
-        with patch("nightjar.ppo.run_integrated", side_effect=replay):
+        with patch("pandion.ppo.run_integrated", side_effect=replay):
             result = _baseline_metrics(scenarios)
         self.assertEqual(calls, [("validation-00", "heuristic"),
                                  ("validation-00", "containment_heuristic"),
@@ -80,8 +80,8 @@ class PPOTests(unittest.TestCase):
             return [{"scenario_id": s["scenario_id"], "affected_area_ha": 1.0,
                      "rejected_orders": 0} for s in scenarios]
 
-        with patch("nightjar.ppo._train_candidate", return_value=(None, [])), \
-                patch("nightjar.ppo.evaluate", side_effect=record_evaluate):
+        with patch("pandion.ppo._train_candidate", return_value=(None, [])), \
+                patch("pandion.ppo.evaluate", side_effect=record_evaluate):
             result = train_select(candidates=1)
         self.assertTrue(all("reserved" not in scenario_id for scenario_id in evaluated))
         self.assertEqual(result["reserved_split"], "not_evaluated")

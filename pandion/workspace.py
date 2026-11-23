@@ -59,13 +59,13 @@ def decorate(replay: dict, scenario: dict, terrain: dict | None = None, training
         "source": p.get("source", ""), "assumptions": p.get("assumptions", {}),
         "scenario_hash": replay.get("scenario_hash", scenario["scenario_hash"]), "acquired_at_utc": p.get("image_acquired_at_utc"),
         "wind_to_m_s": scenario["fire"].get("wind_to_m_s"),
-        "terrain": {"label": "Terreno plano · sin DEM en la simulación", "source": "", "display_only": False},
+        "terrain": {"label": "Flat terrain · no DEM in the simulation", "source": "", "display_only": False},
     }
     environment = scenario.get("environment")
     if environment:
         out["environment"] = deepcopy(environment)
         out["metadata"]["terrain"] = {
-            "label": "Relieve real · cartografía sin episodio" if replay.get("horizon_s") == 0 else "Relieve real · usado en propagación y observaciones del PPO",
+            "label": "Real terrain · mapping with no episode" if replay.get("horizon_s") == 0 else "Real terrain · used in propagation and PPO observations",
             "source": environment.get("terrain", {}).get("source", {}), "display_only": False,
         }
     if terrain is not None and not environment:
@@ -73,7 +73,7 @@ def decorate(replay: dict, scenario: dict, terrain: dict | None = None, training
         if cropped is not None:
             out["display_elevation_m"] = cropped
             out["metadata"]["terrain"] = {
-                "label": "Relieve IGN/CNIG · capa visual; simulación y PPO sobre terreno plano",
+                "label": "IGN/CNIG terrain · visual layer; simulation and PPO on flat terrain",
                 "source": terrain["source"], "display_only": True,
                 "coverage": terrain["coverage"], "scenario_sha256": terrain["scenario_sha256"],
                 "alignment_tolerance_m": 0.1,
@@ -87,7 +87,7 @@ def static_map(scenario: dict) -> dict:
     fire, grid = scenario["fire"], scenario["grid"]
     return {
         "schema_version": "nightjar-static-map-0.1", "scenario_id": scenario["scenario_id"],
-        "policy": "Cartografía · sin episodio", "horizon_s": 0,
+        "policy": "Mapping · no episode", "horizon_s": 0,
         "affected_area_ha": None, "grid": grid, "crs": scenario["crs"],
         "units": {"time": "s", "coordinates": "m", "elevation": "m", "area": "ha"},
         "origin_utm": [grid["origin_utm_easting_m"], grid["origin_utm_northing_m"]],
@@ -104,18 +104,18 @@ def pilot_map(pilot: dict, terrain: dict) -> dict:
     origin = terrain["grid"]["lower_left_origin_m"]
     return {
         "schema_version": "nightjar-static-map-0.1", "scenario_id": "emsr578-paisaje-completo",
-        "policy": "Cartografía · sin episodio", "horizon_s": 0, "affected_area_ha": None,
+        "policy": "Mapping · no episode", "horizon_s": 0, "affected_area_ha": None,
         "seed": None, "grid": pilot["grid"], "crs": pilot["spatial_reference"]["crs"],
         "origin_m": [origin["x"], origin["y"]], "elevation_m": terrain["elevation_m"],
         "fuel_grid": pilot["fuel_model"], "water_mask": pilot["water_mask"],
         "arrival_time_s": [[0 if v else None for v in row] for row in pilot["initial_burn_mask"]],
         "decisions": [], "drops": [], "aircraft_metrics": {},
-        "metadata": {"name": "Artesa de Segre · paisaje completo", "source": pilot["source"],
+        "metadata": {"name": "Artesa de Segre · full landscape", "source": pilot["source"],
                      "source_kind": "copernicus_cems", "split": "development", "seed": None,
                      "scenario_hash": terrain["scenario_sha256"],
                      "acquired_at_utc": pilot["observation_timestamps"]["t0_initial_utc"],
                      "assumptions": {"fuel_crosswalk": "inferred", "episode": "none; initial observed burned footprint only"},
-                     "terrain": {"label": "Relieve IGN/CNIG · cartografía histórica, sin episodio",
+                     "terrain": {"label": "IGN/CNIG terrain · historical mapping, no episode",
                                  "source": terrain["source"], "coverage": terrain["coverage"], "display_only": False}},
     }
 
@@ -127,14 +127,14 @@ def load_policy(checkpoint: Path, report_path: Path, scenarios: list[dict], **op
 
 def policy_replay(model, scenario: dict) -> dict:
     from .geographic_ppo import rollout_geographic, with_fleet
-    config = getattr(model, "_nightjar_inference", {})
+    config = getattr(model, "_pandion_inference", {})
     scenario = with_fleet([scenario], config.get("fleet_size", 1))[0]
     replays = []
     rollout_geographic(model, scenario, deterministic=True, inference_only=True, replay_out=replays,
                        **{key: config[key] for key in ("device", "input_mode", "imagery_dir",
                           "include_ros", "include_thermal", "skip_forced") if key in config})
     replay = replays[0]
-    replay["policy"] = "PPO geográfico"
+    replay["policy"] = "Geographic PPO"
     return replay
 
 
@@ -173,7 +173,7 @@ def build_workspace(scenarios_dir: Path, output_dir: Path, *, episodes: int = 2,
             else:
                 episodes_here.append(static_map(scenario))
             for replay in episodes_here:
-                decorated = decorate(replay, scenario, terrain, training if replay["policy"] == "PPO geográfico" else None)
+                decorated = decorate(replay, scenario, terrain, training if replay["policy"] == "Geographic PPO" else None)
                 replays.append(decorated)
                 name = f"{scenario['scenario_id']}-{len(replays):02d}.json"
                 (output_dir / name).write_text(json.dumps(decorated, ensure_ascii=False, allow_nan=False))
@@ -190,7 +190,7 @@ def build_workspace(scenarios_dir: Path, output_dir: Path, *, episodes: int = 2,
                 "scenario_hashes": {s["scenario_id"]: s["scenario_hash"] for v in splits.values() for s in v}}
     manifest["artifacts"] = [{"path": p.name, "sha256": file_hash(p)} for p in sorted(output_dir.glob("*.json"))]
     (output_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False, allow_nan=False))
-    write_viewer_html(replays, output_dir / "index.html", title="Nightjar · Laboratorio de incendios",
+    write_viewer_html(replays, output_dir / "index.html", title="Pandion · Wildfire laboratory",
                       imagery_dirs=[imagery_dir] if imagery_dir else None)
     from .experiment_catalog import scan_catalog, write_catalog
     roots = [output_dir] + ([checkpoint, training_report] if checkpoint else [])
@@ -251,7 +251,7 @@ def build_fold_workspace(scenarios_dir: Path, folds_dir: Path, output_dir: Path,
             episodes_here.extend(run_geographic_integrated(baseline, policy=p) for p in
                                  ("heuristic", "containment_heuristic", "no_intervention"))
             for replay in episodes_here:
-                decorated = decorate(replay, case, training=training if replay["policy"] == "PPO geográfico" else None)
+                decorated = decorate(replay, case, training=training if replay["policy"] == "Geographic PPO" else None)
                 replays.append(decorated)
                 name = f"{case['scenario_id']}-{len(replays):02d}.json"
                 (output_dir / name).write_text(json.dumps(decorated, ensure_ascii=False, allow_nan=False))
@@ -266,7 +266,7 @@ def build_fold_workspace(scenarios_dir: Path, folds_dir: Path, output_dir: Path,
                 "scenario_hashes": {r["scenario_id"]: r["scenario_hash"] for r in replays}}
     manifest["artifacts"] = [{"path": p.name, "sha256": file_hash(p)} for p in sorted(output_dir.glob("*.json"))]
     (output_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False, allow_nan=False))
-    write_viewer_html(replays, output_dir / "index.html", title=f"Nightjar · {folds_dir.name}",
+    write_viewer_html(replays, output_dir / "index.html", title=f"Pandion · {folds_dir.name}",
                       imagery_dirs=[imagery_dir] if imagery_dir else None)
     return manifest
 

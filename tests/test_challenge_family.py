@@ -4,8 +4,8 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from nightjar.challenge_family import build_scenarios, canonical_hash, write_family
-from nightjar.integrated import run_integrated
+from pandion.challenge_family import build_scenarios, canonical_hash, write_family
+from pandion.integrated import run_integrated
 
 
 class ChallengeFamilyTests(unittest.TestCase):

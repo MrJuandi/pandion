@@ -4,10 +4,10 @@ from math import hypot
 import random
 import unittest
 
-from nightjar.environment import validate_forcing
-from nightjar.geographic_family import build_synthetic_cems_fixture, canonical_hash, generate_geographic_scenario
-from nightjar.geographic_integrated import run_geographic_integrated
-from nightjar.multi_ignition_family import (
+from pandion.environment import validate_forcing
+from pandion.geographic_family import build_synthetic_cems_fixture, canonical_hash, generate_geographic_scenario
+from pandion.geographic_integrated import run_geographic_integrated
+from pandion.multi_ignition_family import (
     FOCI_RANGE,
     MIN_SEPARATION_CELLS,
     SPEED_LIMITS_M_S,

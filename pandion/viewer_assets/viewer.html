@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>__TITLE__</title>
+  <style>__CSS__</style>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#mapa" aria-label="Pandion, 3D map" title="3D map"><span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 40 28"><path d="M3 15 Q9 5 15.5 9.5 L20 16 L24.5 9.5 Q31 5 37 15" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 23 H17 M23 23 H36" stroke="var(--water)" stroke-width="2.4" stroke-linecap="round"/></svg></span><span class="brand-text"><span class="brand-name">pandion</span><span class="brand-context">Wildfire and aerial decisions</span></span></a>
+    <nav class="main-nav" aria-label="Sections">
+      <a class="nav-link active" href="#mapa">3D map</a>
+      <a class="nav-link" href="#comparacion">Comparison</a>
+      <a class="nav-link" href="#condiciones">Conditions</a>
+      <a class="nav-link" href="#datos">Data and models</a>
+    </nav>
+    <div class="header-status" id="header-status"><i></i><span id="scenario-kicker">LOADING</span></div>
+    <div class="header-controls">
+      <div class="context-field scenario-field"><label for="scenario-select">Scenario</label><select id="scenario-select"></select></div>
+      <div class="context-field policy-field"><label for="policy-select">Policy <span id="policy-count">0</span></label><select id="policy-select"></select></div>
+      <div class="context-field compare-policy-field" id="compare-policy-field" hidden><label for="compare-policy-select">Compare with</label><select id="compare-policy-select"></select></div>
+    </div>
+  </header>
+
+  <main>
+    <section class="workspace" id="mapa" aria-label="3D analysis workspace">
+      <section class="viewport" id="map-stage" aria-label="3D view of the episode">
+        <div id="map-panels" class="map-panels"></div>
+
+        <div class="hud hud-terrain" id="hud-terrain">
+          <b id="map-title">Simulated fire</b>
+          <span id="map-subtitle">—</span>
+          <span id="hud-conditions">—</span>
+          <span class="terrain-note" id="terrain-note" hidden></span>
+        </div>
+
+        <div class="map-rail">
+        <div class="cam-dock" role="group" aria-label="Camera">
+          <button id="view-3d" class="cam-btn selected" aria-pressed="true" title="Tactical 3D perspective">3D Tactical</button>
+          <button id="view-2d" class="cam-btn" aria-pressed="false" title="Orthographic top-down view">2D Ortho</button>
+          <button id="cam-chase" class="cam-btn" aria-pressed="false" title="Follow the aircraft">Chase</button>
+          <button id="cam-front" class="cam-btn" aria-pressed="false" title="Center the active front">Front</button>
+        </div>
+        <div class="view-tools" role="group" aria-label="Map zoom">
+          <button id="zoom-in" aria-label="Zoom in map" title="Zoom in [+]">+</button>
+          <button id="zoom-out" aria-label="Zoom out map" title="Zoom out [−]">−</button>
+          <button id="camera-reset" aria-label="Reset camera" title="Reset camera [Home]">⟲</button>
+          <button id="export-png" aria-label="Export PNG image" title="Export PNG image">⤓</button>
+        </div>
+        </div>
+
+        <div class="hud hud-clock">
+          <strong id="hud-clock">--:--:--</strong>
+          <span class="hud-step" id="hud-step">—</span>
+          <span class="hud-cam" id="hud-cam">—</span>
+        </div>
+        <div class="compass" id="compass" aria-hidden="true">
+          <svg viewBox="-50 -50 100 100"><g id="compass-rose"><circle r="44" class="rose-ring"/><text y="-30" class="rose-n">N</text><text x="31" y="4" class="rose-t">E</text><text y="38" class="rose-t">S</text><text x="-31" y="4" class="rose-t">W</text></g><g id="compass-wind"><line y1="22" y2="-22" class="wind-shaft"/><path d="M0 -30 L-7 -18 L7 -18 Z" class="wind-head"/></g></svg>
+          <span id="compass-wind-label">—</span>
+        </div>
+
+        <details class="hud legend" id="legend" open>
+          <summary>Legend and layers</summary>
+          <div class="legend-controls">
+            <label>Color <select id="terrain-style"><option value="imagery">Sentinel-2 imagery</option><option value="fuel">Fuel</option><option value="elevation">Elevation</option><option value="slope">Slope</option></select></label>
+            <label>State <select id="state-select"><option value="combined">Combined</option><option value="simulator">Simulator</option><option value="observation">Delivered observation</option><option value="historical">Historical mapping</option></select></label>
+            <label>Terrain <select id="relief-scale"><option value="1">1× true scale</option><option value="1.5" selected>1.5×</option><option value="2">2×</option><option value="3">3×</option></select></label>
+          </div>
+          <div class="legend-grid">
+            <label><input type="checkbox" id="layer-front" checked><i class="sw sw-front"></i>Active front</label>
+            <label><input type="checkbox" id="layer-burn" checked><i class="sw sw-burn"></i>Burned area</label>
+            <label><input type="checkbox" id="layer-observations" checked><i class="sw sw-report"></i>Delivered detections</label>
+            <label><input type="checkbox" id="layer-drops" checked><i class="sw sw-drop"></i>Drops · treated cells</label>
+            <label><input type="checkbox" id="layer-flight" checked><i class="sw sw-track"></i>Aircraft and track</label>
+            <label><input type="checkbox" id="layer-contours" checked><i class="sw sw-contour"></i>Contour lines</label>
+            <label><input type="checkbox" id="layer-labels" checked><i class="sw sw-label"></i>Labels</label>
+            <label><input type="checkbox" id="layer-grid"><i class="sw sw-grid"></i>Cell grid</label>
+            <label><input type="checkbox" id="layer-smoke" checked><i class="sw sw-smoke"></i>Smoke <em>illustrative</em></label>
+          </div>
+          <div id="terrain-color-key" class="color-key" hidden></div>
+        </details>
+
+        <div class="hud-hint" id="camera-hint">Drag: orbit · Right-click or Shift: pan · Wheel: zoom · Double-click: focus · Space: play</div>
+        <div class="map-attribution" id="map-attribution" hidden></div>
+        <div class="map-scale" id="map-scale"><i></i><span>—</span></div>
+        <div class="renderer-status" id="renderer-status" role="status" hidden></div>
+        <div class="map-tooltip" id="map-tooltip"></div>
+
+        <div class="timeline" id="timeline">
+          <div class="transport" role="group" aria-label="Playback">
+            <button id="btn-play" class="btn btn-primary btn-play" aria-label="Play" title="Play / pause [Space]">Play</button>
+            <button id="btn-reset" class="btn btn-icon" title="Return to episode start [R]" aria-label="Return to start"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3v10M13 3.5 6 8l7 4.5z"/></svg></button>
+            <select id="speed-select" aria-label="Playback speed" title="Playback speed"><option value="5">5×</option><option value="15">15×</option><option value="30" selected>30×</option><option value="60">60×</option><option value="120">120×</option></select>
+          </div>
+          <div class="time-now"><span>T</span><strong id="time-display">00:00</strong><em>/ <b id="time-end">00:00</b></em></div>
+          <div class="slider-wrap"><canvas class="growth-strip" id="timeline-growth" aria-hidden="true"></canvas><div class="ticks" id="timeline-ticks"></div><input id="time-slider" aria-label="Episode time" type="range" min="0" max="0" value="0" step="1"></div>
+          <div class="time-step" id="time-step">—</div>
+        </div>
+      </section>
+
+      <aside class="sidebar" aria-label="Analysis panel">
+        <section class="card compare-card" id="compare-card" hidden>
+          <div class="card-head"><h2>Episode comparison</h2><span class="pill">Shared clock</span></div>
+          <button id="compare-toggle" class="compare-button" aria-label="Side-by-side comparison of policies" aria-pressed="false"><span class="compare-label"><b>Compare two policies</b><small>Select a reference</small></span></button>
+          <div id="comparison-results" class="comparison-results" hidden></div>
+        </section>
+
+        <section class="card">
+          <div class="card-head"><h2>Physical state</h2><span class="pill" id="live-time">t = 0 s</span></div>
+          <div class="metric-grid">
+            <div class="metric"><small>Affected area</small><b><span id="live-area">—</span> <i>ha</i></b><span id="live-area-delta">—</span></div>
+            <div class="metric hot"><small>Active front</small><b><span id="live-front">—</span> <i>ha</i></b><span id="live-front-cells">—</span></div>
+            <div class="metric water"><small>Water dropped</small><b><span id="live-water">—</span> <i>L</i></b><span id="live-drops">—</span></div>
+            <div class="metric"><small>Aircraft</small><b id="live-phase">—</b><span id="live-tank">—</span></div>
+          </div>
+          <div class="final-row" aria-label="Final episode result">
+            <span>Final</span>
+            <span><b id="m-area">—</b> ha</span>
+            <span><b id="m-water">—</b> L</span>
+            <span class="flight-metric"><b id="m-flight">—</b> <i id="m-flight-unit">km</i></span>
+            <span><b id="m-drops">—</b> drops · <b id="m-rejected">—</b> rejected</span>
+          </div>
+        </section>
+
+        <section class="card">
+          <div class="card-head"><h2>Growth dynamics A(t)</h2><span class="pill">Arrival raster</span></div>
+          <canvas class="chart" id="chart-growth" role="img" aria-label="Affected area over time"></canvas>
+          <div class="chart-legend" id="growth-legend"></div>
+        </section>
+
+        <section class="card">
+          <div class="card-head"><h2>Terrain profile</h2><span class="pill" id="profile-label">Section</span></div>
+          <canvas class="chart" id="chart-profile" role="img" aria-label="Elevation profile"></canvas>
+          <div class="chart-foot" id="profile-foot">—</div>
+        </section>
+
+        <section class="card inspector-card">
+          <div class="card-head"><h2>Current decision</h2><span class="pill accent" id="inspector-time">—</span></div>
+          <div class="inspector-row"><small>Action</small><b id="inspector-action">No decision at this time</b></div>
+          <div class="inspector-row"><small>Observation available to the controller</small><p id="inspector-observation">—</p></div>
+        </section>
+
+        <section class="card">
+          <div class="card-head"><h2>Fleet</h2><span class="pill" id="fleet-count">1 unit</span></div>
+          <label class="fleet-picker">Aircraft to track <select id="fleet-select" aria-label="Aircraft to track"></select></label>
+          <table class="fleet-table"><thead><tr><th>Callsign</th><th>Type</th><th>Phase</th><th>Tank</th></tr></thead><tbody id="fleet-body"></tbody></table>
+          <p class="card-note">Position recorded in the replay and interpolated between samples. Altitude and symbol size are display only.</p>
+        </section>
+
+        <section class="card decisions-card">
+          <div class="card-head"><h2>Decision sequence</h2><span class="pill" id="decision-count">—</span></div>
+          <div class="decision-list" id="decision-list"></div>
+        </section>
+      </aside>
+    </section>
+
+    <section class="page environment-panel" id="condiciones" aria-labelledby="environment-title" hidden>
+      <div class="environment-heading"><div><p class="eyebrow">AT THE SELECTED TIME</p><h2 id="environment-title">Environmental conditions</h2><p class="environment-subtitle" id="environment-time">UTC time —</p></div><span class="environment-mode" id="environment-mode">No episode</span></div>
+      <div class="environment-values" aria-live="polite">
+        <article class="environment-value wind"><small>Simulation wind</small><b id="environment-wind">—</b><span id="environment-wind-detail">Direction toward —</span></article>
+        <article class="environment-value"><small>Air temperature</small><b id="environment-temperature">—</b><span>Weather station</span></article>
+        <article class="environment-value"><small>Relative humidity</small><b id="environment-humidity">—</b><span>Weather station</span></article>
+        <article class="environment-value"><small>Precipitation</small><b id="environment-rain">—</b><span>Interval total</span></article>
+        <article class="environment-value"><small>1 h dead fuel moisture</small><b id="environment-moisture">—</b><span>Model estimate</span></article>
+        <article class="environment-value elevation"><small>DEM elevation</small><b id="environment-elevation">—</b><span id="environment-elevation-use">—</span></article>
+      </div>
+      <div class="environment-foot"><p id="environment-source">Weather and terrain source —</p><p id="environment-caveat">The 2 m station wind is a proxy; it is not calibrated as midflame wind. Measured rain does not imply a calibrated wetting effect.</p></div>
+      <div class="environment-delivered" id="environment-delivered">Weather delivered to the controller (latest completed interval): <b id="environment-observation">Not available at this time.</b></div>
+      <div class="timeline-slot" id="timeline-slot"></div>
+    </section>
+
+    <section id="datos" class="page data-section" hidden><div class="data-heading"><div><p class="eyebrow">PROVENANCE</p><h2>Data and models</h2></div><span class="data-stamp">LOCAL ARTIFACT · OFFLINE</span></div><div id="provenance" class="provenance-grid"></div>
+      <div class="display-notes"><h3>Display conventions</h3><ul>
+        <li>Terrain may be exaggerated vertically (the "Terrain" selector); the active exaggeration is always shown in the top panel. The physics uses unexaggerated elevation.</li>
+        <li>The 3D surface interpolates cell-corner heights (Catmull-Rom); it adds no physical resolution.</li>
+        <li>Active front: cells reached that have at least one fuel neighbor not yet reached, according to the simulator's arrival raster.</li>
+        <li>The aircraft follows the recorded horizontal positions, linearly interpolated between samples. Its altitude and size are display only and do not come from the replay.</li>
+        <li>The water curtain and smoke are visual effects; the smoke is not simulated.</li>
+      </ul></div>
+      <details class="technical-details"><summary>Technical details of sources, sets and footprints</summary><div id="technical-provenance"></div></details><p class="generated">View generated <span id="generated-at">__GENERATED_AT__</span> · Pandion Replay Viewer</p></section>
+  </main>
+  <script>const REPLAYS = __REPLAYS__; const IMAGERY = __IMAGERY__;</script><script>__JS__</script>
+</body>
+</html>

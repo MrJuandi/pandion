@@ -5,9 +5,9 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from nightjar.geographic_family import build_geographic_family, canonical_hash
-from nightjar.geographic_ppo import load_geographic_split
-from nightjar.ignition_family import (
+from pandion.geographic_family import build_geographic_family, canonical_hash
+from pandion.geographic_ppo import load_geographic_split
+from pandion.ignition_family import (
     EDGE_MARGIN_CELLS,
     IGNITION_RADII_CELLS,
     build_ignition_family,

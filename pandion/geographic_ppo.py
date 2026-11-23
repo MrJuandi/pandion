@@ -71,7 +71,7 @@ def make_input_tensorizer(
     if input_mode != "image":
         raise ValueError(f"Unknown input_mode: {input_mode}")
     if imagery_dir is None:
-        raise ValueError("image inputs need imagery_dir (output of nightjar.imagery_acquire)")
+        raise ValueError("image inputs need imagery_dir (output of pandion.imagery_acquire)")
     from .imagery_acquire import load_activation_image
     from .policy_inputs import GeographicInputTensorizer
 
@@ -954,7 +954,7 @@ def main() -> None:
     parser.add_argument("--action-mode", choices=("tactical", "spatial", "parametric"), default="tactical",
                         help="tactical macro-actions, one drop action per cell, or focus x aspect "
                              "parameterised actions (D-61); the latter two need image or cells inputs")
-    parser.add_argument("--imagery-dir", type=Path, help="output directory of nightjar.imagery_acquire")
+    parser.add_argument("--imagery-dir", type=Path, help="output directory of pandion.imagery_acquire")
     parser.add_argument("--ros", action="store_true", help="add the Rothermel ROS channel (image inputs)")
     parser.add_argument("--thermal", action="store_true",
                         help="add a simulated thermal band as a 4th image channel (image inputs, D-58)")
@@ -1237,7 +1237,7 @@ def main() -> None:
             model, artifact_info = load_policy_artifact(args.checkpoint, args.training_report,
                 load_geographic_split("development", args.scenarios_dir, synthetic=args.synthetic),
                 imagery_dir=args.imagery_dir, device=str(device), skip_forced=True if args.skip_forced else None)
-            config = model._nightjar_inference
+            config = model._pandion_inference
             target_scenarios = with_fleet(load_geographic_split(args.split, args.scenarios_dir, synthetic=args.synthetic), config["fleet_size"])
             if args.eval_scenarios is not None:
                 target_scenarios = target_scenarios[:args.eval_scenarios]

@@ -3,9 +3,9 @@ import json
 import unittest
 from pathlib import Path
 
-from nightjar.fire_rothermel import run_fire_rothermel
-from nightjar.rothermel import FM1_MOISTURE_EXTINCTION, fm1_components, fm1_directional_rate
-from nightjar.sensitivity import compare_resolution
+from pandion.fire_rothermel import run_fire_rothermel
+from pandion.rothermel import FM1_MOISTURE_EXTINCTION, fm1_components, fm1_directional_rate
+from pandion.sensitivity import compare_resolution
 
 
 EXAMPLE = Path(__file__).resolve().parents[1] / "examples" / "fm1_fire.json"

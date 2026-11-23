@@ -10,12 +10,12 @@ from unittest.mock import patch
 
 import numpy as np
 
-from nightjar.geographic_family import build_synthetic_cems_fixture, generate_geographic_scenario
-from nightjar.geographic_integrated import run_geographic_integrated
-from nightjar.imagery_acquire import SCHEMA_VERSION
-from nightjar.imagery_composite import compose_view, thermal_view
-from nightjar.model import HAS_TORCH, ActionMapper
-from nightjar.policy_inputs import FUEL_FAMILIES, GeographicInputTensorizer, elevation_gradient, fuel_family
+from pandion.geographic_family import build_synthetic_cems_fixture, generate_geographic_scenario
+from pandion.geographic_integrated import run_geographic_integrated
+from pandion.imagery_acquire import SCHEMA_VERSION
+from pandion.imagery_composite import compose_view, thermal_view
+from pandion.model import HAS_TORCH, ActionMapper
+from pandion.policy_inputs import FUEL_FAMILIES, GeographicInputTensorizer, elevation_gradient, fuel_family
 
 PX = 4
 
@@ -189,7 +189,7 @@ class ImageModelTests(unittest.TestCase):
         cls.tz = GeographicInputTensorizer(cls.scenario, np.full((cls.rows * PX, cls.rows * PX, 3), 80, np.uint8))
 
     def model(self, action_mode, recurrent):
-        from nightjar.image_model import ImageActorCritic
+        from pandion.image_model import ImageActorCritic
         self.torch.manual_seed(0)
         return ImageActorCritic(cell_channels=self.tz.num_cell_channels, vector_dim=self.tz.NUM_VECTOR_FEATURES,
                                 px_per_cell=PX, grid_rows=self.rows, grid_cols=self.rows,
@@ -245,9 +245,9 @@ class ImageModelTests(unittest.TestCase):
                     self.assertEqual(observation, original_observation)
 
         thermal_tz = GeographicInputTensorizer(self.scenario, base, include_thermal=True)
-        from nightjar import policy_inputs
+        from pandion import policy_inputs
         original_state_masks = policy_inputs.state_masks
-        with patch("nightjar.policy_inputs.state_masks", wraps=original_state_masks) as masks_spy:
+        with patch("pandion.policy_inputs.state_masks", wraps=original_state_masks) as masks_spy:
             thermal_tz.extract_arrays(observations[-1])
         masks_spy.assert_called_once()
 
@@ -297,7 +297,7 @@ class ImageModelTests(unittest.TestCase):
 
     def test_image_ppo_rollout_and_update(self):
         torch = self.torch
-        from nightjar.geographic_ppo import build_policy_model, ppo_update_geographic, rollout_geographic
+        from pandion.geographic_ppo import build_policy_model, ppo_update_geographic, rollout_geographic
         with tempfile.TemporaryDirectory() as tmp:
             write_imagery(Path(tmp), self.scenario, np.full((self.rows * PX, self.rows * PX, 3), 80, np.uint8))
             for input_mode, mode, thermal in (("image", "tactical", False), ("image", "spatial", False),

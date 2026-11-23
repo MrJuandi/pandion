@@ -18,9 +18,9 @@ Prepare the existing four-product real family as documented in [README.md](../RE
 ```sh
 .venv/bin/python -m pip install -r requirements-standard.txt -r requirements-rl.txt
 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 .venv/bin/python -m unittest discover -s tests -v
-OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 .venv/bin/python -m nightjar.geographic_ppo --smoke --seed 42 --scenarios-dir runs/geographic-family-real-v2 --checkpoint runs/geographic-ppo-verification/smoke.pt --output runs/geographic-ppo-verification/smoke.json
-OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 .venv/bin/python -m nightjar.geographic_ppo --smoke --seed 42 --scenarios-dir runs/geographic-family-real-v2 --checkpoint runs/geographic-ppo-verification/repeat.pt --output runs/geographic-ppo-verification/repeat.json
-OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 .venv/bin/python -m nightjar.geographic_ppo --smoke --seed 42 --scenarios-dir runs/geographic-family-real-v2 --resume runs/geographic-ppo-verification/smoke.pt --checkpoint runs/geographic-ppo-verification/resumed.pt --output runs/geographic-ppo-verification/resumed.json
+OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 .venv/bin/python -m pandion.geographic_ppo --smoke --seed 42 --scenarios-dir runs/geographic-family-real-v2 --checkpoint runs/geographic-ppo-verification/smoke.pt --output runs/geographic-ppo-verification/smoke.json
+OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 .venv/bin/python -m pandion.geographic_ppo --smoke --seed 42 --scenarios-dir runs/geographic-family-real-v2 --checkpoint runs/geographic-ppo-verification/repeat.pt --output runs/geographic-ppo-verification/repeat.json
+OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 .venv/bin/python -m pandion.geographic_ppo --smoke --seed 42 --scenarios-dir runs/geographic-family-real-v2 --resume runs/geographic-ppo-verification/smoke.pt --checkpoint runs/geographic-ppo-verification/resumed.pt --output runs/geographic-ppo-verification/resumed.json
 ```
 
 The full local suite passed **172 tests without failures or skips**, including the previously optional PyTorch paths and locally cached external-source checks. The new checkpoint/seed tests use fixed seeds and small generated fixtures. Selection-seed wiring uses mocked evaluations; it does not open real validation outcomes. CI adds a `unit-rl` job that requires CPU PyTorch and runs the same suite; external-source checks still skip in a checkout without those audited files.
@@ -41,7 +41,7 @@ import json
 import math
 from pathlib import Path
 import torch
-from nightjar.geographic_ppo import load_geographic_split, train_geographic_ppo, rollout_geographic
+from pandion.geographic_ppo import load_geographic_split, train_geographic_ppo, rollout_geographic
 
 root = Path("runs/geographic-ppo-verification")
 reports = {name: json.loads((root / f"{name}.json").read_text())
