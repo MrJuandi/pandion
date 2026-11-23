@@ -3,7 +3,7 @@ from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch
-from nightjar.terrain_acquire import acquire_terrain
+from pandion.terrain_acquire import acquire_terrain
 
 
 class TerrainAcquireTests(unittest.TestCase):
@@ -18,7 +18,7 @@ class TerrainAcquireTests(unittest.TestCase):
             Path(command[-1]).write_text('ncols 2\nnrows 2\nxllcorner 331136.4\nyllcorner 4642171.6\ncellsize 100\n10 20\n0 30\n')
         with tempfile.TemporaryDirectory() as temporary:
             out=Path(temporary)/'dem'
-            with patch('nightjar.terrain_acquire.load_geographic_split',side_effect=lambda split,*args:[self.scenario()] if split=='development' else []), patch('nightjar.terrain_acquire.subprocess.run',side_effect=fetch):
+            with patch('pandion.terrain_acquire.load_geographic_split',side_effect=lambda split,*args:[self.scenario()] if split=='development' else []), patch('pandion.terrain_acquire.subprocess.run',side_effect=fetch):
                 sources=acquire_terrain(Path('unused'),out)
             manifest=json.loads((out/'sources.json').read_text())
             self.assertEqual(manifest['schema_version'],'nightjar-terrain-sources-0.1')
@@ -34,7 +34,7 @@ class TerrainAcquireTests(unittest.TestCase):
             Path(command[-1]).write_text('ncols 2\nnrows 2\nxllcorner 331136.4\nyllcorner 4642171.6\ncellsize 100\nNODATA_value -9999\n10 20\n-9999 30\n')
         with tempfile.TemporaryDirectory() as temporary:
             out=Path(temporary)/'dem'
-            with patch('nightjar.terrain_acquire.load_geographic_split',side_effect=lambda split,*args:[self.scenario()] if split=='development' else []), patch('nightjar.terrain_acquire.subprocess.run',side_effect=fetch):
+            with patch('pandion.terrain_acquire.load_geographic_split',side_effect=lambda split,*args:[self.scenario()] if split=='development' else []), patch('pandion.terrain_acquire.subprocess.run',side_effect=fetch):
                 with self.assertRaises(ValueError):acquire_terrain(Path('unused'),out)
             self.assertFalse((out/'sources.json').exists())
 
@@ -47,7 +47,7 @@ class TerrainAcquireTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             out=Path(temporary)/'dem'
             loader=lambda split,*args:[self.scenario(),extra] if split=='development' else []
-            with patch('nightjar.terrain_acquire.load_geographic_split',side_effect=loader), patch('nightjar.terrain_acquire.subprocess.run',side_effect=fetch):
+            with patch('pandion.terrain_acquire.load_geographic_split',side_effect=loader), patch('pandion.terrain_acquire.subprocess.run',side_effect=fetch):
                 sources=acquire_terrain(Path('unused'),out,['EMSR602_AOI02'])
                 self.assertEqual(set(sources),{'EMSR602_AOI02'})
                 self.assertTrue((out/'emsr602-aoi02.asc').exists())

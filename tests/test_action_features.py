@@ -5,15 +5,15 @@ import unittest
 
 import numpy as np
 
-from nightjar.action_features import (
+from pandion.action_features import (
     ACTION_FEATURE_NAMES,
     NUM_ACTION_FEATURES,
     ObservedFireBehavior,
     action_feature_array,
 )
-from nightjar.environment import MOISTURE_KEYS
-from nightjar.model import HAS_TORCH
-from nightjar.parametric_actions import ParametricActionMapper, num_actions
+from pandion.environment import MOISTURE_KEYS
+from pandion.model import HAS_TORCH
+from pandion.parametric_actions import ParametricActionMapper, num_actions
 
 PX = 4
 MOISTURE = {"dead_1h": 0.06, "dead_10h": 0.07, "dead_100h": 0.08,
@@ -187,9 +187,9 @@ class ActionFeatureModelTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         import torch
-        from nightjar.geographic_family import build_synthetic_cems_fixture, generate_geographic_scenario
-        from nightjar.geographic_integrated import run_geographic_integrated
-        from nightjar.policy_inputs import GeographicInputTensorizer
+        from pandion.geographic_family import build_synthetic_cems_fixture, generate_geographic_scenario
+        from pandion.geographic_integrated import run_geographic_integrated
+        from pandion.policy_inputs import GeographicInputTensorizer
         cls.torch = torch
         fixture = build_synthetic_cems_fixture("EMSR578", utm_zone=31, rows=40, cols=40)
         cls.scenario = generate_geographic_scenario(fixture, index=0, split="development",
@@ -205,7 +205,7 @@ class ActionFeatureModelTests(unittest.TestCase):
                                            action_features=True, drop_distances=cls.distances)
 
     def make_model(self, **overrides):
-        from nightjar.image_model import ImageActorCritic
+        from pandion.image_model import ImageActorCritic
         kwargs = dict(use_image=False, action_mode="parametric", drop_distances=self.distances,
                       action_feature_dim=NUM_ACTION_FEATURES, cell_channels=self.tz.num_cell_channels,
                       vector_dim=self.tz.num_vector_features, px_per_cell=1, grid_rows=self.rows,
@@ -278,7 +278,7 @@ class ActionFeatureModelTests(unittest.TestCase):
             model.forward(*inputs, inputs[2])
 
     def test_action_features_require_parametric_mode(self):
-        from nightjar.image_model import ImageActorCritic
+        from pandion.image_model import ImageActorCritic
         with self.assertRaises(ValueError):
             ImageActorCritic(use_image=False, action_mode="tactical", action_feature_dim=NUM_ACTION_FEATURES,
                              cell_channels=self.tz.num_cell_channels, vector_dim=self.tz.num_vector_features,
@@ -288,8 +288,8 @@ class ActionFeatureModelTests(unittest.TestCase):
 class ActionFeatureTensorizerTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        from nightjar.geographic_family import build_synthetic_cems_fixture, generate_geographic_scenario
-        from nightjar.geographic_integrated import run_geographic_integrated
+        from pandion.geographic_family import build_synthetic_cems_fixture, generate_geographic_scenario
+        from pandion.geographic_integrated import run_geographic_integrated
         fixture = build_synthetic_cems_fixture("EMSR578", utm_zone=31, rows=40, cols=40)
         cls.scenario = generate_geographic_scenario(fixture, index=0, split="development",
                                                     window_rows=12, window_cols=12, horizon_s=900.0)
@@ -298,7 +298,7 @@ class ActionFeatureTensorizerTests(unittest.TestCase):
         cls.base = np.full((cls.rows * PX, cls.rows * PX, 3), 80, dtype=np.uint8)
 
     def test_action_features_add_one_trailing_float_array(self):
-        from nightjar.policy_inputs import GeographicInputTensorizer
+        from pandion.policy_inputs import GeographicInputTensorizer
         tz = GeographicInputTensorizer(self.scenario, self.base, focus_slots=True,
                                        action_features=True, drop_distances=(0, 1))
         arrays = tz.extract_arrays(self.observation)
@@ -309,12 +309,12 @@ class ActionFeatureTensorizerTests(unittest.TestCase):
         self.assertEqual(rgb.shape[0], 3)
 
     def test_action_features_need_focus_slots(self):
-        from nightjar.policy_inputs import GeographicInputTensorizer
+        from pandion.policy_inputs import GeographicInputTensorizer
         with self.assertRaises(ValueError):
             GeographicInputTensorizer(self.scenario, self.base, focus_slots=False, action_features=True)
 
     def test_default_tensorizer_output_is_unchanged(self):
-        from nightjar.policy_inputs import GeographicInputTensorizer
+        from pandion.policy_inputs import GeographicInputTensorizer
         tz = GeographicInputTensorizer(self.scenario, self.base, focus_slots=True)
         self.assertEqual(len(tz.extract_arrays(self.observation)), 3)
         self.assertEqual(tz.num_action_features, 0)

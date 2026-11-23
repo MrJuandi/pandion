@@ -1,4 +1,4 @@
-"""Nightjar's synthetic Stage 0 research components."""
+"""Pandion's synthetic Stage 0 research components."""
 
 from .aircraft import run_episode
 

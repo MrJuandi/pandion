@@ -2,7 +2,7 @@ import json
 import unittest
 from pathlib import Path
 
-from nightjar.aircraft import CAPACITY_L, run_episode
+from pandion.aircraft import CAPACITY_L, run_episode
 
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples"

@@ -4,9 +4,9 @@ import unittest
 
 import numpy as np
 
-from nightjar.geographic_family import build_synthetic_cems_fixture, generate_geographic_scenario
-from nightjar.geographic_integrated import run_geographic_integrated
-from nightjar.imagery_composite import (
+from pandion.geographic_family import build_synthetic_cems_fixture, generate_geographic_scenario
+from pandion.geographic_integrated import run_geographic_integrated
+from pandion.imagery_composite import (
     BURNED_RGB,
     BURNING_RGB,
     THERMAL_BURNED_PEAK,

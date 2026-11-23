@@ -5,9 +5,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from nightjar.replay_view import normalize_replay
-from nightjar.workspace import terrain_crop, static_map, decorate, build_workspace, load_policy
-from nightjar.geographic_family import build_synthetic_cems_fixture, generate_geographic_scenario
+from pandion.replay_view import normalize_replay
+from pandion.workspace import terrain_crop, static_map, decorate, build_workspace, load_policy
+from pandion.geographic_family import build_synthetic_cems_fixture, generate_geographic_scenario
 
 
 class ReplayViewTests(unittest.TestCase):
@@ -121,8 +121,8 @@ class WorkspaceTests(unittest.TestCase):
         splits = {"development": [self.scenario], "validation": [{**self.scenario, "scenario_id": "val", "split": "validation"}],
                   "reserved": [{**self.scenario, "scenario_id": "res", "split": "reserved"}]}
         with tempfile.TemporaryDirectory() as tmp, \
-             patch("nightjar.workspace.load_geographic_split", side_effect=lambda split, *a, **k: splits[split]), \
-             patch("nightjar.workspace.run_geographic_integrated", return_value=static_map(self.scenario)) as simulator:
+             patch("pandion.workspace.load_geographic_split", side_effect=lambda split, *a, **k: splits[split]), \
+             patch("pandion.workspace.run_geographic_integrated", return_value=static_map(self.scenario)) as simulator:
             root = Path(tmp)
             (root / "manifest.json").write_text('{}')
             report = build_workspace(root, root / "out", episodes=1)

@@ -2,8 +2,8 @@ from copy import deepcopy
 import json
 import unittest
 
-from nightjar.scenario_family import TIME_ORIGIN_UTC, VARIANT_SPECS, build_scenarios, canonical_hash
-from nightjar.integrated import run_integrated
+from pandion.scenario_family import TIME_ORIGIN_UTC, VARIANT_SPECS, build_scenarios, canonical_hash
+from pandion.integrated import run_integrated
 
 
 class ScenarioFamilyTests(unittest.TestCase):

@@ -8,19 +8,19 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from nightjar.geographic_ppo import HAS_TORCH
+from pandion.geographic_ppo import HAS_TORCH
 
 if not HAS_TORCH:
     raise unittest.SkipTest("PyTorch not installed")
 
 import torch
 
-from nightjar.geographic_family import (
+from pandion.geographic_family import (
     build_geographic_family,
     build_synthetic_cems_fixture,
     generate_geographic_scenario,
 )
-from nightjar.geographic_ppo import (
+from pandion.geographic_ppo import (
     attach_vine_samples,
     build_policy_model,
     main,
@@ -28,7 +28,7 @@ from nightjar.geographic_ppo import (
     rollout_geographic,
     train_geographic_ppo,
 )
-from nightjar.vine import choose_vine_decisions, leave_one_out_advantages, vine_episode
+from pandion.vine import choose_vine_decisions, leave_one_out_advantages, vine_episode
 
 
 def _scenario():

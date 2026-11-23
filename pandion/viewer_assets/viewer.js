@@ -1,15 +1,32 @@
 (() => {
   'use strict';
   const $ = (id) => document.getElementById(id);
-  const Fire = window.NightjarFire;
-  const STATIC = 'Cartografía · sin episodio';
+  const Fire = window.PandionFire;
+  const STATIC = 'Mapping · no episode';
+  // Labels written by earlier builds in Spanish. Old workspace files still carry them; map them to the English text.
+  const LEGACY_LABELS = {
+    'Cartografía · sin episodio': 'Mapping · no episode',
+    'PPO geográfico': 'Geographic PPO',
+    'Sin política registrada': 'No policy recorded',
+    'Entrenamiento exploratorio': 'Exploratory training',
+    'Terreno plano · sin DEM en la simulación': 'Flat terrain · no DEM in the simulation',
+    'Relieve real · cartografía sin episodio': 'Real terrain · mapping with no episode',
+    'Relieve real · usado en propagación y observaciones del PPO': 'Real terrain · used in propagation and PPO observations',
+    'Relieve IGN/CNIG · capa visual; simulación y PPO sobre terreno plano': 'IGN/CNIG terrain · visual layer; simulation and PPO on flat terrain',
+    'Relieve IGN/CNIG · cartografía histórica, sin episodio': 'IGN/CNIG terrain · historical mapping, no episode',
+    'Relieve del simulador': 'Simulator terrain',
+    'Sin elevaciones registradas': 'No elevations recorded',
+    'Origen no registrado': 'Source not recorded',
+    'Artesa de Segre · paisaje completo': 'Artesa de Segre · full landscape'
+  };
+  const canonicalLabel = (s) => (typeof s === 'string' && Object.prototype.hasOwnProperty.call(LEGACY_LABELS, s) ? LEGACY_LABELS[s] : s);
   const finite = (n) => typeof n === 'number' && Number.isFinite(n);
   const clampNum = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
-  const fmt = (n, digits = 1) => finite(n) ? n.toLocaleString('es-ES', {maximumFractionDigits: digits}) : '—';
+  const fmt = (n, digits = 1) => finite(n) ? n.toLocaleString('en-US', {maximumFractionDigits: digits}) : '—';
   const clock = (s) => `${String(Math.floor(Math.max(0, s) / 60)).padStart(2, '0')}:${String(Math.floor(Math.max(0, s) % 60)).padStart(2, '0')}`;
   const esc = (s) => String(s ?? '—');
-  const policyLabel = (r) => ({heuristic: 'Heurística · ataque directo', containment_heuristic: 'Heurística · contención', no_intervention: 'Sin intervención', random_valid: 'Aleatoria válida', ppo: 'PPO'}[r.policy] || r.policy || '—');
-  const COMPASS = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSO', 'SO', 'OSO', 'O', 'ONO', 'NO', 'NNO'];
+  const policyLabel = (r) => ({heuristic: 'Heuristic · direct attack', containment_heuristic: 'Heuristic · containment', no_intervention: 'No intervention', random_valid: 'Random valid', ppo: 'PPO'}[r.policy] || canonicalLabel(r.policy) || '—');
+  const COMPASS = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
   const compass = (deg) => COMPASS[Math.round(((deg % 360) + 360) % 360 / 22.5) % 16];
   const SERIES = ['#38bdf8', '#a78bfa', '#f472b6', '#94a3b8', '#facc15'];
 
@@ -21,7 +38,7 @@
   };
   const scenarios = new Map();
   for (const replay of REPLAYS) {
-    const key = String(replay.scenario_id ?? 'escenario');
+    const key = String(replay.scenario_id ?? 'scenario');
     if (!scenarios.has(key)) scenarios.set(key, []);
     scenarios.get(key).push(replay);
   }
@@ -29,18 +46,19 @@
   let activeReplay = 0, comparisonReference = 1, compare = false;
   let now = 0, playing = false, speed = Number(ui.speed.value) || 30, lastFrame = 0;
   let camMode = '3d', rendererFailed = false, syncing = false, hudTimer = 0;
-  let activeView = ['mapa', 'condiciones', 'comparacion', 'datos'].includes(location.hash.slice(1)) ? location.hash.slice(1) : 'mapa';
+  const VIEWS = ['mapa', 'condiciones', 'comparacion', 'datos'];
+  let activeView = VIEWS.includes(location.hash.slice(1)) ? location.hash.slice(1) : 'mapa';
   let selectedAircraftIndex = 0;
   let views = [];
   const cache = new WeakMap();
 
   const currentGroup = () => scenarios.get(activeScenario) || [];
-  const episodeGroup = () => currentGroup().filter((r) => r.policy !== STATIC);
+  const episodeGroup = () => currentGroup().filter((r) => !isStatic(r));
   const current = () => currentGroup()[activeReplay] || currentGroup()[0];
   const comparisonGroup = () => [current(), currentGroup()[comparisonReference]].filter(Boolean);
   const displayGroup = () => compare ? comparisonGroup() : [current()];
   const checked = (id) => $(id).checked;
-  const isStatic = (r) => r?.policy === STATIC;
+  const isStatic = (r) => canonicalLabel(r?.policy) === STATIC;
 
   // ---------------------------------------------------------------------------
   // Derived, cached replay facts (all from recorded data)
@@ -51,7 +69,7 @@
     const elev = r.elevation_m.flat().filter(finite);
     const arrivals = r.arrival_time_s.flat().filter(finite).sort((a, b) => a - b);
     const decisions = Array.isArray(r.decisions) ? r.decisions : [];
-    const fleet = NightjarFleet.derive(r);
+    const fleet = PandionFleet.derive(r);
     const track = fleet[0]?.track || [], capacity = fleet[0]?.capacity ?? null;
     const releases = fleet.flatMap(u => u.releases);
     const drops = (r.drops || []).filter(d => finite(Number(d.time_s))).map(d => ({...d, time_s: Number(d.time_s), cells: d.newly_blocked_cells || d.treated_cells || []}));
@@ -90,7 +108,7 @@
   function episodeTime(r) { return Math.min(now, Number(r.horizon_s) || 0); }
 
   function fleetAt(r, t) {
-    return isStatic(r) ? [] : facts(r).fleet.map(u => NightjarFleet.at(u, t)).filter(Boolean);
+    return isStatic(r) ? [] : facts(r).fleet.map(u => PandionFleet.at(u, t)).filter(Boolean);
   }
   function aircraftAt(r, t) {
     const fleet = fleetAt(r, t);
@@ -114,7 +132,7 @@
   // ---------------------------------------------------------------------------
   function init() {
     for (const [id, group] of scenarios) {
-      const option = document.createElement('option'); option.value = id; option.textContent = group[0].metadata?.name || id; ui.scenario.append(option);
+      const option = document.createElement('option'); option.value = id; option.textContent = canonicalLabel(group[0].metadata?.name) || id; ui.scenario.append(option);
     }
     ui.scenario.addEventListener('change', () => { activeScenario = ui.scenario.value; activeReplay = 0; comparisonReference = 1; now = 0; compare = false; if (activeView === 'comparacion') activeView = 'mapa'; stop(); fillPolicies(); updateCompare(); refresh(); });
     ui.policy.addEventListener('change', () => { activeReplay = Number(ui.policy.value); updateCompare(); refresh(); });
@@ -141,7 +159,7 @@
     // Back/forward and edited fragments switch views like the navigation links.
     window.addEventListener('hashchange', () => {
       const view = location.hash.slice(1);
-      if (['mapa', 'condiciones', 'comparacion', 'datos'].includes(view) && view !== activeView) setView(view);
+      if (VIEWS.includes(view) && view !== activeView) setView(view);
     });
     // Section fragments are view selectors, not scroll targets: keep the header controls in view on load.
     const toTop = () => { if (window.scrollY) window.scrollTo(0, 0); };
@@ -168,8 +186,8 @@
     $('compare-policy-field').hidden = !compare || activeView !== 'comparacion';
     ui.compare.setAttribute('aria-pressed', String(compare));
     ui.compare.disabled = episodeGroup().length < 2;
-    ui.compare.querySelector('b').textContent = compare ? 'Salir de la comparación' : 'Comparar dos políticas';
-    ui.compare.querySelector('small').textContent = compare ? 'Dos políticas · reloj y cámara compartidos' : 'Selecciona una referencia';
+    ui.compare.querySelector('b').textContent = compare ? 'Exit comparison' : 'Compare two policies';
+    ui.compare.querySelector('small').textContent = compare ? 'Two policies · shared clock and camera' : 'Select a reference';
   }
   function horizon() { return compare ? Math.max(0, ...comparisonGroup().map((r) => Number(r.horizon_s) || 0)) : Number(current()?.horizon_s) || 0; }
   function setView(view) {
@@ -195,9 +213,9 @@
   // ---------------------------------------------------------------------------
   function createRenderer(host) {
     if (!rendererFailed) {
-      try { return new window.NightjarScene3D(host); } catch (error) { rendererFailed = true; }
+      try { return new window.PandionScene3D(host); } catch (error) { rendererFailed = true; }
     }
-    return new window.NightjarFlatMap(host);
+    return new window.PandionFlatMap(host);
   }
   function rebuildPanels(group) {
     const many = group.length > 1;
@@ -209,7 +227,7 @@
       const renderer = createRenderer(host), canvas = renderer.canvas;
       canvas.dataset.index = String(index);
       if (index === 0) canvas.id = 'map-canvas';
-      canvas.setAttribute('aria-label', 'Mapa 3D interactivo del episodio');
+      canvas.setAttribute('aria-label', 'Interactive 3D map of the episode');
       const view = {panel, host, renderer, index, title: null, scale: null};
       canvas.addEventListener('pointermove', (e) => { if (!e.buttons) hover(e, view); });
       canvas.addEventListener('pointerleave', () => { ui.tooltip.style.display = 'none'; });
@@ -239,7 +257,7 @@
       view.replay = group[index];
       if (view.title) {
         view.title.textContent = policyLabel(group[index]);
-        view.title.title = `Inspeccionar ${policyLabel(group[index])}`;
+        view.title.title = `Inspect ${policyLabel(group[index])}`;
         const selected = group[index] === current();
         view.panel.classList.toggle('selected-policy', selected); view.title.setAttribute('aria-pressed', String(selected));
       } else view.panel.classList.remove('selected-policy');
@@ -250,7 +268,7 @@
   function updateRendererStatus() {
     const fallback = rendererFailed;
     ui.status.hidden = !fallback;
-    if (fallback) ui.status.textContent = 'WebGL no disponible. Vista 2D de compatibilidad; la perspectiva 3D requiere WebGL.';
+    if (fallback) ui.status.textContent = 'WebGL unavailable. Compatibility 2D view; the 3D perspective requires WebGL.';
     for (const v of views) if (fallback) v.renderer.canvas.dataset.renderer = camMode === '2d' ? '2d' : 'canvas-fallback';
     for (const id of ['cam-chase', 'cam-front']) $(id).disabled = fallback;
   }
@@ -264,8 +282,8 @@
     for (const [id, m] of [['view-3d', '3d'], ['view-2d', '2d'], ['cam-chase', 'chase'], ['cam-front', 'front']]) {
       $(id).classList.toggle('selected', m === mode); $(id).setAttribute('aria-pressed', String(m === mode));
     }
-    $('camera-hint').textContent = mode === '2d' ? 'Arrastrar: desplazar · Rueda: zoom · Doble clic: enfocar · Espacio: reproducir'
-      : 'Arrastrar: orbitar · Clic dcho o Mayús: desplazar · Rueda: zoom · Doble clic: enfocar · Espacio: reproducir';
+    $('camera-hint').textContent = mode === '2d' ? 'Drag: pan · Wheel: zoom · Double-click: focus · Space: play'
+      : 'Drag: orbit · Right-click or Shift: pan · Wheel: zoom · Double-click: focus · Space: play';
   }
   function resetCamera() {
     if (camMode === 'chase' || camMode === 'front') markCamMode('3d');
@@ -313,9 +331,9 @@
     });
     const style = ui.style.value, key = $('terrain-color-key'), f = facts(r), img = Fire.imageryFor(r);
     key.hidden = style === 'fuel'; key.dataset.style = style;
-    key.textContent = style === 'elevation' ? `Altitud: ${fmt(f.minElev, 0)}–${fmt(f.maxElev, 0)} m · huella oculta`
-      : style === 'imagery' ? `Sentinel-2 L2A previa al incendio · ${(img?.primary_datetime_utc || '').slice(0, 10) || 'fecha no indicada'}${img?.scenes_used > 1 ? ` · composición de ${img.scenes_used} escenas` : ''} · solo representación`
-      : 'Pendiente: 0–45° · huella oculta';
+    key.textContent = style === 'elevation' ? `Elevation: ${fmt(f.minElev, 0)}–${fmt(f.maxElev, 0)} m · footprint hidden`
+      : style === 'imagery' ? `Pre-fire Sentinel-2 L2A · ${(img?.primary_datetime_utc || '').slice(0, 10) || 'date not recorded'}${img?.scenes_used > 1 ? ` · composite of ${img.scenes_used} scenes` : ''} · display only`
+      : 'Slope: 0–45° · footprint hidden';
     const attribution = $('map-attribution');
     attribution.hidden = !(style === 'imagery' && img); attribution.textContent = img ? `${img.attribution || 'Copernicus Sentinel data'} · ${img.collection || 'Sentinel-2'}` : '';
     if (style !== 'fuel' && f.minElev === null) { ui.style.value = 'fuel'; key.hidden = true; }
@@ -339,8 +357,8 @@
   // ---------------------------------------------------------------------------
   // Playback loop
   // ---------------------------------------------------------------------------
-  function togglePlay() { if (playing) { stop(); return; } if (now >= horizon()) now = 0; playing = true; ui.play.textContent = 'Pausar'; ui.play.setAttribute('aria-label', 'Pausar'); lastFrame = performance.now(); }
-  function stop() { playing = false; ui.play.textContent = 'Reproducir'; ui.play.setAttribute('aria-label', 'Reproducir'); }
+  function togglePlay() { if (playing) { stop(); return; } if (now >= horizon()) now = 0; playing = true; ui.play.textContent = 'Pause'; ui.play.setAttribute('aria-label', 'Pause'); lastFrame = performance.now(); }
+  function stop() { playing = false; ui.play.textContent = 'Play'; ui.play.setAttribute('aria-label', 'Play'); }
   function loop(t) {
     const dt = Math.min(0.1, Math.max(0, (t - lastFrame) / 1000)); lastFrame = t;
     if (playing) { now += dt * speed; if (now >= horizon()) { now = horizon(); stop(); } updateTime(); }
@@ -374,38 +392,38 @@
   function updateHeading(r) {
     const f = facts(r), grid = r.grid || {}, terrain = r.environment?.terrain?.source || r.metadata?.terrain?.source;
     const dem = terrain && typeof terrain === 'object' ? [terrain.provider, terrain.dataset].filter(Boolean).join(' · ') : (typeof terrain === 'string' ? terrain : '');
-    $('map-title').textContent = isStatic(r) ? 'Cartografía histórica inicial · sin episodio' : (r.metadata?.name || r.scenario_id || 'Paisaje');
-    $('map-subtitle').textContent = `${grid.rows ?? '?'}×${grid.cols ?? '?'} celdas · ${fmt(grid.cell_size_m, 0)} m · ${fmt(f.minElev, 0)}–${fmt(f.maxElev, 0)} m · ${r.crs || 'CRS no indicado'}${dem ? ` · ${dem}` : ''}`;
+    $('map-title').textContent = isStatic(r) ? 'Initial historical mapping · no episode' : (canonicalLabel(r.metadata?.name) || r.scenario_id || 'Landscape');
+    $('map-subtitle').textContent = `${grid.rows ?? '?'}×${grid.cols ?? '?'} cells · ${fmt(grid.cell_size_m, 0)} m · ${fmt(f.minElev, 0)}–${fmt(f.maxElev, 0)} m · ${r.crs || 'CRS not recorded'}${dem ? ` · ${dem}` : ''}`;
     const km2 = grid.rows * grid.cols * f.cellHa / 100;
     $('scenario-kicker').textContent = `DEM ${grid.rows}×${grid.cols} (${fmt(km2, 1)} km²) · ELEV ${fmt(f.minElev, 0)}–${fmt(f.maxElev, 0)} m · ${r.crs || '—'} · ${activeScenario.toUpperCase()}`;
     const t = r.metadata?.terrain, note = $('terrain-note');
-    note.hidden = !t?.display_only; note.textContent = t?.display_only ? 'Relieve de referencia: el simulador usó una cuadrícula plana.' : '';
+    note.hidden = !t?.display_only; note.textContent = t?.display_only ? 'Reference terrain: the simulator used a flat grid.' : '';
   }
   function updateClock(r) {
     const env = r.environment || {}, origin = env.time_origin_utc || r.time_origin_utc || r.metadata?.acquired_at_utc;
     const date = origin ? new Date(Date.parse(origin) + episodeTime(r) * 1000) : null;
     $('hud-clock').textContent = date && !Number.isNaN(date.valueOf()) ? `${date.toISOString().slice(11, 19)} UTC` : clock(now);
     const decisions = r.decisions || [], k = decisions.filter((d) => Number(d.time_s) <= episodeTime(r)).length;
-    $('hud-step').textContent = isStatic(r) ? 'CARTOGRAFÍA · SIN EPISODIO' : `DECISIÓN ${String(k).padStart(2, '0')} / ${String(decisions.length).padStart(2, '0')} · T + ${fmt(now / 60, 1)} MIN`;
+    $('hud-step').textContent = isStatic(r) ? 'MAPPING · NO EPISODE' : `DECISION ${String(k).padStart(2, '0')} / ${String(decisions.length).padStart(2, '0')} · T + ${fmt(now / 60, 1)} MIN`;
     const drops = facts(r).drops.filter((d) => d.time_s <= episodeTime(r)).length;
-    $('time-step').textContent = isStatic(r) ? 'Sin episodio' : `Decisión ${k}/${decisions.length} · ${drops} descargas · t = ${fmt(now, 0)} s`;
+    $('time-step').textContent = isStatic(r) ? 'No episode' : `Decision ${k}/${decisions.length} · ${drops} drops · t = ${fmt(now, 0)} s`;
     const wind = windAt(r, episodeTime(r)), station = activeForcing(r, episodeTime(r))?.station_weather || {};
     const moisture = moisturePercent(activeForcing(r, episodeTime(r))?.moisture?.dead_1h);
     const bits = [];
-    if (wind) bits.push(`Viento ${fmt(wind.speed, 1)} m/s hacia ${compass(wind.degrees)}`);
-    if (moisture !== null) bits.push(`Comb. muerto 1 h ${fmt(moisture, 1)} %`);
+    if (wind) bits.push(`Wind ${fmt(wind.speed, 1)} m/s toward ${compass(wind.degrees)}`);
+    if (moisture !== null) bits.push(`1 h dead fuel ${fmt(moisture, 1)} %`);
     if (finite(station.air_temperature_c)) bits.push(`${fmt(station.air_temperature_c, 1)} °C`);
-    if (finite(station.relative_humidity_pct)) bits.push(`HR ${fmt(station.relative_humidity_pct, 0)} %`);
+    if (finite(station.relative_humidity_pct)) bits.push(`RH ${fmt(station.relative_humidity_pct, 0)} %`);
     const ex = Number(ui.relief.value) || 1;
-    bits.push(ex === 1 ? 'Relieve 1:1' : `Relieve exagerado ×${fmt(ex, 1)}`);
+    bits.push(ex === 1 ? 'Terrain 1:1' : `Terrain exaggerated ×${fmt(ex, 1)}`);
     $('hud-conditions').textContent = bits.join(' · ');
     $('compass-wind').style.display = wind ? '' : 'none';
-    $('compass-wind-label').textContent = wind ? `${fmt(wind.speed * 3.6, 0)} km/h` : 'sin viento';
+    $('compass-wind-label').textContent = wind ? `${fmt(wind.speed * 3.6, 0)} km/h` : 'no wind';
   }
   function updateCameraHud() {
     const v = views[0]; if (!v) return;
     const info = v.renderer.cameraInfo(), wind = windAt(v.replay, episodeTime(v.replay));
-    $('hud-cam').textContent = `CÁM · INCL ${fmt(info.pitch, 0)}° · AZ ${fmt(info.azimuth, 0)}°${finite(info.altitude) ? ` · ALT ${fmt(info.altitude, 0)} m` : ''}`;
+    $('hud-cam').textContent = `CAM · TILT ${fmt(info.pitch, 0)}° · AZ ${fmt(info.azimuth, 0)}°${finite(info.altitude) ? ` · ALT ${fmt(info.altitude, 0)} m` : ''}`;
     $('compass-rose').setAttribute('transform', `rotate(${-info.azimuth})`);
     if (wind) $('compass-wind').setAttribute('transform', `rotate(${wind.degrees - info.azimuth})`);
     const nice = (value) => { const p = 10 ** Math.floor(Math.log10(value)), n = value / p; return (n >= 5 ? 5 : n >= 2 ? 2 : 1) * p; };
@@ -413,7 +431,7 @@
       const i = renderer.cameraInfo(); if (!finite(i.metresPerPixel) || i.metresPerPixel <= 0) return;
       const metres = nice(i.metresPerPixel * 110), px = metres / i.metresPerPixel;
       el.replaceChildren(); const bar = document.createElement('i'); bar.style.width = `${px}px`;
-      const text = document.createElement('span'); text.textContent = `${metres >= 1000 ? `${fmt(metres / 1000, 1)} km` : `${fmt(metres, 0)} m`}${i.pitch < 89 ? ' · en el centro' : ''}`;
+      const text = document.createElement('span'); text.textContent = `${metres >= 1000 ? `${fmt(metres / 1000, 1)} km` : `${fmt(metres, 0)} m`}${i.pitch < 89 ? ' · at center' : ''}`;
       el.append(bar, text);
     };
     label(v.renderer, $('map-scale'));
@@ -466,24 +484,24 @@
     if (isStatic(r)) {
       for (const id of ['live-area', 'live-front', 'live-water', 'live-phase']) $(id).textContent = '—';
       $('live-area').textContent = fmt(areaAt(r, 0), 0);
-      $('live-area-delta').textContent = 'perímetro cartografiado'; $('live-front-cells').textContent = '—'; $('live-drops').textContent = '—'; $('live-tank').textContent = 'sin episodio';
-      $('fleet-body').replaceChildren(); $('fleet-count').textContent = '0 unidades';
+      $('live-area-delta').textContent = 'mapped perimeter'; $('live-front-cells').textContent = '—'; $('live-drops').textContent = '—'; $('live-tank').textContent = 'no episode';
+      $('fleet-body').replaceChildren(); $('fleet-count').textContent = '0 units';
       return;
     }
     const fire = Fire.fireState(r, t), area = fire.count * f.cellHa, area0 = areaAt(r, 0);
     $('live-area').textContent = fmt(area, area < 100 ? 2 : 0);
-    $('live-area-delta').textContent = `+${fmt(area - area0, area - area0 < 100 ? 2 : 0)} ha desde t = 0`;
+    $('live-area-delta').textContent = `+${fmt(area - area0, area - area0 < 100 ? 2 : 0)} ha since t = 0`;
     $('live-front').textContent = fmt(fire.front.length * f.cellHa, 1);
-    $('live-front-cells').textContent = `${fire.front.length} celdas perimetrales`;
+    $('live-front-cells').textContent = `${fire.front.length} perimeter cells`;
     const released = f.releases.filter((x) => x.t <= t);
     $('live-water').textContent = fmt(released.reduce((s, x) => s + x.litres, 0), 0);
-    $('live-drops').textContent = `${f.drops.filter((d) => d.time_s <= t).length} descargas registradas`;
+    $('live-drops').textContent = `${f.drops.filter((d) => d.time_s <= t).length} drops recorded`;
     const a = aircraftAt(r, t);
     $('live-phase').textContent = a ? a.phase : '—';
     $('live-tank').textContent = a && finite(a.water) ? `${fmt(a.water, 0)}${a.capacity ? ` / ${fmt(a.capacity, 0)}` : ''} L` : '—';
     const body = $('fleet-body'); body.replaceChildren();
     const fleet = fleetAt(r, t);
-    $('fleet-count').textContent = `${fleet.length} ${fleet.length === 1 ? 'unidad' : 'unidades'}`;
+    $('fleet-count').textContent = `${fleet.length} ${fleet.length === 1 ? 'unit' : 'units'}`;
     for (const craft of fleet) {
       const tr = document.createElement('tr'); tr.dataset.aircraftIndex = craft.index;
       for (const text of [craft.callsign, 'CL-415 ref.', craft.phase, finite(craft.water) ? `${fmt(craft.water, 0)}${craft.capacity ? ` / ${fmt(craft.capacity, 0)}` : ''} L` : '—']) {
@@ -509,8 +527,8 @@
 
   function updateDecisionList(r) {
     const list = Array.isArray(r.decisions) ? r.decisions : [];
-    ui.decisions.replaceChildren(); $('decision-count').textContent = `${list.length} ${list.length === 1 ? 'registro' : 'registros'}`;
-    if (!list.length) { const empty = document.createElement('div'); empty.className = 'empty-state'; empty.textContent = isStatic(r) ? 'Esta capa cartográfica no contiene un episodio de simulación.' : 'Este episodio no contiene decisiones registradas.'; ui.decisions.append(empty); return; }
+    ui.decisions.replaceChildren(); $('decision-count').textContent = `${list.length} ${list.length === 1 ? 'record' : 'records'}`;
+    if (!list.length) { const empty = document.createElement('div'); empty.className = 'empty-state'; empty.textContent = isStatic(r) ? 'This mapping layer does not contain a simulation episode.' : 'This episode contains no recorded decisions.'; ui.decisions.append(empty); return; }
     for (const d of list) {
       const item = document.createElement('button'); item.type = 'button'; item.className = 'decision-item'; item.dataset.time = String(d.time_s ?? 0);
       const type = orderType(d); if (type === 'DROP') item.classList.add('drop'); if (type === 'RETURN_TO_REFILL') item.classList.add('refill');
@@ -522,7 +540,7 @@
   }
   function decisionLabel(d) {
     const order = d.order || d.action || {}, code = orderType(d);
-    const kind = ({HOLD: 'Esperar', DROP: 'Descargar', RETURN_TO_REFILL: 'Volver a recargar'})[code] || code || 'Decisión registrada';
+    const kind = ({HOLD: 'Hold', DROP: 'Drop', RETURN_TO_REFILL: 'Return to refill'})[code] || code || 'Recorded decision';
     const target = order.target_m || order.position_m;
     return Array.isArray(target) ? `${kind} · (${fmt(target[0], 0)}, ${fmt(target[1], 0)}) m` : String(kind);
   }
@@ -530,25 +548,25 @@
   function latestObservation(r, t) { return latestDecision(r, t)?.observation || null; }
   function updateInspector(r) {
     const decision = latestDecision(r), observation = decision?.observation;
-    $('inspector-time').textContent = decision ? `Emitida ${clock(Number(decision.time_s))} · hace ${fmt(Math.max(0, Math.min(now, r.horizon_s) - Number(decision.time_s)), 0)} s` : 'Sin decisión disponible';
-    $('inspector-action').textContent = decision ? decisionLabel(decision) : r.horizon_s === 0 ? 'Cartografía histórica' : 'Aún no hay decisiones registradas';
+    $('inspector-time').textContent = decision ? `Issued ${clock(Number(decision.time_s))} · ${fmt(Math.max(0, Math.min(now, r.horizon_s) - Number(decision.time_s)), 0)} s ago` : 'No decision available';
+    $('inspector-action').textContent = decision ? decisionLabel(decision) : r.horizon_s === 0 ? 'Historical mapping' : 'No decisions recorded yet';
     const reports = observation?.fire_reports;
     $('inspector-observation').textContent = observation
-      ? `${Array.isArray(reports) ? reports.length : '—'} celdas con detección entregada. ${latestDeliveredWeather(r) ? 'Meteorología entregada disponible.' : 'Sin meteorología entregada.'}`
-      : 'Este instante no contiene una observación registrada del controlador.';
+      ? `${Array.isArray(reports) ? reports.length : '—'} cells with a delivered detection. ${latestDeliveredWeather(r) ? 'Delivered weather available.' : 'No delivered weather.'}`
+      : 'This time has no recorded controller observation.';
   }
   function updateComparisonResults() {
     const box = ui.comparisonResults; box.replaceChildren(); box.classList.remove('message');
     const group = comparisonGroup();
     if (!(compare && group.length > 1)) {
       box.hidden = activeView !== 'comparacion';
-      if (!box.hidden) { box.classList.add('message'); box.textContent = 'Este escenario no dispone de dos episodios para comparar.'; }
+      if (!box.hidden) { box.classList.add('message'); box.textContent = 'This scenario does not have two episodes to compare.'; }
       return;
     }
     box.hidden = false;
     const table = document.createElement('table'); table.className = 'compare-table';
     const head = document.createElement('thead'), hr = document.createElement('tr');
-    ['Política', 'Final (ha)', 'Agua (L)', 'Vuelo', 'Desc.'].forEach((s) => { const th = document.createElement('th'); th.textContent = s; hr.append(th); });
+    ['Policy', 'Final (ha)', 'Water (L)', 'Flight', 'Drops'].forEach((s) => { const th = document.createElement('th'); th.textContent = s; hr.append(th); });
     head.append(hr); const body = document.createElement('tbody');
     group.forEach((r) => {
       const tr = document.createElement('tr'), m = r.aircraft_metrics || {};
@@ -600,7 +618,7 @@
   function drawProfile(r) {
     const canvas = $('chart-profile'); if (!canvas.offsetParent) return;
     const {ctx, w, h} = prepareCanvas(canvas), f = facts(r), t = episodeTime(r);
-    if (f.minElev === null) { ctx.fillStyle = '#7a8aa0'; ctx.font = '11px ui-sans-serif, system-ui'; ctx.fillText('Sin DEM en este escenario', 12, h / 2); $('profile-foot').textContent = '—'; return; }
+    if (f.minElev === null) { ctx.fillStyle = '#7a8aa0'; ctx.font = '11px ui-sans-serif, system-ui'; ctx.fillText('No DEM in this scenario', 12, h / 2); $('profile-foot').textContent = '—'; return; }
     const W = f.cols * f.size, Hm = f.rows * f.size;
     const fire = Fire.fireState(r, t), centre = fire.frontCentroid || fire.burnedCentroid || [W / 2, Hm / 2];
     const wind = windAt(r, t), dir = wind && wind.speed > 0 ? [wind.east / wind.speed, wind.north / wind.speed] : [1, 0];
@@ -635,12 +653,12 @@
     ctx.beginPath(); samples.forEach((p, k) => k ? ctx.lineTo(X(p.s), Y(p.e)) : ctx.moveTo(X(p.s), Y(p.e))); ctx.strokeStyle = '#7dd3fc'; ctx.lineWidth = 1.8; ctx.stroke();
     const ec = elevAt(centre[0], centre[1]);
     ctx.beginPath(); ctx.arc(X(0), Y(ec), 4, 0, Math.PI * 2); ctx.fillStyle = fire.frontCentroid ? '#f87171' : '#fbbf24'; ctx.fill(); ctx.strokeStyle = '#fff'; ctx.lineWidth = 1; ctx.stroke();
-    ctx.fillStyle = '#fca5a5'; ctx.textAlign = 'center'; ctx.fillText(`${fire.frontCentroid ? 'FRENTE' : 'CENTRO'} · ${fmt(ec, 0)} m`, clampNum(X(0), 60, w - 60), Math.max(T + 8, Y(ec) - 8));
+    ctx.fillStyle = '#fca5a5'; ctx.textAlign = 'center'; ctx.fillText(`${fire.frontCentroid ? 'FRONT' : 'CENTER'} · ${fmt(ec, 0)} m`, clampNum(X(0), 60, w - 60), Math.max(T + 8, Y(ec) - 8));
     ctx.fillStyle = '#7a8aa0'; ctx.textAlign = 'left'; ctx.fillText('0', L, h - 6); ctx.textAlign = 'right'; ctx.fillText(`${fmt((tmax - tmin) / 1000, 1)} km`, w - R, h - 6);
     let rise = 0; for (let k = 1; k < samples.length; k++) rise += Math.abs(samples[k].e - samples[k - 1].e);
     const bearing = (Math.atan2(dir[0], dir[1]) * 180 / Math.PI + 360) % 360;
     $('profile-label').textContent = `${compass(bearing + 180)} → ${compass(bearing)}`;
-    $('profile-foot').replaceChildren(...[`Corte ${wind ? 'según el viento' : 'oeste–este'}`, `Máx ${fmt(hi, 0)} m`, `Pendiente media ${fmt(rise / (tmax - tmin) * 100, 0)} %`].map((s) => { const e = document.createElement('span'); e.textContent = s; return e; }));
+    $('profile-foot').replaceChildren(...[`Section ${wind ? 'along wind' : 'west–east'}`, `Max ${fmt(hi, 0)} m`, `Mean slope ${fmt(rise / (tmax - tmin) * 100, 0)} %`].map((s) => { const e = document.createElement('span'); e.textContent = s; return e; }));
   }
 
   // ---- tooltip ----------------------------------------------------------------------
@@ -656,9 +674,9 @@
     const {row, col} = hit, f = facts(r), origin = Array.isArray(r.origin_m) ? r.origin_m : [0, 0];
     const at = r.arrival_time_s?.[row]?.[col], wx = Number(origin[0] || 0) + (col + 0.5) * f.size, wy = Number(origin[1] || 0) + (row + 0.5) * f.size;
     const reported = latestObservation(r, episodeTime(r))?.fire_reports?.some((c) => c[0] === row && c[1] === col);
-    const arrival = ui.state.value === 'observation' ? (reported ? 'detección entregada' : 'sin detección entregada') : isStatic(r) ? 'perímetro histórico inicial' : `llegada ${finite(at) ? `${fmt(at, 0)} s (${clock(at)})` : 'no alcanzada'}`;
+    const arrival = ui.state.value === 'observation' ? (reported ? 'delivered detection' : 'no delivered detection') : isStatic(r) ? 'initial historical perimeter' : `arrival ${finite(at) ? `${fmt(at, 0)} s (${clock(at)})` : 'not reached'}`;
     const p = r.__painter;
-    ui.tooltip.textContent = `Celda [${row}, ${col}] · ${fmt(wx, 0)} E, ${fmt(wy, 0)} N\nCombustible ${r.fuel_grid?.[row]?.[col] ?? '—'}${r.water_mask?.[row]?.[col] ? ' · agua' : ''} · Elevación ${fmt(r.elevation_m?.[row]?.[col], 0)} m · Pendiente ${p ? fmt(p.slopeDeg(row, col), 0) : '—'}°\n${arrival} · ${r.crs || 'CRS no indicado'}`;
+    ui.tooltip.textContent = `Celda [${row}, ${col}] · ${fmt(wx, 0)} E, ${fmt(wy, 0)} N\nFuel ${r.fuel_grid?.[row]?.[col] ?? '—'}${r.water_mask?.[row]?.[col] ? ' · water' : ''} · Elevation ${fmt(r.elevation_m?.[row]?.[col], 0)} m · Slope ${p ? fmt(p.slopeDeg(row, col), 0) : '—'}°\n${arrival} · ${r.crs || 'CRS not recorded'}`;
     ui.tooltip.style.whiteSpace = 'pre-line'; ui.tooltip.style.display = 'block';
     const box = ui.stage.getBoundingClientRect();
     ui.tooltip.style.left = `${Math.max(8, Math.min(e.clientX - box.left + 14, box.width - ui.tooltip.offsetWidth - 8))}px`;
@@ -675,17 +693,17 @@
   }
   function updateEnvironment(r) {
     const env = r.environment || {}, stat = isStatic(r);
-    const modeName = stat ? 'Condiciones iniciales · sin episodio' : env.weather_mode === 'station_intervals' ? 'Estación · intervalos' : env.weather_mode === 'constant_synthetic' ? 'Viento sintético constante' : env.weather_mode === 'synthetic_intervals' ? 'Viento sintético variable' : 'Sin datos meteorológicos';
+    const modeName = stat ? 'Initial conditions · no episode' : env.weather_mode === 'station_intervals' ? 'Station · intervals' : env.weather_mode === 'constant_synthetic' ? 'Constant synthetic wind' : env.weather_mode === 'synthetic_intervals' ? 'Variable synthetic wind' : 'No weather data';
     $('environment-mode').textContent = modeName; ui.environment.classList.toggle('is-empty', !env.weather_mode && !stat); ui.environment.classList.toggle('is-static', stat);
     const t = Math.min(now, r.horizon_s);
     const origin = env.time_origin_utc || r.time_origin_utc || r.metadata?.acquired_at_utc, date = origin ? new Date(Date.parse(origin) + (t * 1000)) : null;
-    $('environment-time').textContent = `Hora UTC ${date && !Number.isNaN(date.valueOf()) ? date.toISOString().replace('.000Z', 'Z') : '—'} · t = ${fmt(t, 0)} s`;
+    $('environment-time').textContent = `UTC time ${date && !Number.isNaN(date.valueOf()) ? date.toISOString().replace('.000Z', 'Z') : '—'} · t = ${fmt(t, 0)} s`;
     let active = null;
     if (env.weather_mode === 'station_intervals' || env.weather_mode === 'synthetic_intervals') active = activeForcing(r, t);
     else if (env.weather_mode === 'constant_synthetic') active = {midflame_wind_to_m_s: r.metadata?.wind_to_m_s || r.wind_to_m_s || null, moisture: null, station_weather: null};
     const wind = vectorValue(active?.midflame_wind_to_m_s), station = active?.station_weather || {};
     $('environment-wind').textContent = wind ? `${fmt(wind.speed, 1)} m/s · ${compass(wind.degrees)}` : '—';
-    $('environment-wind-detail').textContent = wind ? `Hacia ${compass(wind.degrees)}${finite(station.wind_speed_2m_m_s) ? ` · estación 2 m ${fmt(station.wind_speed_2m_m_s, 1)} m/s desde ${fmt(station.wind_from_deg, 0)}°` : ''}` : 'Dirección hacia —';
+    $('environment-wind-detail').textContent = wind ? `Toward ${compass(wind.degrees)}${finite(station.wind_speed_2m_m_s) ? ` · station 2 m ${fmt(station.wind_speed_2m_m_s, 1)} m/s from ${fmt(station.wind_from_deg, 0)}°` : ''}` : 'Direction toward —';
     $('environment-temperature').textContent = finite(station.air_temperature_c) ? `${fmt(station.air_temperature_c, 1)} °C` : '—';
     $('environment-humidity').textContent = finite(station.relative_humidity_pct) ? `${fmt(station.relative_humidity_pct, 0)} %` : '—';
     $('environment-rain').textContent = finite(station.precipitation_mm) ? `${fmt(station.precipitation_mm, 1)} mm` : '—';
@@ -693,48 +711,48 @@
     const f = facts(r);
     $('environment-elevation').textContent = f.minElev !== null ? `${fmt(f.minElev, 0)}–${fmt(f.maxElev, 0)} m` : '—';
     const metadataTerrain = r.metadata?.terrain || {}, environmentTerrain = env.terrain || {};
-    const terrainSource = environmentTerrain.source ?? metadataTerrain.source ?? {}, terrainLabel = environmentTerrain.label || metadataTerrain.label || '';
+    const terrainSource = environmentTerrain.source ?? metadataTerrain.source ?? {}, terrainLabel = canonicalLabel(environmentTerrain.label || metadataTerrain.label) || '';
     const displayOnly = environmentTerrain.display_only ?? metadataTerrain.display_only;
     const hasSource = typeof terrainSource === 'string' ? terrainSource.trim().length > 0 : !!terrainSource && typeof terrainSource === 'object' && Object.keys(terrainSource).length > 0;
-    $('environment-elevation-use').textContent = stat ? 'Capa histórica; no hay episodio' : displayOnly ? 'DEM de referencia; no usado en física' : hasSource ? 'DEM usado por la física' : f.minElev !== null ? 'Elevación disponible; fuente DEM y uso físico no documentados' : 'Sin DEM disponible';
+    $('environment-elevation-use').textContent = stat ? 'Historical layer; no episode' : displayOnly ? 'Reference DEM; not used by the physics' : hasSource ? 'DEM used by the physics' : f.minElev !== null ? 'Elevation available; DEM source and physics use not recorded' : 'No DEM available';
     const ws = env.station || {}, sourceLabel = [ws.code, ws.name, ws.provider, ws.dataset].filter(Boolean).join(' · ');
     const provenance = Array.isArray(env.sources) ? env.sources.map((s) => typeof s === 'string' ? s : (s.provider || s.name || s.dataset)).filter(Boolean).join(', ') : '';
-    const availability = active && env.weather_mode === 'station_intervals' ? ` · Intervalo ${active.interval_start_utc || clock(active.start_s)}–${active.interval_end_utc || clock(active.end_s)}; agregado disponible al cierre t = ${fmt(active.available_at_s, 0)} s` : '';
+    const availability = active && env.weather_mode === 'station_intervals' ? ` · Interval ${active.interval_start_utc || clock(active.start_s)}–${active.interval_end_utc || clock(active.end_s)}; aggregate available at close t = ${fmt(active.available_at_s, 0)} s` : '';
     const uiTerrain = typeof terrainSource === 'string' ? terrainSource : [terrainSource.provider, terrainSource.name, terrainSource.dataset].filter(Boolean).join(' · ');
-    $('environment-source').textContent = `${stat ? 'Condiciones iniciales del escenario' : 'Forzamiento actual de simulación'} · meteorología: ${env.weather_mode === 'station_intervals' ? (sourceLabel || provenance || 'estación indicada en el replay') : 'no disponible para el clima sintético'}${availability} · Relieve: ${uiTerrain || terrainLabel || 'fuente no indicada'}`;
+    $('environment-source').textContent = `${stat ? 'Initial scenario conditions' : 'Current simulation forcing'} · weather: ${env.weather_mode === 'station_intervals' ? (sourceLabel || provenance || 'station listed in the replay') : 'not available for synthetic weather'}${availability} · Terrain: ${uiTerrain || terrainLabel || 'source not recorded'}`;
     const observation = latestDeliveredWeather(r);
-    $('environment-observation').textContent = observation ? describeWeather(observation) : 'No disponible en este instante.';
+    $('environment-observation').textContent = observation ? describeWeather(observation) : 'Not available at this time.';
   }
   function vectorValue(v) { if (!Array.isArray(v) || v.length < 2 || !finite(Number(v[0])) || !finite(Number(v[1]))) return null; const u = Number(v[0]), north = Number(v[1]); return {speed: Math.hypot(u, north), degrees: (Math.atan2(u, north) * 180 / Math.PI + 360) % 360}; }
   function moisturePercent(value) { if (value && typeof value === 'object') value = value.value ?? value.fraction ?? value.moisture_fraction ?? value.pct ?? value.estimated_fraction; if (!finite(value)) return null; return Math.abs(value) <= 1 ? value * 100 : value; }
-  function describeWeather(w) { const wind = vectorValue(w.midflame_wind_to_m_s), station = w.station_weather || {}, bits = []; if (wind) bits.push(`viento de simulación ${fmt(wind.speed, 1)} m/s hacia ${compass(wind.degrees)}`); if (finite(station.air_temperature_c)) bits.push(`${fmt(station.air_temperature_c, 1)} °C`); if (finite(station.relative_humidity_pct)) bits.push(`${fmt(station.relative_humidity_pct, 0)} % HR`); if (finite(station.precipitation_mm)) bits.push(`${fmt(station.precipitation_mm, 1)} mm lluvia`); if (w.moisture?.dead_1h != null) bits.push(`combustible muerto 1 h estimado ${fmt(moisturePercent(w.moisture.dead_1h), 1)} %`); return bits.join(' · ') || 'Registro disponible, sin campos reconocidos'; }
+  function describeWeather(w) { const wind = vectorValue(w.midflame_wind_to_m_s), station = w.station_weather || {}, bits = []; if (wind) bits.push(`simulation wind ${fmt(wind.speed, 1)} m/s toward ${compass(wind.degrees)}`); if (finite(station.air_temperature_c)) bits.push(`${fmt(station.air_temperature_c, 1)} °C`); if (finite(station.relative_humidity_pct)) bits.push(`${fmt(station.relative_humidity_pct, 0)} % HR`); if (finite(station.precipitation_mm)) bits.push(`${fmt(station.precipitation_mm, 1)} mm rain`); if (w.moisture?.dead_1h != null) bits.push(`estimated 1 h dead fuel ${fmt(moisturePercent(w.moisture.dead_1h), 1)} %`); return bits.join(' · ') || 'Record available, no recognized fields'; }
   function latestDeliveredWeather(r) { const records = []; for (const d of (r.decisions || [])) { const issued = Number(d.time_s), weather = d.observation?.environment_weather; if (!weather || !Number.isFinite(issued) || issued > Math.min(now, r.horizon_s)) continue; const available = Number(weather.available_at_s); const deliveredAt = Number.isFinite(available) ? available : issued; if (deliveredAt <= now) records.push({weather, deliveredAt, issued}); } records.sort((a, b) => a.deliveredAt - b.deliveredAt || a.issued - b.issued); return records.at(-1)?.weather || null; }
   function updateProvenance(r) {
     const m = r.metadata || {}, terrain = m.terrain || {}, training = m.training || {};
-    const splitNames = {development: 'Desarrollo', validation: 'Validación', reserved: 'Reserva'};
+    const splitNames = {development: 'Development', validation: 'Validation', reserved: 'Reserved'};
     const items = [
-      ['Fuente', sourceSummary(m), m.acquired_at_utc ? `Adquirido: ${m.acquired_at_utc}` : 'Época de adquisición no indicada'],
-      ['Escenario', m.name || r.scenario_id || '—', `Partición: ${splitNames[m.split] || m.split || '—'} · Semilla: ${m.seed ?? '—'}`],
-      ['Relieve', terrain.label || 'Sin capa de elevación', terrainSummary(terrain)],
-      ...(Fire.imageryFor(r) ? [(() => { const i = Fire.imageryFor(r); return ['Imagen base (solo visual)', `Sentinel-2 L2A previa · ${(i.primary_datetime_utc || '').slice(0, 10)}`,
-        `${i.attribution || ''} · ${i.scenes_used} escena(s) · ${i.pixel_size_m} m/px · SHA-256 ${(i.array_sha256 || '').slice(0, 12)}. No la usa el simulador.`]; })()] : []),
-      ['Modelo de política', training.label || policyLabel(r), trainingSummary(training, m)],
+      ['Source', canonicalLabel(sourceSummary(m)), m.acquired_at_utc ? `Acquired: ${m.acquired_at_utc}` : 'Acquisition date not recorded'],
+      ['Scenario', canonicalLabel(m.name) || r.scenario_id || '—', `Split: ${splitNames[m.split] || m.split || '—'} · Seed: ${m.seed ?? '—'}`],
+      ['Terrain', canonicalLabel(terrain.label) || 'No elevation layer', terrainSummary(terrain)],
+      ...(Fire.imageryFor(r) ? [(() => { const i = Fire.imageryFor(r); return ['Base imagery (visual only)', `Pre-fire Sentinel-2 L2A · ${(i.primary_datetime_utc || '').slice(0, 10)}`,
+        `${i.attribution || ''} · ${i.scenes_used} scene(s) · ${i.pixel_size_m} m/px · SHA-256 ${(i.array_sha256 || '').slice(0, 12)}. Not used by the simulator.`]; })()] : []),
+      ['Policy model', canonicalLabel(training.label) || policyLabel(r), trainingSummary(training, m)],
       ...(training.checkpoint_name ? [['Checkpoint', training.checkpoint_name, `Fold ${training.fold || '—'} · SHA-256 ${(training.checkpoint_sha256 || '').slice(0, 12)}`]] : []),
-      ...(training.checkpoint_report_binding ? [['Procedencia del modelo', training.checkpoint_report_binding === 'verified' ? 'Pesos e informe vinculados por hash' : 'Asociación legacy indicada al cargar', (training.warnings || []).join(' ')]] : []),
-      ['Ejecución', policyLabel(r), `${fmt(r.horizon_s, 0)} s · ${m.seed == null ? 'semilla —' : `semilla ${m.seed}`}`],
-      ['Supuestos', typeof m.assumptions === 'string' ? m.assumptions : 'Consulta el detalle técnico', `Versión de esquema: ${r.schema_version || m.schema_version || '—'}`]
+      ...(training.checkpoint_report_binding ? [['Model provenance', training.checkpoint_report_binding === 'verified' ? 'Weights and report bound by hash' : 'Legacy association flagged at load', (training.warnings || []).join(' ')]] : []),
+      ['Run', policyLabel(r), `${fmt(r.horizon_s, 0)} s · ${m.seed == null ? 'seed —' : `seed ${m.seed}`}`],
+      ['Assumptions', typeof m.assumptions === 'string' ? m.assumptions : 'See the technical details', `Schema version: ${r.schema_version || m.schema_version || '—'}`]
     ];
     const box = $('provenance'); box.replaceChildren();
     items.forEach(([label, value, detail]) => { const c = document.createElement('article'); c.className = 'provenance-card'; const a = document.createElement('small'); a.textContent = label; const b = document.createElement('b'); b.textContent = esc(value); const p = document.createElement('p'); p.textContent = esc(detail); c.append(a, b, p); box.append(c); });
     const technical = {source: m.source || null, source_kind: m.source_kind || null, terrain_source: terrain.source || null, terrain_attribution: typeof terrain.source?.attribution === 'string' ? `${terrain.source.attribution.startsWith('produced using') ? '' : 'produced using Copernicus WorldDEM-30 '}${terrain.source.attribution}` : null, training_dataset: training.dataset || null, scenario_hash: m.scenario_hash || null, checkpoint_sha256: training.checkpoint_sha256 || null, report_sha256: training.report_sha256 || null, inference: training.inference || null, execution: training.execution || null, assumptions: m.assumptions || null};
     $('technical-provenance').textContent = JSON.stringify(technical, null, 2);
   }
-  function sourceSummary(m) { const source = m.source; if (source && typeof source === 'object') { const n = [source.provider || source.name || source.collection || null, source.dataset || source.product || null].filter(Boolean); return n.join(' · ') || 'Fuente documentada'; } return ({copernicus_cems: 'Cartografía Copernicus', synthetic_fixture: 'Mapa sintético'})[m.source_kind] || source || m.source_kind || 'No indicada'; }
-  function terrainSummary(t) { const source = t.source; if (source && typeof source === 'object') { const n = [source.provider || source.name || null, source.dataset || source.product || null, source.native_resolution_m ? `${source.native_resolution_m} m` : null].filter(Boolean); return n.join(' · ') || 'Resolución nativa no indicada'; } return typeof source === 'string' ? source : 'Resolución nativa no indicada'; }
-  function trainingSummary(t, m) { const dataset = t.dataset, pool = dataset && typeof dataset === 'object' ? (dataset.splits?.development?.length ?? dataset.pool_size ?? dataset.count) : t.dataset_size; return [`Semilla ${t.seed ?? m.seed ?? '—'}`, t.updates == null ? null : `${t.updates} actualizaciones`, pool == null ? null : `${pool} casos de entrenamiento`, t.dev_cases == null ? null : `${t.dev_cases} casos de desarrollo`, t.status || null].filter(Boolean).join(' · ') || 'Estado no documentado'; }
+  function sourceSummary(m) { const source = m.source; if (source && typeof source === 'object') { const n = [source.provider || source.name || source.collection || null, source.dataset || source.product || null].filter(Boolean); return n.join(' · ') || 'Documented source'; } return ({copernicus_cems: 'Copernicus mapping', synthetic_fixture: 'Synthetic map'})[m.source_kind] || source || m.source_kind || 'Not recorded'; }
+  function terrainSummary(t) { const source = t.source; if (source && typeof source === 'object') { const n = [source.provider || source.name || null, source.dataset || source.product || null, source.native_resolution_m ? `${source.native_resolution_m} m` : null].filter(Boolean); return n.join(' · ') || 'Native resolution not recorded'; } return typeof source === 'string' ? source : 'Native resolution not recorded'; }
+  function trainingSummary(t, m) { const dataset = t.dataset, pool = dataset && typeof dataset === 'object' ? (dataset.splits?.development?.length ?? dataset.pool_size ?? dataset.count) : t.dataset_size; return [`Seed ${t.seed ?? m.seed ?? '—'}`, t.updates == null ? null : `${t.updates} updates`, pool == null ? null : `${pool} training cases`, t.dev_cases == null ? null : `${t.dev_cases} development cases`, canonicalLabel(t.status) || null].filter(Boolean).join(' · ') || 'Status not recorded'; }
 
   // Read-only inspection handle for browser regression checks.
-  window.NightjarViewer = {get views() { return views; }, get now() { return now; }, get cameraMode() { return camMode; }};
+  window.PandionViewer = {get views() { return views; }, get now() { return now; }, get cameraMode() { return camMode; }};
   $('fleet-select').addEventListener('change', e => { selectedAircraftIndex = Number(e.target.value); updateTime(); });
   init();
 })();

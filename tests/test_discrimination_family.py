@@ -4,7 +4,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from nightjar.discrimination_family import (
+from pandion.discrimination_family import (
     DEVELOPMENT_INDICES,
     VALIDATION_INDICES,
     RESERVED_INDICES,
@@ -15,7 +15,7 @@ from nightjar.discrimination_family import (
     generate_domain_randomized_scenario,
     write_family,
 )
-from nightjar.integrated import run_integrated
+from pandion.integrated import run_integrated
 
 
 class DiscriminationFamilyTests(unittest.TestCase):

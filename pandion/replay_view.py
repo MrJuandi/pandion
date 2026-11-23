@@ -79,20 +79,20 @@ def normalize_replay(replay: dict) -> dict:
     provenance = out.get("provenance", {})
     provenance = provenance if isinstance(provenance, dict) else {"source": provenance}
     meta = {
-        "name": out.get("name", out.get("scenario_id", "Nightjar")),
+        "name": out.get("name", out.get("scenario_id", "Pandion")),
         "source_kind": out.get("source_kind", provenance.get("source_kind", "unspecified")),
-        "source": provenance.get("source", "Origen no registrado"),
+        "source": provenance.get("source", "Source not recorded"),
         "split": out.get("split", "unspecified"), "seed": out.get("seed"),
         "scenario_hash": out.get("scenario_hash", out.get("scenario_sha256")),
         "acquired_at_utc": out.get("time_origin_utc", provenance.get("image_acquired_at_utc")),
         "assumptions": provenance.get("assumptions", {}),
-        "terrain": {"label": "Relieve del simulador" if any(v is not None for row in out["elevation_m"] for v in row) else "Sin elevaciones registradas",
+        "terrain": {"label": "Simulator terrain" if any(v is not None for row in out["elevation_m"] for v in row) else "No elevations recorded",
                     "source": "", "display_only": False},
     }
     meta.update(out.get("metadata", {}))
     out["metadata"] = meta
-    out.setdefault("scenario_id", "Nightjar")
-    out.setdefault("policy", "Sin política registrada")
+    out.setdefault("scenario_id", "Pandion")
+    out.setdefault("policy", "No policy recorded")
     out.setdefault("affected_area_ha", None)
     out.setdefault("aircraft_metrics", {})
     out.setdefault("decisions", [])

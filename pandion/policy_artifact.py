@@ -162,11 +162,11 @@ def load_policy_artifact(checkpoint: Path, report_path: Path, scenarios: list[di
     except RuntimeError as exc:
         raise ValueError(f"checkpoint architecture does not match report: {exc}") from exc
     model.to(device).eval()
-    model._nightjar_inference = {**config, "imagery_dir": image_path, "device": device}
+    model._pandion_inference = {**config, "imagery_dir": image_path, "device": device}
     if report.get("execution", {}).get("source_sha256") and report["execution"]["source_sha256"] != execution_provenance()["source_sha256"]:
         warnings.append("Current source differs from the report; this is inference under the current simulator version.")
-    info = {"label": "PPO geográfico", "seed": report.get("selected_seed", report.get("seed")),
-            "updates": report.get("updates"), "status": "Entrenamiento exploratorio",
+    info = {"label": "Geographic PPO", "seed": report.get("selected_seed", report.get("seed")),
+            "updates": report.get("updates"), "status": "Exploratory training",
             "checkpoint_sha256": digest, "report_sha256": file_hash(report_path),
             "checkpoint_report_binding": "verified" if artifact else "caller_supplied_legacy",
             "inference": {**config, "imagery_dir": str(image_path) if image_path else None},

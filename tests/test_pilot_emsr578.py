@@ -11,7 +11,7 @@ from zipfile import ZipFile
 
 import numpy as np
 
-from nightjar import pilot_emsr578
+from pandion import pilot_emsr578
 
 
 class GeodeticProjectionTests(unittest.TestCase):

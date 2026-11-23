@@ -7,9 +7,9 @@ from unittest.mock import patch
 
 import numpy as np
 
-from nightjar.geographic_family import build_synthetic_cems_fixture, generate_geographic_scenario
-from nightjar.geographic_ppo import HAS_TORCH, build_policy_model, rollout_geographic, with_fleet
-from nightjar.geographic_rollouts import RolloutBackend, rollout_geographic_batch
+from pandion.geographic_family import build_synthetic_cems_fixture, generate_geographic_scenario
+from pandion.geographic_ppo import HAS_TORCH, build_policy_model, rollout_geographic, with_fleet
+from pandion.geographic_rollouts import RolloutBackend, rollout_geographic_batch
 from tests.test_policy_inputs import PX, write_imagery
 
 if HAS_TORCH:
@@ -121,7 +121,7 @@ class BatchedRolloutTests(unittest.TestCase):
                 self.assert_episodes_equal([result[0] for result in serial], records)
 
     def test_augmented_image_and_slot_feature_inputs_match(self):
-        from nightjar.augmentation import augment_scenario
+        from pandion.augmentation import augment_scenario
 
         augmented = [augment_scenario(sc, 4) for sc in self.scenarios[:2]]
         with tempfile.TemporaryDirectory() as temp:
@@ -173,7 +173,7 @@ class BatchedRolloutTests(unittest.TestCase):
             backend.reset([])
 
     def test_all_forced_episode_has_no_records_or_policy_calls(self):
-        from nightjar.model import ActionMapper
+        from pandion.model import ActionMapper
 
         original_mask = ActionMapper.compute_mask
         def one_valid_action(mapper, observation):
@@ -226,15 +226,15 @@ class BatchedRolloutTests(unittest.TestCase):
         self.assert_episodes_equal(runs[0][0], runs[1][0])
 
     def test_training_batches_keep_episode_count_and_pack_once_per_update(self):
-        from nightjar import geographic_ppo as gp
+        from pandion import geographic_ppo as gp
         collected = []
         real = rollout_geographic_batch
         def collect(*args, **kwargs):
             result = real(*args, **kwargs)
             collected.append(len(result[0]))
             return result
-        with patch("nightjar.geographic_rollouts.rollout_geographic_batch", side_effect=collect), \
-             patch("nightjar.geographic_ppo._pack_episode", wraps=gp._pack_episode) as pack:
+        with patch("pandion.geographic_rollouts.rollout_geographic_batch", side_effect=collect), \
+             patch("pandion.geographic_ppo._pack_episode", wraps=gp._pack_episode) as pack:
             model, losses = gp.train_geographic_ppo(
                 self.scenarios, updates=2, episodes_per_update=3, rollout_envs=2,
                 input_mode="cells", action_mode="parametric", ppo_epochs=3,
@@ -246,22 +246,22 @@ class BatchedRolloutTests(unittest.TestCase):
         self.assertTrue(all(torch.isfinite(t).all() for t in model.state_dict().values()))
 
     def test_invalid_collection_options_fail_before_training(self):
-        from nightjar.geographic_ppo import train_geographic_ppo
+        from pandion.geographic_ppo import train_geographic_ppo
         for options in ({"rollout_envs": 0}, {"rollout_workers": -1}):
             with self.assertRaises(ValueError):
                 train_geographic_ppo(self.scenarios, **options)
 
     def test_cli_records_and_passes_collection_settings(self):
         import json
-        from nightjar import geographic_ppo as gp
+        from pandion import geographic_ppo as gp
         with tempfile.TemporaryDirectory() as temp:
             output = Path(temp) / "report.json"
             with patch("sys.argv", ["geographic_ppo", "--train", "--rollout-envs", "8",
                                     "--rollout-workers", "2", "--episodes-per-update", "8",
                                     "--output", str(output)]), \
-                 patch("nightjar.geographic_ppo.load_geographic_split", return_value=self.scenarios), \
-                 patch("nightjar.geographic_ppo.train_geographic_ppo", return_value=(object(), [0.1])) as train, \
-                 patch("nightjar.geographic_ppo.rollout_geographic", return_value=([], {})):
+                 patch("pandion.geographic_ppo.load_geographic_split", return_value=self.scenarios), \
+                 patch("pandion.geographic_ppo.train_geographic_ppo", return_value=(object(), [0.1])) as train, \
+                 patch("pandion.geographic_ppo.rollout_geographic", return_value=([], {})):
                 gp.main()
             self.assertEqual(train.call_args.kwargs["rollout_envs"], 8)
             self.assertEqual(train.call_args.kwargs["rollout_workers"], 2)

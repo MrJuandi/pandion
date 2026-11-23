@@ -3,10 +3,10 @@ import json
 from pathlib import Path
 import unittest
 
-from nightjar.fire_rothermel import run_fire_rothermel
-from nightjar.integrated import run_integrated
-from nightjar.integrated_benchmark import compare_policies
-from nightjar.aircraft import CAPACITY_L
+from pandion.fire_rothermel import run_fire_rothermel
+from pandion.integrated import run_integrated
+from pandion.integrated_benchmark import compare_policies
+from pandion.aircraft import CAPACITY_L
 
 
 EXAMPLE = Path(__file__).resolve().parents[1] / "examples" / "synthetic_integrated.json"

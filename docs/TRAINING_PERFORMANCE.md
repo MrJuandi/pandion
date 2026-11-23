@@ -53,7 +53,7 @@ Add `--rollout-envs 8 --rollout-workers 4` to the existing training command, kee
 The following two-update development command was exercised with the existing local datasets (dataset paths can be changed to their actual locations). It saves a fresh checkpoint/report and evaluates one development scenario after training:
 
 ```sh
-OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 python -m nightjar.geographic_ppo \
+OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 python -m pandion.geographic_ppo \
   --train --updates 2 --episodes-per-update 8 \
   --rollout-envs 8 --rollout-workers 4 \
   --scenarios-dir runs/geographic-multi-ignition-family-20261003 \
@@ -153,7 +153,7 @@ The older thermal, single-aircraft tactical run has about 23.1–23.3 seconds/up
 
 ## Initial development-only measurements
 
-Runtime: Apple M3 Pro, 11 logical CPU cores, 18 GiB unified memory; Python 3.12.8, PyTorch 2.14.0, NumPy 1.26.4, Pyretechnics 2026.8.10. MPS available; CUDA unavailable. One PyTorch CPU thread and `OMP_NUM_THREADS=1 MKL_NUM_THREADS=1`. No other Nightjar training process was found during the initial process check; whole-machine utilization and thermals were not recorded.
+Runtime: Apple M3 Pro, 11 logical CPU cores, 18 GiB unified memory; Python 3.12.8, PyTorch 2.14.0, NumPy 1.26.4, Pyretechnics 2026.8.10. MPS available; CUDA unavailable. One PyTorch CPU thread and `OMP_NUM_THREADS=1 MKL_NUM_THREADS=1`. No other Pandion training process was found during the initial process check; whole-machine utilization and thermals were not recorded.
 
 The probe loads only the manifest-verified development split of `geographic-multi-ignition-family-20261003`, applies the existing two-aircraft override, and samples eight scenarios with seed 42. Each repetition starts fresh weights and a fresh Adam optimizer. It performs rollout collection, reward scaling/GAE, and one PPO update with the recent run's initial settings. Device synchronization brackets the timed phases. All timing experiments ran sequentially.
 
@@ -219,7 +219,7 @@ Successive halving/Hyperband can allocate trial budgets automatically; their pru
 
 ### Implementation changes with an equivalence target
 
-| Alternative | Specific Nightjar opportunity and constraints | Priority |
+| Alternative | Specific Pandion opportunity and constraints | Priority |
 |---|---|---|
 | Batched inference over 4–8 active environments | `train_geographic_ppo` currently completes episodes sequentially; `get_action` sees batch size 1. Batch RGB/cells/vectors/masks on one accelerator, keep one recurrent state per environment, reset on episode boundaries. Initially preserve eight episodes/update. | High |
 | Parallel CPU simulation/tensorization | Use persistent spawned workers, initially 2–4, with central batched MPS inference. Transport arrays via shared memory rather than full nested dictionaries. Avoid separate GPU model copies in every worker. | High after batching |
@@ -248,7 +248,7 @@ For thermal input, SciPy documents an [exact Euclidean distance transform](https
 | `channels_last`, CUDA cuDNN tuning, TF32 | Benchmark the convolution-heavy image trunk. Layout conversion can erase gains; cuDNN/TF32 settings are CUDA-specific. TF32 changes numerical precision. |
 | `torch.compile` | Try a stable-shape encoder/loss region first. Whole-episode variable lengths, Python recurrence and mutable `_slot_masks` complicate capture and recompilation. MPS has a Metal code generator in this installed runtime; do not repeat old claims that compilation is categorically unavailable. Actual model coverage and amortized speed are unmeasured. |
 | CUDA graphs/static buffers | Potentially useful after batching and shape stabilization, especially for many small launches. Requires a CUDA run and memory-address/shape discipline; not a direct MPS switch. |
-| MPS fast math / preferred Metal kernels | Experimental backend options, not established Nightjar wins. Fast math changes numerical behavior; prefer-Metal mainly targets relevant matrix operations. Measure before adopting. |
+| MPS fast math / preferred Metal kernels | Experimental backend options, not established Pandion wins. Fast math changes numerical behavior; prefer-Metal mainly targets relevant matrix operations. Measure before adopting. |
 | Tune activation checkpointing | A genuine compute/memory tradeoff. Chunk 32 did not help in this probe and retained more driver memory. Test selective checkpointing and memory budgets; do not disable it blindly. |
 | Smaller CNN / earlier downsampling / fewer residual blocks | Can reduce image convolution cost substantially; changes capacity and image detail. Expose/version model configuration, retrain, compare quality. A strided stem at image resolution can help while preserving the cell-resolution output. |
 | Truncated BPTT | Bounds recurrent activation memory and may enable larger batches, but changes the gradient horizon. Correct hidden-state carry, burn-in and return bootstrapping are needed; simply detaching every few steps is not equivalent. |
@@ -266,7 +266,7 @@ Official references: [AMP examples](https://docs.pytorch.org/docs/stable/notes/a
 | Multiple GPUs/machines for independent seeds | Usually simpler than distributed training for one small model. One seed per device preserves separate experiments and shortens campaign elapsed time; it does not reduce work per seed. |
 | DDP/multiple learners for a single run | Useful only when the learner has enough work and environments supply data fast enough. Communication, small batches and changed effective optimization can erase the gain. FSDP/ZeRO address model-state capacity, which is not the identified issue. |
 | Ray RLlib | Offers separate environment-runner and learner scaling; substantial adapter/model/protocol migration. Consider if remote workers, fault tolerance and distributed sweeps become requirements. |
-| Sample Factory / PufferLib / EnvPool | Potential collectors/backends for larger-scale throughput. Published environment FPS is not a speed estimate for Nightjar. Preserve custom recurrent masking and event-driven semantics; EnvPool's native environment path entails C++ integration. |
+| Sample Factory / PufferLib / EnvPool | Potential collectors/backends for larger-scale throughput. Published environment FPS is not a speed estimate for Pandion. Preserve custom recurrent masking and event-driven semantics; EnvPool's native environment path entails C++ integration. |
 | Stable-Baselines3 migration | Can improve maintainability, but not a drop-in speed fix. SB3-Contrib's documented `MaskablePPO` does not support recurrent policies; replacing the current masked LSTM policy requires custom integration. |
 | Behavior cloning / DAgger then PPO | Existing observation-only heuristics can provide development demonstrations, potentially avoiding early random exploration. Check whether their chosen targets are representable by the current parametric mapper. A teacher may be suboptimal; compare eventual quality, not only initial convergence. |
 | Curriculum / transfer / auxiliary perception losses | Train easier development cases first or reuse compatible weights; fire-perception auxiliary targets must remain consistent with the declared sensor input contract. Changed curricula/rewards require new learning comparisons. |
