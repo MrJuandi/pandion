@@ -401,7 +401,7 @@ def build_emsr578_scenario(
 
     del_zip = directory / "del.zip"
     if not del_zip.exists():
-        raise FileNotFoundError(f"Missing {del_zip}; run 'python3 -m nightjar.emsr578 fetch' first")
+        raise FileNotFoundError(f"Missing {del_zip}; run 'python3 -m pandion.emsr578 fetch' first")
 
     with ZipFile(del_zip) as archive:
         aoi_name = [n for n in archive.namelist() if n.endswith("areaOfInterestA_r1_v1.json")][0]

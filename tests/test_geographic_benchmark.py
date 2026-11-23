@@ -2,11 +2,11 @@
 
 import unittest
 
-from nightjar.geographic_benchmark import (
+from pandion.geographic_benchmark import (
     BENCHMARK_SCHEMA_VERSION,
     run_geographic_benchmark,
 )
-from nightjar.geographic_family import (
+from pandion.geographic_family import (
     build_synthetic_cems_fixture,
     generate_geographic_scenario,
 )

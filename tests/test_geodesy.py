@@ -3,7 +3,7 @@
 import math
 import unittest
 
-from nightjar.geodesy import (
+from pandion.geodesy import (
     epsg_for_utm_zone,
     utm_central_meridian_deg,
     utm_to_wgs84,

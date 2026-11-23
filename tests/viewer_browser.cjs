@@ -6,7 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const {pathToFileURL} = require('node:url');
 const assert = require('node:assert/strict');
-const Fleet = require('../nightjar/viewer_assets/fleet.js');
+const Fleet = require('../pandion/viewer_assets/fleet.js');
 
 // A refill service waypoint must keep positionAt fixed at the water source.
 assert.deepEqual(Fleet.positionAt([
@@ -18,15 +18,15 @@ const refillReplay = {aircraft_initial_state: [{index: 0, position_m: [0, 0], wa
     order: {type: 'RETURN_TO_REFILL'}}]};
 const refillAtHorizon = Fleet.at(Fleet.derive(refillReplay)[0], 100);
 assert.equal(refillAtHorizon.water, 0);
-assert.equal(refillAtHorizon.phase, 'Hacia recarga / recargando');
+assert.equal(refillAtHorizon.phase, 'Heading to refill / refilling');
 
 // Advance the render loop deterministically (camera transitions, damping) and return a snapshot.
 const settle = (page) => page.evaluate(() => {
-  for (const v of NightjarViewer.views) for (let i = 0; i < 90; i++) v.renderer.frame(performance.now() + i * 16);
-  return NightjarViewer.views.map(v => v.renderer.canvas.toDataURL());
+  for (const v of PandionViewer.views) for (let i = 0; i < 90; i++) v.renderer.frame(performance.now() + i * 16);
+  return PandionViewer.views.map(v => v.renderer.canvas.toDataURL());
 });
 const camera = (page, index = 0) => page.evaluate(i => {
-  const s = NightjarViewer.views[i].renderer.cameraState();
+  const s = PandionViewer.views[i].renderer.cameraState();
   return {ortho: s.ortho, position: s.position ? s.position.toArray().map(n => Math.round(n)) : null, target: s.target ? s.target.toArray().map(n => Math.round(n)) : null};
 }, index);
 
@@ -36,7 +36,7 @@ const camera = (page, index = 0) => page.evaluate(i => {
   const fixture = `
 import sys
 from pathlib import Path
-from nightjar.viewer import write_viewer_html
+from pandion.viewer import write_viewer_html
 base = dict(scenario_id='rectangular', policy='PPO de prueba', horizon_s=180,
     grid=dict(rows=2, cols=3, cell_size_m=100), origin_m=[300000,4600000], crs='EPSG:25831',
     arrival_time_s=[[0,None,120],[None,60,None]], fuel_grid=[[101,145,186],[0,101,145]],
@@ -74,8 +74,8 @@ fleet = {**base,'scenario_id':'fleet','aircraft_metrics':dict(total_water_droppe
              dict(time_s=120,aircraft_index=1,water_l=6137,position_m=[50,100],treated_cells=[[1,0]])]}
 write_viewer_html([base,long,third,static,high,fleet],Path(sys.argv[1]))
 `;
-  execFileSync(process.env.NIGHTJAR_PYTHON || 'python3', ['-c', fixture, target], {cwd: path.resolve(__dirname, '..')});
-  const launch = (args = []) => chromium.launch({headless: true, args, ...(process.env.NIGHTJAR_CHROMIUM_EXECUTABLE ? {executablePath: process.env.NIGHTJAR_CHROMIUM_EXECUTABLE} : {})});
+  execFileSync(process.env.PANDION_PYTHON || 'python3', ['-c', fixture, target], {cwd: path.resolve(__dirname, '..')});
+  const launch = (args = []) => chromium.launch({headless: true, args, ...(process.env.PANDION_CHROMIUM_EXECUTABLE ? {executablePath: process.env.PANDION_CHROMIUM_EXECUTABLE} : {})});
   let browser;
   try {
     browser = await launch(['--use-angle=swiftshader', '--enable-unsafe-swiftshader']);
@@ -91,8 +91,8 @@ write_viewer_html([base,long,third,static,high,fleet],Path(sys.argv[1]))
     assert.equal(await canvas.getAttribute('data-renderer'), 'webgl');
     assert.equal(await page.locator('#condiciones').isVisible(), false);
     assert.equal(await page.locator('#datos').isVisible(), false);
-    assert.equal(await page.locator('#inspector-action').textContent(), 'Esperar');
-    assert.ok(await page.evaluate(() => NightjarViewer.views[0].renderer.terrain.mesh.geometry.index.count > 0));
+    assert.equal(await page.locator('#inspector-action').textContent(), 'Hold');
+    assert.ok(await page.evaluate(() => PandionViewer.views[0].renderer.terrain.mesh.geometry.index.count > 0));
 
     // Separate views keep the selected time; the timeline follows the conditions page.
     await page.locator('.nav-link[href="#condiciones"]').click();
@@ -115,23 +115,23 @@ write_viewer_html([base,long,third,static,high,fleet],Path(sys.argv[1]))
     assert.equal(await slider.getAttribute('max'), '180');
     assert.match(await page.locator('#m-water').textContent(), /6137|6.137/);
     assert.match(await page.locator('#m-flight').textContent(), /1,5/);
-    assert.equal(await page.locator('#environment-mode').textContent(), 'Estación · intervalos');
+    assert.equal(await page.locator('#environment-mode').textContent(), 'Station · intervals');
     assert.match(await page.locator('#environment-time').textContent(), /2025-08-15T12:00:00Z/);
-    assert.match(await page.locator('#environment-wind').textContent(), /5(?:,0)? m\/s · NE/);
-    assert.match(await page.locator('#environment-temperature').textContent(), /24(?:,0)? °C/);
+    assert.match(await page.locator('#environment-wind').textContent(), /5(?:\.0)? m\/s · NE/);
+    assert.match(await page.locator('#environment-temperature').textContent(), /24(?:\.0)? °C/);
     assert.equal(await page.locator('#environment-humidity').textContent(), '42 %');
     assert.equal(await page.locator('#environment-rain').textContent(), '0,2 mm');
     assert.match(await page.locator('#environment-moisture').textContent(), /8(?:,0)? %/);
     assert.equal(await page.locator('#environment-elevation').textContent(), '300–340 m');
-    assert.match(await page.locator('#environment-elevation-use').textContent(), /usado por la física/);
-    assert.equal(await page.locator('#environment-observation').textContent(), 'No disponible en este instante.');
+    assert.match(await page.locator('#environment-elevation-use').textContent(), /used by the physics/);
+    assert.equal(await page.locator('#environment-observation').textContent(), 'Not available at this time.');
     assert.match(await page.locator('#hud-clock').textContent(), /12:00:00 UTC/);
-    assert.match(await page.locator('#hud-conditions').textContent(), /Relieve exagerado ×1,5/);
+    assert.match(await page.locator('#hud-conditions').textContent(), /Terrain exaggerated ×1\.5/);
     await page.selectOption('#policy-select', '1');
-    assert.equal(await page.locator('#environment-mode').textContent(), 'Viento sintético constante');
+    assert.equal(await page.locator('#environment-mode').textContent(), 'Constant synthetic wind');
     assert.match(await page.locator('#environment-wind').textContent(), /2 m\/s · E/);
     assert.equal(await page.locator('#environment-temperature').textContent(), '—');
-    assert.match(await page.locator('#environment-elevation-use').textContent(), /fuente DEM y uso físico no documentados/);
+    assert.match(await page.locator('#environment-elevation-use').textContent(), /DEM source and physics use not recorded/);
     await page.selectOption('#policy-select', '0');
 
     // Live state derived from the arrival raster and recorded aircraft data.
@@ -142,7 +142,7 @@ write_viewer_html([base,long,third,static,high,fleet],Path(sys.argv[1]))
     await slider.fill('150');
     assert.equal(await page.locator('#live-water').textContent(), '6137');
     assert.match(await page.locator('#live-tank').textContent(), /0 \/ 6137 L/);
-    assert.equal(await page.evaluate(() => NightjarViewer.views[0].renderer.aircraft.visible), true);
+    assert.equal(await page.evaluate(() => PandionViewer.views[0].renderer.aircraft.visible), true);
 
     // Independent aircraft tracks, water accounting and selected chase target.
     await page.selectOption('#scenario-select', 'fleet');
@@ -151,7 +151,7 @@ write_viewer_html([base,long,third,static,high,fleet],Path(sys.argv[1]))
     assert.equal(await page.locator('#fleet-body tr').count(), 2);
     assert.equal(await page.locator('#live-water').textContent(), '0');
     const planes = await page.evaluate(() => {
-      const renderer = NightjarViewer.views[0].renderer;
+      const renderer = PandionViewer.views[0].renderer;
       return [...renderer.aircraftVisuals.values()].map(v => ({visible: v.aircraft.visible, position: v.aircraft.position.toArray()}));
     });
     assert.equal(planes.filter(p => p.visible).length, 2);
@@ -163,7 +163,7 @@ write_viewer_html([base,long,third,static,high,fleet],Path(sys.argv[1]))
     assert.equal((await page.locator('#live-water').textContent()).replace(/[., ]/g, ''), '12274');
     await page.selectOption('#fleet-select', '1');
     assert.equal(await page.evaluate(() => {
-      const r = NightjarViewer.views[0].renderer; return r.aircraft === r.aircraftVisuals.get(1).aircraft;
+      const r = PandionViewer.views[0].renderer; return r.aircraft === r.aircraftVisuals.get(1).aircraft;
     }), true);
     assert.match(await page.locator('.decision-item').first().textContent(), /NJ-01/);
     assert.match(await page.locator('.decision-item').nth(1).textContent(), /NJ-02/);
@@ -171,7 +171,7 @@ write_viewer_html([base,long,third,static,high,fleet],Path(sys.argv[1]))
     await slider.fill('150');
 
     // Terrain geometry is relative to the minimum height: an absolute datum shift changes nothing.
-    const heights = () => page.evaluate(() => Array.from(NightjarViewer.views[0].renderer.terrain.heights).map(v => Math.round(v * 100)).join(','));
+    const heights = () => page.evaluate(() => Array.from(PandionViewer.views[0].renderer.terrain.heights).map(v => Math.round(v * 100)).join(','));
     const relief = await heights();
     await page.selectOption('#scenario-select', 'high');
     assert.equal(await heights(), relief);
@@ -210,24 +210,24 @@ write_viewer_html([base,long,third,static,high,fleet],Path(sys.argv[1]))
     assert.equal(await page.locator('#view-2d').getAttribute('aria-pressed'), 'true');
     await page.locator('#view-3d').click();
     await page.locator('#cam-chase').click();
-    assert.equal(await page.evaluate(() => NightjarViewer.cameraMode), 'chase');
+    assert.equal(await page.evaluate(() => PandionViewer.cameraMode), 'chase');
     await page.locator('#view-3d').click();
 
     // Causal decision inspector and delivered observations.
     await slider.fill('120');
     assert.match(await page.locator('#environment-time').textContent(), /2025-08-15T12:02:00Z/);
-    assert.match(await page.locator('#environment-wind').textContent(), /8(?:,0)? m\/s · N/);
+    assert.match(await page.locator('#environment-wind').textContent(), /8(?:\.0)? m\/s · N/);
     assert.equal(await page.locator('#environment-rain').textContent(), '1,5 mm');
     assert.match(await page.locator('#environment-source').textContent(), /disponible al cierre t = 180 s/);
-    assert.match(await page.locator('#environment-observation').textContent(), /24(?:,0)? °C/);
-    assert.equal(await page.locator('#inspector-action').textContent(), 'Esperar');
+    assert.match(await page.locator('#environment-observation').textContent(), /24(?:\.0)? °C/);
+    assert.equal(await page.locator('#inspector-action').textContent(), 'Hold');
     assert.match(await page.locator('#inspector-time').textContent(), /01:00/);
     assert.equal(await page.locator('.decision-item.current').count(), 1);
     await slider.fill('150');
-    assert.match(await page.locator('#inspector-action').textContent(), /Descargar/);
+    assert.match(await page.locator('#inspector-action').textContent(), /Drop/);
     assert.match(await page.locator('#inspector-observation').textContent(), /2 celdas/);
     await slider.fill('120');
-    const texture = () => page.evaluate(() => NightjarViewer.views[0].renderer.painter.color.toDataURL());
+    const texture = () => page.evaluate(() => PandionViewer.views[0].renderer.painter.color.toDataURL());
     const simulator = await texture();
     await page.selectOption('#state-select', 'observation');
     assert.notEqual(await texture(), simulator);
@@ -268,8 +268,8 @@ write_viewer_html([base,long,third,static,high,fleet],Path(sys.argv[1]))
     assert.equal(await slider.getAttribute('max'), '0');
     assert.equal(await page.locator('#btn-play').isDisabled(), true);
     assert.equal(await page.locator('#m-area').textContent(), '—');
-    assert.equal(await page.locator('#environment-mode').textContent(), 'Condiciones iniciales · sin episodio');
-    assert.equal(await page.evaluate(() => NightjarViewer.views[0].renderer.aircraft.visible), false);
+    assert.equal(await page.locator('#environment-mode').textContent(), 'Initial conditions · no episode');
+    assert.equal(await page.evaluate(() => PandionViewer.views[0].renderer.aircraft.visible), false);
     await page.locator('.nav-link[href="#comparacion"]').click();
     assert.match(await page.locator('#comparison-results').textContent(), /no dispone de dos episodios/);
     await page.locator('.nav-link[href="#mapa"]').click();
@@ -316,7 +316,7 @@ write_viewer_html([base,long,third,static,high,fleet],Path(sys.argv[1]))
       fallbackPage.on('pageerror', error => fallbackErrors.push(String(error)));
       await fallbackPage.goto(pathToFileURL(target).href);
       assert.equal(await fallbackPage.locator('#map-canvas').getAttribute('data-renderer'), 'canvas-fallback');
-      assert.match(await fallbackPage.locator('#renderer-status').textContent(), /WebGL no disponible/);
+      assert.match(await fallbackPage.locator('#renderer-status').textContent(), /WebGL unavailable/);
       await fallbackPage.locator('#view-2d').click();
       assert.equal(await fallbackPage.locator('#map-canvas').getAttribute('data-renderer'), '2d');
       await fallbackPage.locator('#time-slider').fill('120');

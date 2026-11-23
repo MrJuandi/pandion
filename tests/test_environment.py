@@ -4,9 +4,9 @@ from math import inf
 import unittest
 from unittest.mock import patch
 
-from nightjar.environment import (build_station_environment, delivered_weather,
+from pandion.environment import (build_station_environment, delivered_weather,
                                   edge_arrival, equilibrium_moisture, validate_forcing)
-from nightjar.geographic_integrated import run_geographic_integrated
+from pandion.geographic_integrated import run_geographic_integrated
 
 
 def fixture():

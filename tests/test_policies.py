@@ -1,8 +1,8 @@
 import random
 import unittest
 
-from nightjar.environment import MOISTURE_KEYS
-from nightjar.policies import candidate_cells, choose_order
+from pandion.environment import MOISTURE_KEYS
+from pandion.policies import candidate_cells, choose_order
 
 
 def moist(obs):

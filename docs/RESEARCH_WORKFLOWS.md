@@ -19,9 +19,9 @@ the same environmental scenarios, foci, wind and scenario hashes. Change the
 experimental seed explicitly to request another draw.
 
 ```sh
-python -m nightjar.multi_ignition_family --scenarios-dir runs/environment-family \
+python -m pandion.multi_ignition_family --scenarios-dir runs/environment-family \
   --output-dir runs/multi-family-seed42 --seed 42
-python -m nightjar.ignition_family --scenarios-dir runs/environment-family \
+python -m pandion.ignition_family --scenarios-dir runs/environment-family \
   --output-dir runs/ignition-family-seed42 --seed 42
 ```
 
@@ -42,10 +42,10 @@ forced-step skipping and multiple aircraft. Inference collects no PPO training
 records and performs no weight updates.
 
 ```sh
-python -m nightjar.workspace --scenarios-dir runs/family --output-dir runs/workspace-new \
+python -m pandion.workspace --scenarios-dir runs/family --output-dir runs/workspace-new \
   --checkpoint runs/model.pt --training-report runs/selection.json \
   --imagery-dir runs/images --episodes 1
-python -m nightjar.geographic_ppo --eval --scenarios-dir runs/family \
+python -m pandion.geographic_ppo --eval --scenarios-dir runs/family \
   --checkpoint runs/model.pt --training-report runs/selection.json \
   --split development --output runs/evaluation-new.json
 ```
@@ -79,7 +79,7 @@ imagery manifest content. A relocated directory must retain those contents.
 ## Artifact catalog
 
 ```sh
-python -m nightjar.experiment_catalog runs/experiment-a runs/experiment-b \
+python -m pandion.experiment_catalog runs/experiment-a runs/experiment-b \
   --output runs/catalog.json --html runs/catalog.html
 ```
 
@@ -100,8 +100,8 @@ meaning of future folds. Historical AOI-specific folds retain their original
 meaning and cannot be pooled as separate independent incidents from one group.
 
 ```sh
-python -m nightjar.fold_report runs/folds --output runs/fold-summary.json
-python -m nightjar.fold_report runs/folds --strict --output runs/fold-summary-strict.json
+python -m pandion.fold_report runs/folds --output runs/fold-summary.json
+python -m pandion.fold_report runs/folds --strict --output runs/fold-summary-strict.json
 ```
 
 The report rejects changed configurations/source/runtime versions, different
@@ -160,7 +160,7 @@ when its trained action distribution prefers waiting.
 
 Verification after correction: `OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 python3 -m
 unittest discover -s tests -v` passed 339 tests with four optional-data skips.
-`NIGHTJAR_PYTHON=... node tests/viewer_browser.cjs` passed with Chromium 151;
+`PANDION_PYTHON=... node tests/viewer_browser.cjs` passed with Chromium 151;
 the generated D-71 viewer also showed the correct checkpoint, two aircraft and
 no page errors. All six first-case PPO areas matched the archived fold rows
 (201, 74, 61, 68, 27, 215 ha); all 24 replay tracks ended within the horizon.

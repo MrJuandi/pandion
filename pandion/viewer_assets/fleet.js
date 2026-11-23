@@ -62,7 +62,7 @@
     const completed = unit.decisions.filter(d => Number(d.completed_at_s ?? d.time_s) <= time).at(-1);
     const active = issued && time < Number(issued.completed_at_s ?? issued.time_s);
     const type = issued && orderType(issued);
-    const phase = !issued ? 'En espera' : type === 'DROP' ? (active ? 'Hacia descarga' : 'Disponible') : type === 'RETURN_TO_REFILL' ? (active ? 'Hacia recarga / recargando' : 'Disponible') : 'En espera';
+    const phase = !issued ? 'Standby' : type === 'DROP' ? (active ? 'Heading to drop' : 'Available') : type === 'RETURN_TO_REFILL' ? (active ? 'Heading to refill / refilling' : 'Available') : 'Standby';
     const water = completed && finite(Number(completed.aircraft_water_l)) ? Number(completed.aircraft_water_l) : unit.initialWater;
     const accent = ['#7dd3fc', '#c4b5fd', '#fbbf24', '#6ee7b7'][unit.index % 4];
     const callsign = `NJ-${String(unit.index + 1).padStart(2, '0')}`;
@@ -71,6 +71,6 @@
       labelLines: [`${callsign} · CL-415 ref.`, `${phase}${finite(water) ? ` · ${Math.round(water)} L` : ''}`]};
   }
   const api = {derive, at, positionAt};
-  root.NightjarFleet = api;
+  root.PandionFleet = api;
   if (typeof module !== 'undefined') module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);

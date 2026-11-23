@@ -28,7 +28,7 @@ Freeze the existing `integrated-synthetic-0.1` FM1 scenario and its 35 m permane
 
 ### Fixed scenario-family diagnostic (2026-09-28)
 
-`python3 -m nightjar.scenario_family --output-dir runs/scenario-family` generates four fixed base configurations: two development and two reserved. Each is run with the **same** ignition, wind, aircraft start, and simulator seed at water radii 35 and 55 m, making eight scenarios. The manifest declares the synthetic UTC time origin (`2026-01-01T00:00:00Z`), local-metre CRS, units, source hash, variant specifications, component hashes, and splits. The command writes 96 full replays: no intervention and heuristic once per variant, plus ten random-policy choice seeds per variant. The report includes every run and descriptive split summaries. The paired design was chosen after inspecting a preliminary unpaired baseline run, and the reserved outcomes in this table have been opened. This is an exploratory diagnostic, not a blind policy test. There is no learned controller in this comparison.
+`python3 -m pandion.scenario_family --output-dir runs/scenario-family` generates four fixed base configurations: two development and two reserved. Each is run with the **same** ignition, wind, aircraft start, and simulator seed at water radii 35 and 55 m, making eight scenarios. The manifest declares the synthetic UTC time origin (`2026-01-01T00:00:00Z`), local-metre CRS, units, source hash, variant specifications, component hashes, and splits. The command writes 96 full replays: no intervention and heuristic once per variant, plus ten random-policy choice seeds per variant. The report includes every run and descriptive split summaries. The paired design was chosen after inspecting a preliminary unpaired baseline run, and the reserved outcomes in this table have been opened. This is an exploratory diagnostic, not a blind policy test. There is no learned controller in this comparison.
 
 | Base case | Split | No intervention (ha) | Heuristic at 35 / 55 m (ha) | Random mean at 35 / 55 m (ha) |
 |---|---|---:|---:|---:|
@@ -41,7 +41,7 @@ The heuristic reaches the same 0.75 ha at 35 m and 0.25 ha at 55 m in **every** 
 
 ### Synthetic decision challenge (2026-09-28)
 
-`python3 -m nightjar.challenge_family --output-dir runs/challenge-family` keeps the 35 m water rule and existing FM1/action code, but extends the horizon from 600 to 1,200 s, generates seeded nonburnable cells, and delays full-grid surveys by 30, 90, or 150 s after capture. The generator writes four development and four separately seeded reserved scenario files with hashes. It evaluates **development only**, saving one no-intervention and heuristic replay and ten random-choice replays per case (48 total). Development indices `00`, `01`, `06`, and `09` were chosen after exploratory inspection of baseline behavior, so their outcomes are deliberately illustrative, not an unbiased model test.
+`python3 -m pandion.challenge_family --output-dir runs/challenge-family` keeps the 35 m water rule and existing FM1/action code, but extends the horizon from 600 to 1,200 s, generates seeded nonburnable cells, and delays full-grid surveys by 30, 90, or 150 s after capture. The generator writes four development and four separately seeded reserved scenario files with hashes. It evaluates **development only**, saving one no-intervention and heuristic replay and ten random-choice replays per case (48 total). Development indices `00`, `01`, `06`, and `09` were chosen after exploratory inspection of baseline behavior, so their outcomes are deliberately illustrative, not an unbiased model test.
 
 | Development case | Report delay | No intervention | Heuristic | Random mean, ten choice seeds |
 |---|---:|---:|---:|---:|
@@ -68,7 +68,7 @@ The linear scorer tied the heuristic in three cases and improved one by a single
 
 ### Multi-foci decision discrimination family (2026-09-28)
 
-`python3 -m nightjar.discrimination_family --output-dir runs/discrimination-family` generates 24 synthetic scenarios under schema `nightjar-discrimination-family-0.1` partitioned into strictly disjoint splits: eight development (`discrimination-development-00` to `07`, seeds `500000–500007`), eight validation (`discrimination-validation-00` to `07`, seeds `600000–600007`), and eight reserved (`discrimination-reserved-00` to `07`, seeds `700000–700007`).
+`python3 -m pandion.discrimination_family --output-dir runs/discrimination-family` generates 24 synthetic scenarios under schema `nightjar-discrimination-family-0.1` partitioned into strictly disjoint splits: eight development (`discrimination-development-00` to `07`, seeds `500000–500007`), eight validation (`discrimination-validation-00` to `07`, seeds `600000–600007`), and eight reserved (`discrimination-reserved-00` to `07`, seeds `700000–700007`).
 
 The family addresses the floor effects and forced single-front convergence observed in earlier cases:
 1. **Multi-foci ignitions:** Each scenario features two distinct ignitions placed in separate quadrants (Manhattan distance $\ge 4$ cells), creating a real spatial dispatch dilemma.
@@ -93,14 +93,14 @@ Decisions show substantial variance across scenarios (affected area differences 
 
 ### PPO development/validation selection (exploratory)
 
-`python3 -m nightjar.ppo --select --output runs/ppo-selection.json --checkpoint runs/ppo-selection.pt --candidates 2 --updates 1 --episodes-per-update 1` trains each candidate only on development scenarios, evaluates each deterministically on all eight validation scenarios, and runs `heuristic` and `containment_heuristic` through `run_integrated` on those exact validation scenarios. JSON output stores per-case PPO and baseline metrics matched explicitly by `scenario_id`, plus selected-candidate paired PPO-minus-baseline means/counts, wins/losses, and predeclared criteria (>=0.50 ha reduction versus greedy, non-inferiority versus containment, wins >=50%, losses <=25%, zero rejected orders). Selection minimizes mean validation `affected_area_ha`; exact ties break by candidate seed and then candidate index. The command never evaluates reserved scenarios and uses no reserved rollout.
+`python3 -m pandion.ppo --select --output runs/ppo-selection.json --checkpoint runs/ppo-selection.pt --candidates 2 --updates 1 --episodes-per-update 1` trains each candidate only on development scenarios, evaluates each deterministically on all eight validation scenarios, and runs `heuristic` and `containment_heuristic` through `run_integrated` on those exact validation scenarios. JSON output stores per-case PPO and baseline metrics matched explicitly by `scenario_id`, plus selected-candidate paired PPO-minus-baseline means/counts, wins/losses, and predeclared criteria (>=0.50 ha reduction versus greedy, non-inferiority versus containment, wins >=50%, losses <=25%, zero rejected orders). Selection minimizes mean validation `affected_area_ha`; exact ties break by candidate seed and then candidate index. The command never evaluates reserved scenarios and uses no reserved rollout.
 
 #### Prior 8x8 result
 
 The frozen exploratory comparison protocol was five independent training seeds (`0`–`4`), eight development episodes per update, and eight updates per seed. The completed run was:
 
 ```text
-python3 -m nightjar.ppo --select --output runs/ppo-matched-5seeds.json --checkpoint runs/ppo-matched-5seeds.pt --candidates 5 --updates 8 --episodes-per-update 8
+python3 -m pandion.ppo --select --output runs/ppo-matched-5seeds.json --checkpoint runs/ppo-matched-5seeds.pt --candidates 5 --updates 8 --episodes-per-update 8
 ```
 
 The five validation means (ha) were seed `0`: `9.875`, seed `1`: `8.9375`, seed `2`: `8.8125`, seed `3`: `8.84375`, and seed `4`: `8.84375`. The pre-existing lowest-mean rule selected seed `2`. Its paired validation areas were:
@@ -129,7 +129,7 @@ Before increasing the budget, the selected 8x8 checkpoint (`SHA-256 9e4eb448d5fe
 The frozen exploratory comparison protocol used five independent training seeds (`0`–`4`), 16 updates, and eight development episodes per update. The exact verified command was:
 
 ```text
-python3 -m nightjar.ppo --select --output runs/ppo-matched-5seeds-16x8.json --checkpoint runs/ppo-matched-5seeds-16x8.pt --candidates 5 --updates 16 --episodes-per-update 8 --seed 0
+python3 -m pandion.ppo --select --output runs/ppo-matched-5seeds-16x8.json --checkpoint runs/ppo-matched-5seeds-16x8.pt --candidates 5 --updates 16 --episodes-per-update 8 --seed 0
 ```
 
 The five validation means (ha) were seed `0`: `9.875`, seed `1`: `9.03125`, seed `2`: `8.625`, seed `3`: `8.8125`, and seed `4`: `8.9375`. The lowest-mean rule selected seed `2`. Its paired validation areas were:
@@ -165,7 +165,7 @@ Source and provenance: the result is recorded from ignored artifact `runs/ppo-ma
 Under the predeclared protocol, the selected 16x8 checkpoint (`runs/ppo-matched-5seeds-16x8.pt`, SHA-256 `c88258584e7b79d10ab56a6908609e6b209bcc72d89039ccf495bd88b532ad0d`) was evaluated strictly once across all eight previously unopened reserved scenarios (`discrimination-reserved-00` to `07`), alongside observation-matched baselines (`no_intervention`, `heuristic`, `containment_heuristic`, and ten choice seeds for `random_valid`):
 
 ```text
-python3 -m nightjar.evaluate_reserved --checkpoint runs/ppo-matched-5seeds-16x8.pt --output runs/reserved-evaluation/report.json --replays-dir runs/reserved-evaluation/replays
+python3 -m pandion.evaluate_reserved --checkpoint runs/ppo-matched-5seeds-16x8.pt --output runs/reserved-evaluation/report.json --replays-dir runs/reserved-evaluation/replays
 ```
 
 | Scenario | PPO seed 2 (ha) | Heuristic (ha) | Containment (ha) | Random mean (ha) | No intervention (ha) |
@@ -214,7 +214,7 @@ Following the identification of observation delay amnesia and spatial action spa
 Training command on procedural domain-randomized scenarios with 2 candidates selected on the full 32-scenario validation set (`nightjar-discrimination-family-0.1`):
 
 ```text
-python3 -m nightjar.ppo --select --candidates 2 --updates 40 --episodes-per-update 12 --seed 0 --recurrent --domain-randomization --action-mode tactical --output runs/ppo-tactical-v2.json --checkpoint runs/ppo-tactical-v2.pt
+python3 -m pandion.ppo --select --candidates 2 --updates 40 --episodes-per-update 12 --seed 0 --recurrent --domain-randomization --action-mode tactical --output runs/ppo-tactical-v2.json --checkpoint runs/ppo-tactical-v2.pt
 ```
 
 Selected candidate 1 (seed 1) validation performance across all 32 validation scenarios:
@@ -247,7 +247,7 @@ In high-wind scenarios where containment fails to cut off rapid head fire (such 
 To test whether the recurrent tactical policy resolves the specific failure modes diagnosed under D-27, `runs/ppo-tactical-v2.pt` was evaluated on the 8 opened reserved scenarios (`discrimination-reserved-00` to `07`):
 
 ```text
-python3 -m nightjar.evaluate_reserved --checkpoint runs/ppo-tactical-v2.pt --output runs/reserved-evaluation/tactical-v2-diagnostic.json --replays-dir runs/reserved-evaluation/tactical-v2-replays --split-version v1
+python3 -m pandion.evaluate_reserved --checkpoint runs/ppo-tactical-v2.pt --output runs/reserved-evaluation/tactical-v2-diagnostic.json --replays-dir runs/reserved-evaluation/tactical-v2-replays --split-version v1
 ```
 
 | Scenario | PPO tactical (ha) | Old PPO feedforward (ha) | Greedy heuristic (ha) | Containment (ha) | PPO - Greedy (ha) | PPO - Containment (ha) |
@@ -273,7 +273,7 @@ Key findings:
 To satisfy the Stage 1 Gate without adaptive validation reuse or opened-scenario bias, 32 fresh, untouched reserved scenarios (`discrimination-reserved-v2-00` to `31`, disjoint seeds `800000`–`800031`) were generated and evaluated strictly once under schema `nightjar-reserved-evaluation-0.2`:
 
 ```text
-python3 -m nightjar.evaluate_reserved --checkpoint runs/ppo-tactical-v2.pt --output runs/reserved-v2-evaluation/report.json --replays-dir runs/reserved-v2-evaluation/replays --split-version v2
+python3 -m pandion.evaluate_reserved --checkpoint runs/ppo-tactical-v2.pt --output runs/reserved-v2-evaluation/report.json --replays-dir runs/reserved-v2-evaluation/replays --split-version v2
 ```
 
 #### Overall Performance across 32 Held-Out Scenarios:
@@ -338,7 +338,7 @@ A seven-case synthetic comparison found 25 m versus 5 m area differences from �
 
 The [Annaburroo fixed-FM1 external diagnostic](VALIDATION_ANNABURROO.md) has 0.5264 m/s mean absolute head-rate error across 120 eligible experimental plots. This is a physical-model transfer check, not a controller benchmark or a geographic test split.
 
-The first **integrated synthetic smoke comparison** is reproducible with `python3 -m nightjar.integrated_benchmark examples/synthetic_integrated.json --output runs/integrated-comparison.json` (2026-09-28). All three policies use the same 11×11 FM1 grid, fixed wind, fire ignition, aircraft and survey schedule. The random policy varies only its choice seed (`0`–`9`); neither the fire nor aircraft executor draws randomness. The primary diagnostic is full-cell affected area at 600 s, not a predeclared real-data endpoint.
+The first **integrated synthetic smoke comparison** is reproducible with `python3 -m pandion.integrated_benchmark examples/synthetic_integrated.json --output runs/integrated-comparison.json` (2026-09-28). All three policies use the same 11×11 FM1 grid, fixed wind, fire ignition, aircraft and survey schedule. The random policy varies only its choice seed (`0`–`9`); neither the fire nor aircraft executor draws randomness. The primary diagnostic is full-cell affected area at 600 s, not a predeclared real-data endpoint.
 
 | Policy | Affected area | Drops | Interpretation |
 |---|---:|---:|---|
@@ -350,7 +350,7 @@ The assumed 35 m permanent barrier can dominate these differences. It is not a s
 
 ### Exploratory PPO workflow
 
-`python3 -m nightjar.ppo --output runs/ppo-smoke.json --updates 1 --episodes-per-update 1` trains and evaluates a minimal masked PPO controller on the **development** split generated by `nightjar.discrimination_family`. It uses only `IntegratedTrainingEnv` observations and action masks, records final affected area, rejected orders, total reward, and action count, and is explicitly synthetic with no physical claim. Validation and reserved scenarios are not evaluated by the default smoke path and remain reserved for a later, fixed evaluation protocol.
+`python3 -m pandion.ppo --output runs/ppo-smoke.json --updates 1 --episodes-per-update 1` trains and evaluates a minimal masked PPO controller on the **development** split generated by `pandion.discrimination_family`. It uses only `IntegratedTrainingEnv` observations and action masks, records final affected area, rejected orders, total reward, and action count, and is explicitly synthetic with no physical claim. Validation and reserved scenarios are not evaluated by the default smoke path and remain reserved for a later, fixed evaluation protocol.
 
 ## 1. Endpoints
 
@@ -389,7 +389,7 @@ Simulator-conditional comparisons must state the fixed scenario and assumptions 
 
 ## Workspace comparisons
 
-The Spanish offline workspace is an inspection interface, not a new evaluation protocol. It can replay deterministic inference from the source-bound geographic smoke checkpoint and existing baselines on the first requested development cases. The final area, water, flight-distance and drop counts come from each simulator replay; scrubbing the timeline does not create new endpoint measurements. Validation and reserved cases are static maps only in this workflow. Legacy visual DEM overlays do not change the flat-terrain environment, dataset splits, checkpoint selection or previously reported results. The new D-45 environment experiment uses fresh development weights and changed scenario hashes; it must be reported separately. No geographic performance/generalization claim is made by adding these views.
+The offline workspace is an inspection interface, not a new evaluation protocol. It can replay deterministic inference from the source-bound geographic smoke checkpoint and existing baselines on the first requested development cases. The final area, water, flight-distance and drop counts come from each simulator replay; scrubbing the timeline does not create new endpoint measurements. Validation and reserved cases are static maps only in this workflow. Legacy visual DEM overlays do not change the flat-terrain environment, dataset splits, checkpoint selection or previously reported results. The new D-45 environment experiment uses fresh development weights and changed scenario hashes; it must be reported separately. No geographic performance/generalization claim is made by adding these views.
 
 The 2026-10-01 derived environment experiment is recorded in [ENVIRONMENT_INTEGRATION.md](ENVIRONMENT_INTEGRATION.md): six recurrent PPO updates on development only, sourced heights, and dry time-dependent Baldomar weather under explicit wind/moisture assumptions. Its first development rollout reached 1,356 ha with zero rejected orders. The environment and hashes differ from old flat-terrain runs, so this is no controlled evidence of an improvement; no validation/reserved episodes or model selection were performed.
 
@@ -469,7 +469,7 @@ refill metrics count completed services and actual travel within the episode;
 this correction changes those audit metrics, not the trained weights.
 ### Holdout folds after D-69 and D-70 (2026-10-05)
 
-The table above predates D-69 (causal burning state, horizon scoring) and D-70 (scoopable refill points 7–22 km away instead of nearby ponds), so its numbers are superseded. The same configuration was re-run on `runs/geographic-multi-ignition-family-d70-20261005` (all families regenerated with the D-70 refill points; imagery reused because grids are unchanged), seed 42, commit `99160c1`, 3 concurrent folds. Selection on validation (EMSR590, 24 scenarios): heuristic 112.62, containment 115.42, no intervention 144.33 ha; selected weights 105.54 / 105.12 / 103.75 ha. Summary from `python -m nightjar.fold_report runs/geographic-holdout-folds-d70-20261005` (95% bootstrap interval, 10,000 resamples):
+The table above predates D-69 (causal burning state, horizon scoring) and D-70 (scoopable refill points 7–22 km away instead of nearby ponds), so its numbers are superseded. The same configuration was re-run on `runs/geographic-multi-ignition-family-d70-20261005` (all families regenerated with the D-70 refill points; imagery reused because grids are unchanged), seed 42, commit `99160c1`, 3 concurrent folds. Selection on validation (EMSR590, 24 scenarios): heuristic 112.62, containment 115.42, no intervention 144.33 ha; selected weights 105.54 / 105.12 / 103.75 ha. Summary from `python -m pandion.fold_report runs/geographic-holdout-folds-d70-20261005` (95% bootstrap interval, 10,000 resamples):
 
 | Held-out incident | Policy | Heuristic | Containment | Policy − heuristic (95% CI) | Better / equal / worse |
 |---|---|---|---|---|---|
@@ -482,7 +482,7 @@ With realistic refill distances the policy still beats containment on every fold
 
 ### Holdout folds with 20 development incidents (D-73, 2026-10-06)
 
-Same configuration and seed (42) on `runs/geographic-multi-ignition-family-d71-20261006` (20 development incidents, 640 scenarios; each fold trains on the other 19 incidents) with imagery `runs/geographic-imagery-s2-d71-px4-20261006`, commit `79d5a7b`, two batches of three concurrent folds (`runs/geographic-holdout-folds-d71-20261006/run.sh`). Regenerating the families re-drew foci and wind (D-73), so held-out and validation scenarios differ from the D-70 run and only policy-minus-baseline differences are comparable. Validation (EMSR590, 24 scenarios): heuristic 92.62, containment 92.50, no intervention 122.33 ha; selected weights 86.96–91.54 ha. `python -m nightjar.fold_report runs/geographic-holdout-folds-d71-20261006`:
+Same configuration and seed (42) on `runs/geographic-multi-ignition-family-d71-20261006` (20 development incidents, 640 scenarios; each fold trains on the other 19 incidents) with imagery `runs/geographic-imagery-s2-d71-px4-20261006`, commit `79d5a7b`, two batches of three concurrent folds (`runs/geographic-holdout-folds-d71-20261006/run.sh`). Regenerating the families re-drew foci and wind (D-73), so held-out and validation scenarios differ from the D-70 run and only policy-minus-baseline differences are comparable. Validation (EMSR590, 24 scenarios): heuristic 92.62, containment 92.50, no intervention 122.33 ha; selected weights 86.96–91.54 ha. `python -m pandion.fold_report runs/geographic-holdout-folds-d71-20261006`:
 
 | Held-out incident | Policy | Heuristic | Containment | Policy − heuristic (95% CI) | Better / equal / worse |
 |---|---|---|---|---|---|
@@ -532,7 +532,7 @@ One training run, same configuration as the D-73 sweep (two aircraft, parametric
 
 ### Sensitivity to the water-effect parameters (2026-11-03)
 
-`python3 -m nightjar.water_sensitivity runs/geographic-multi-ignition-family-d73-20261006/development --output runs/water-sensitivity-d74-20261103.json --scenarios 64 --seed 7 --workers 6` runs the no-intervention, heuristic and containment policies (two aircraft) on a seeded sample of 64 development scenarios while the D-74/D-76 hold limits and the D-78 evaporation delay are varied. No training; validation and reserved scenarios are not read. Mean final burned area is 48.4 ha without intervention.
+`python3 -m pandion.water_sensitivity runs/geographic-multi-ignition-family-d73-20261006/development --output runs/water-sensitivity-d74-20261103.json --scenarios 64 --seed 7 --workers 6` runs the no-intervention, heuristic and containment policies (two aircraft) on a seeded sample of 64 development scenarios while the D-74/D-76 hold limits and the D-78 evaporation delay are varied. No training; validation and reserved scenarios are not read. Mean final burned area is 48.4 ha without intervention.
 
 | Variant | Heuristic (ha) | Containment (ha) | Growth prevented by the heuristic | Heuristic − containment (ha) |
 |---|---|---|---|---|
@@ -681,7 +681,7 @@ Reading: the policy gradient is close to noise. Half of the decisions have no ef
 
 #### When a decision changes the burned area (2026-11-17)
 
-Same weights and the same 96 training scenarios as above (1,802 decisions). At every decision four actions are sampled from the policy and each is followed to the end by the same policy with common random numbers (`nightjar.vine`); the burned area of each branch is read from its replay's arrival times at fixed minutes after the decision, so branches are compared at equal simulated times. Each pair of distinct sampled actions gives a difference curve d(τ) and a final difference at the 60-minute horizon. Scripts `diag_window.py` and `window_analyse.py`, output in `runs/geographic-signal-diagnostic-20261117`.
+Same weights and the same 96 training scenarios as above (1,802 decisions). At every decision four actions are sampled from the policy and each is followed to the end by the same policy with common random numbers (`pandion.vine`); the burned area of each branch is read from its replay's arrival times at fixed minutes after the decision, so branches are compared at equal simulated times. Each pair of distinct sampled actions gives a difference curve d(τ) and a final difference at the 60-minute horizon. Scripts `diag_window.py` and `window_analyse.py`, output in `runs/geographic-signal-diagnostic-20261117`.
 
 A third of the decisions (560 of 1,697 with two distinct sampled actions) change the area at some point; 17 % of action pairs end with a different final area (median 1 ha, 90th percentile 3, maximum 15) and 5 % differ only temporarily.
 

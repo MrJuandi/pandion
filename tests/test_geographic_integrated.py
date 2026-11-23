@@ -3,13 +3,13 @@
 from copy import deepcopy
 import unittest
 
-from nightjar.environment import SCHEMA_VERSION as ENVIRONMENT_SCHEMA_VERSION
-from nightjar.geographic_family import (
+from pandion.environment import SCHEMA_VERSION as ENVIRONMENT_SCHEMA_VERSION
+from pandion.geographic_family import (
     MOISTURE_ENSEMBLES,
     build_synthetic_cems_fixture,
     generate_geographic_scenario,
 )
-from nightjar.geographic_integrated import (
+from pandion.geographic_integrated import (
     REPLAY_SCHEMA_VERSION,
     geographic_episode,
     run_geographic_integrated,
@@ -87,9 +87,9 @@ class TestStackedDrops(unittest.TestCase):
     def test_a_breaching_front_is_delayed_by_boiling_off_the_water(self):
         # D-78: one drop on the head of a ~4,000 kW/m front delays its arrival there by
         # water mass x (heating + evaporation) / (intensity x cell width).
-        from nightjar.geographic_integrated import WATER_EVAPORATION_KJ_KG, WATER_HEATING_KJ_KG
-        from nightjar.geographic_training_env import GeographicTrainingEnv
-        from nightjar.policies import candidate_cells, choose_order
+        from pandion.geographic_integrated import WATER_EVAPORATION_KJ_KG, WATER_HEATING_KJ_KG
+        from pandion.geographic_training_env import GeographicTrainingEnv
+        from pandion.policies import candidate_cells, choose_order
         scenario = with_weather(growing_fire_scenario(), (0.03, 0.04, 0.05, 0.03, 0.3, 0.6), (4.6, 4.6))
         scenario["aircraft"]["fleet_size"] = 1
 
@@ -179,7 +179,7 @@ class TestGeographicIntegrated(unittest.TestCase):
         self.assertEqual(run1["aircraft_metrics"]["total_water_dropped_l"], run2["aircraft_metrics"]["total_water_dropped_l"])
 
     def test_drop_replay_utm_uses_selected_local_cell_anchor(self):
-        from nightjar.geodesy import utm_to_wgs84, wgs84_to_utm
+        from pandion.geodesy import utm_to_wgs84, wgs84_to_utm
 
         row, col = 4, 5
         size = self.scenario["grid"]["cell_size_m"]

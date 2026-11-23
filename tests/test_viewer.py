@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from nightjar.viewer import build_viewer_html, write_viewer_html
+from pandion.viewer import build_viewer_html, write_viewer_html
 
 
 class Viewer3DTests(unittest.TestCase):
@@ -74,7 +74,7 @@ class Viewer3DTests(unittest.TestCase):
         html = build_viewer_html([self.sample_replay_1])
         self.assertIn("<!DOCTYPE html>", html)
         self.assertIn("discrimination-reserved-00", html)
-        self.assertIn("Nightjar Replay Viewer", html)
+        self.assertIn("Pandion Replay Viewer", html)
         self.assertIn("time-slider", html)
         self.assertIn("canvas", html)
 
@@ -97,7 +97,7 @@ class Viewer3DTests(unittest.TestCase):
     def test_offline_webgl_bundle_includes_license_and_fallback(self):
         page = build_viewer_html([self.sample_replay_1])
         self.assertIn("Copyright © 2010-2021 three.js authors", page)
-        self.assertIn("NightjarScene3D", page)
+        self.assertIn("PandionScene3D", page)
         self.assertIn("OrbitControls", page)
         self.assertIn("canvas-fallback", page)
         self.assertNotIn('<script src=', page)
@@ -141,8 +141,8 @@ class DisplayImageryTests(unittest.TestCase):
                                                            "activations": {"ACT": self.source}}))
 
     def attach(self, replay):
-        from nightjar.replay_view import normalize_replay
-        from nightjar.viewer import attach_display_imagery
+        from pandion.replay_view import normalize_replay
+        from pandion.viewer import attach_display_imagery
         normalized = [normalize_replay(replay)]
         return normalized[0], attach_display_imagery(normalized, [self.dir])
 

@@ -1069,7 +1069,7 @@ def _clc2018_layers(activation_id: str, prod_info: dict[str, Any],
     """
     if landcover_path is None or not landcover_path.is_file():
         raise FileNotFoundError(f"{activation_id}: CORINE 2018 extract {landcover_filename(activation_id)} is required; "
-                                "fetch it with `python -m nightjar.cems_catalog fetch-landcover`")
+                                "fetch it with `python -m pandion.cems_catalog fetch-landcover`")
     content = landcover_path.read_bytes()
     digest = sha256(content).hexdigest()
     if digest != prod_info["landcover_sha256"]:

@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 from statistics import median
 
-from nightjar.rothermel import fm1_components
+from pandion.rothermel import fm1_components
 
 
 EXPECTED_SHA256 = "4425d11fe970e263d400b7a9d089b8eea70bda4de4a1e29cbeedea28bc727934"

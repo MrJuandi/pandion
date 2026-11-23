@@ -1,4 +1,4 @@
-"""Real-world geographic scenario family generator for Nightjar.
+"""Real-world geographic scenario family generator for Pandion.
 
 This module builds a versioned suite of real-incident decision scenarios ('nightjar-geographic-family-0.1')
 across disjoint splits to prevent benchmark overfitting and data leakage:

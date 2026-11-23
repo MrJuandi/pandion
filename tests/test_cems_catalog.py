@@ -7,7 +7,7 @@ import unittest
 from unittest.mock import patch
 from zipfile import ZipFile
 
-from nightjar.cems_catalog import (
+from pandion.cems_catalog import (
     ACTIVATIONS,
     UNIVERSAL_CORINE_CROSSWALK,
     build_cems_scenario,
@@ -60,7 +60,7 @@ class TestCemsCatalog(unittest.TestCase):
             self.assertTrue(url.endswith(".zip"))
 
     def test_additional_development_incidents_are_development_only(self):
-        from nightjar.cems_catalog import incidents_for_split, raw_package_name
+        from pandion.cems_catalog import incidents_for_split, raw_package_name
         development = incidents_for_split("development")
         self.assertEqual(development[0], "EMSR578")
         self.assertEqual(set(development[1:]), {"EMSR583", "EMSR625_AOI01", "EMSR625_AOI02",
@@ -199,7 +199,7 @@ class TestCemsCatalog(unittest.TestCase):
 
     def test_asymmetric_projected_layers_use_north_rows_east_columns(self):
         from hashlib import sha256
-        from nightjar.geodesy import utm_to_wgs84
+        from pandion.geodesy import utm_to_wgs84
 
         zone, size = 30, 100.0
         x0, y0 = 500000.25, 4400000.25

@@ -13,8 +13,8 @@ from zipfile import ZipFile
 
 import numpy as np
 
-from nightjar import pilot_simulation
-from nightjar.pilot_terrain import build_terrain
+from pandion import pilot_simulation
+from pandion.pilot_terrain import build_terrain
 
 
 class PilotSimulationUnitTests(unittest.TestCase):

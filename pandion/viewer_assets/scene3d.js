@@ -1,4 +1,4 @@
-/* Nightjar 3D scene: interactive Three.js terrain, fire state and aircraft rendering.
+/* Pandion 3D scene: interactive Three.js terrain, fire state and aircraft rendering.
  * Every layer is drawn from the replay at the selected time. Display-only choices
  * (vertical exaggeration, aircraft symbol size and altitude, interpolated positions,
  * illustrative smoke) are labelled in the interface and never fed back to a controller.
@@ -395,7 +395,7 @@
   // ---------------------------------------------------------------------------
   // Interactive scene
   // ---------------------------------------------------------------------------
-  class NightjarScene3D {
+  class PandionScene3D {
     constructor(host) {
       this.host = host;
       const renderer = new T.WebGLRenderer({antialias: true, preserveDrawingBuffer: true, powerPreference: 'high-performance'});
@@ -735,8 +735,8 @@
         label.sprite.userData.small = true;
         this.markerGroup.add(pole, label.sprite);
       };
-      for (const p of state.refills || []) add(p, ['Recarga', 'posición registrada'], '#38bdf8');
-      if (state.waterLabel) add(state.waterLabel, ['Agua', 'máscara del escenario'], '#0ea5e9');
+      for (const p of state.refills || []) add(p, ['Refill', 'position recorded'], '#38bdf8');
+      if (state.waterLabel) add(state.waterLabel, ['Water', 'scenario mask'], '#0ea5e9');
     }
 
     // ---- camera ----------------------------------------------------------------
@@ -935,7 +935,7 @@
   // ---------------------------------------------------------------------------
   // 2D compatibility map (used only when WebGL is unavailable)
   // ---------------------------------------------------------------------------
-  class NightjarFlatMap {
+  class PandionFlatMap {
     constructor(host) {
       this.host = host; this.canvas = document.createElement('canvas'); this.canvas.tabIndex = 0; this.canvas.dataset.renderer = 'canvas-fallback';
       this.canvas.style.width = '100%'; this.canvas.style.height = '100%'; host.append(this.canvas);
@@ -993,7 +993,7 @@
     dispose() { this.canvas.remove(); }
   }
 
-  window.NightjarFire = {fireState, isBurnable, imageryFor};
-  window.NightjarScene3D = NightjarScene3D;
-  window.NightjarFlatMap = NightjarFlatMap;
+  window.PandionFire = {fireState, isBurnable, imageryFor};
+  window.PandionScene3D = PandionScene3D;
+  window.PandionFlatMap = PandionFlatMap;
 })();

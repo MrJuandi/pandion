@@ -1,6 +1,6 @@
 import unittest
 
-from nightjar.observation import build_reports, observe
+from pandion.observation import build_reports, observe
 
 
 class ObservationTests(unittest.TestCase):

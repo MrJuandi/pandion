@@ -6,7 +6,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from nightjar.pilot_terrain import build_terrain, load_terrain, scenario_sha256
+from pandion.pilot_terrain import build_terrain, load_terrain, scenario_sha256
 
 
 class PilotTerrainTests(unittest.TestCase):
