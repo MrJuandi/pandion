@@ -31,7 +31,7 @@ const camera = (page, index = 0) => page.evaluate(i => {
 }, index);
 
 (async () => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'nightjar-viewer-'));
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'pandion-viewer-'));
   const target = path.join(directory, 'index.html');
   const fixture = `
 import sys

@@ -14,7 +14,7 @@ import zlib
 
 from .replay_view import normalize_replay
 
-VIEWER_VERSION = "nightjar-viewer-0.7"
+VIEWER_VERSION = "pandion-viewer-0.8"
 _ASSETS = Path(__file__).with_name("viewer_assets")
 
 

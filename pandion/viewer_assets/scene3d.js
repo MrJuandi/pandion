@@ -100,7 +100,7 @@
     let entry = imageryCache.get(info.id);
     if (!entry) {
       entry = {img: new Image(), ready: false}; imageryCache.set(info.id, entry);
-      entry.img.onload = () => { entry.ready = true; window.dispatchEvent(new CustomEvent('nightjar-imagery-ready', {detail: info.id})); };
+      entry.img.onload = () => { entry.ready = true; window.dispatchEvent(new CustomEvent('pandion-imagery-ready', {detail: info.id})); };
       entry.img.src = info.png_data_uri;
     }
     return entry.ready ? entry.img : null;

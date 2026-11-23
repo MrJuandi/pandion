@@ -155,7 +155,7 @@
     document.querySelectorAll('.nav-link,.brand').forEach((link) => link.addEventListener('click', (e) => { e.preventDefault(); setView(link.hash.slice(1)); }));
     document.addEventListener('keydown', globalKey);
     // Imagery decodes asynchronously: repaint once it is available.
-    window.addEventListener('nightjar-imagery-ready', () => { for (const r of REPLAYS) if (r.__painter) r.__painter.key = ''; updateTime(); });
+    window.addEventListener('pandion-imagery-ready', () => { for (const r of REPLAYS) if (r.__painter) r.__painter.key = ''; updateTime(); });
     // Back/forward and edited fragments switch views like the navigation links.
     window.addEventListener('hashchange', () => {
       const view = location.hash.slice(1);
@@ -292,7 +292,7 @@
   function exportPng() {
     const canvas = views[0]?.renderer.canvas; if (!canvas) return;
     const link = document.createElement('a');
-    link.download = `nightjar-${activeScenario}-${clock(now).replace(':', 'm')}s.png`;
+    link.download = `pandion-${activeScenario}-${clock(now).replace(':', 'm')}s.png`;
     link.href = canvas.toDataURL('image/png'); link.click();
   }
 
