@@ -88,12 +88,16 @@ def attach_display_imagery(replays: Sequence[dict], imagery_dirs: Sequence[Path]
 
 
 def build_viewer_html(replays: Sequence[dict], title: str = "Pandion Replay Viewer",
-                      imagery_dirs: Sequence[Path] | None = None) -> str:
-    """Build a complete offline viewer. Replay inputs are normalized at the boundary."""
+                      imagery_dirs: Sequence[Path] | None = None, imagery: dict | None = None) -> str:
+    """Build a complete offline viewer. Replay inputs are normalized at the boundary.
+
+    ``imagery`` passes display payloads already prepared by ``attach_display_imagery``
+    (for example copied from a built viewer); replays select one by ``display_imagery_id``.
+    """
     if not replays:
         raise ValueError("at least one replay is required to generate viewer HTML")
     normalized = [normalize_replay(replay) for replay in replays]
-    imagery = attach_display_imagery(normalized, imagery_dirs) if imagery_dirs else {}
+    imagery = {**(imagery or {}), **(attach_display_imagery(normalized, imagery_dirs) if imagery_dirs else {})}
     template = (_ASSETS / "viewer.html").read_text(encoding="utf-8")
     css = (_ASSETS / "viewer.css").read_text(encoding="utf-8")
     license_text = (_ASSETS / "vendor" / "THREE-LICENSE.txt").read_text(encoding="utf-8")
