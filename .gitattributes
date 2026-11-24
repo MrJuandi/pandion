@@ -1,4 +1,4 @@
 # Keep GitHub language statistics on the project's own source.
-site/viewer.html linguist-generated
-site/data/** linguist-generated
-pandion/viewer_assets/vendor/** linguist-vendored
+site/viewer.html linguist-generated=true linguist-detectable=false
+site/data/** linguist-generated=true linguist-detectable=false
+pandion/viewer_assets/vendor/** linguist-vendored=true
