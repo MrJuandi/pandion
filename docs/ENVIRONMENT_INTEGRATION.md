@@ -53,7 +53,7 @@ The reward, tactical actions and provisional permanent five-cell water barriers 
 
 ## Reproduction and local evidence
 
-The exact acquisition/family/training/workspace commands are in [README.md](../README.md). They were run successfully with the four verified local ZIPs and source-bound pilot/weather artifacts. Output paths are ignored and must be new/empty when rebuilding.
+The exact acquisition/family/training/workspace commands are in [USAGE.md](USAGE.md). They were run successfully with the four verified local ZIPs and source-bound pilot/weather artifacts. Output paths are ignored and must be new/empty when rebuilding.
 
 | Tactical crop | Height range (m) | Source | Raw crop SHA256 |
 |---|---:|---|---|

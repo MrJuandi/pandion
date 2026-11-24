@@ -395,7 +395,7 @@ The 2026-10-01 derived environment experiment is recorded in [ENVIRONMENT_INTEGR
 
 ## Real-time image policy comparison (D-49–D-53, 2026-10-02)
 
-Exploratory development/validation comparison under the D-49 real-time simulator; no reserved scenario was evaluated. Family `runs/geographic-environment-family-20261001` (8 development EMSR578, 8 validation EMSR590), tactical actions, recurrent, `--select --candidates 1 --updates 60 --episodes-per-update 8`, seeds 42–45, code at commit `cbc35ae` (legacy, image) and `dd1a66a` (cells ablation, same model code plus the ablation). Image runs used `runs/geographic-imagery-s2-20261002`.
+Exploratory development/validation comparison under the D-49 real-time simulator; no reserved scenario was evaluated. Family `runs/geographic-environment-family-20261001` (8 development EMSR578, 8 validation EMSR590), tactical actions, recurrent, `--select --candidates 1 --updates 60 --episodes-per-update 8`, seeds 42–45, code at commit `8639885` (legacy, image) and `48795c4` (cells ablation, same model code plus the ablation). Image runs used `runs/geographic-imagery-s2-20261002`.
 
 Validation mean final burned area (ha), 8 scenarios:
 
@@ -409,7 +409,7 @@ Baselines on the same scenarios: no intervention 1406.62, random valid 1389.81, 
 
 ## Thermal image policy on the ignition family (D-55, D-58, 2026-10-03)
 
-Exploratory development/validation run; no reserved scenario was evaluated. Family `runs/geographic-ignition-family-expanded-20261002` (192 development scenarios over six incidents, 24 validation EMSR590), D-52 image model with the D-58 thermal band, tactical actions, recurrent, `--select --candidates 1 --updates 60 --episodes-per-update 8 --device mps --ppo-epochs 4 --minibatches 4 --gae-lambda 0.95 --reward-scaling --target-kl 0.02`, seeds 42–45, commit `27d5e9c`, about 20 minutes for four concurrent seeds.
+Exploratory development/validation run; no reserved scenario was evaluated. Family `runs/geographic-ignition-family-expanded-20261002` (192 development scenarios over six incidents, 24 validation EMSR590), D-52 image model with the D-58 thermal band, tactical actions, recurrent, `--select --candidates 1 --updates 60 --episodes-per-update 8 --device mps --ppo-epochs 4 --minibatches 4 --gae-lambda 0.95 --reward-scaling --target-kl 0.02`, seeds 42–45, commit `b8f533f`, about 20 minutes for four concurrent seeds.
 
 Validation mean final burned area (ha), 24 scenarios, same real-time simulator for all rows:
 
@@ -429,13 +429,13 @@ Same family, model, thermal band and PPO settings as above, but `--updates 300 -
 
 ## Thermal image policy on the multi-focus, shifting-wind family (D-60, 2026-10-03)
 
-Exploratory development/validation run; reserved scenarios were generated but not opened. Family `runs/geographic-multi-ignition-family-20261003` (192 development over six incidents, 24 validation EMSR590), thermal image model, tactical actions, recurrent, D-55 PPO settings with entropy 0.05→0.005, 200 updates × 8 episodes, MPS, seeds 42–45, about 1.5 h, commit `567a7c1`.
+Exploratory development/validation run; reserved scenarios were generated but not opened. Family `runs/geographic-multi-ignition-family-20261003` (192 development over six incidents, 24 validation EMSR590), thermal image model, tactical actions, recurrent, D-55 PPO settings with entropy 0.05→0.005, 200 updates × 8 episodes, MPS, seeds 42–45, about 1.5 h, commit `23cff78`.
 
 Validation mean final burned area (ha), 24 scenarios: no intervention 121.21, random valid 89.33, heuristic 76.88, containment **76.00**; seeds 42 / 43 / 44 / 45: 89.79 / 80.00 / 87.96 / 76.62. The best seed is 0.26 ha below the heuristic and 0.62 ha above containment, within noise; two seeds are near random. Deterministic choices on 12 validation scenarios again collapse to head attacks: seed 45 `ATTACK_HEAD_LARGEST` 99%, seed 43 83% largest / 17% nearest, seed 44 74% nearest, seed 42 100% nearest. Choosing the largest cluster's head is the best of these defaults with several foci, but the policy still does not condition its choice on the situation. The nine macro-actions offer no way to express finer targeting, which points to a per-cell action space or richer parameterised macro-actions as the next step.
 
 ## Parameterised actions with two aircraft (D-61–D-63, 2026-10-04)
 
-Exploratory development/validation run; reserved scenarios unopened. Multi-focus family `runs/geographic-multi-ignition-family-20261003` with `--fleet-size 2`, thermal image model, `--action-mode parametric`, D-55 PPO settings, entropy 0.05→0.005, 200 updates × 8 episodes, MPS, seeds 42–45 (two concurrent at a time; four exhausted memory), commit `e738750`.
+Exploratory development/validation run; reserved scenarios unopened. Multi-focus family `runs/geographic-multi-ignition-family-20261003` with `--fleet-size 2`, thermal image model, `--action-mode parametric`, D-55 PPO settings, entropy 0.05→0.005, 200 updates × 8 episodes, MPS, seeds 42–45 (two concurrent at a time; four exhausted memory), commit `f132110`.
 
 Validation mean final burned area (ha), 24 EMSR590 scenarios, two aircraft: no intervention 121.21; random 66.19; uncoordinated heuristic 67.46 / containment 67.75; coordinated (D-63) heuristic **55.54** / containment **55.25**; seeds 42 / 43 / 44 / 45: 74.08 / 61.75 / 59.29 / 58.00. Three seeds beat random and the uncoordinated heuristics; none reaches the coordinated heuristics. On 12 validation scenarios the best seed spreads drops across the four focus slots (90 / 89 / 88 / 49) — the first learned policy whose target depends on the situation — but always chooses the head aspect, and 77 of its 316 drops (24%) land in the other aircraft's pending footprint, which the coordinated heuristics never do.
 
@@ -443,13 +443,13 @@ After this run, overlapping drops were prohibited for every policy (D-63, revise
 
 ## Two-aircraft policy after the front fix (D-64–D-67, 2026-10-04/05)
 
-Exploratory development/validation run; reserved scenarios unopened. Multi-focus family with `--fleet-size 2`, thermal image model at 4 px per cell with ROS, parametric actions over fire-front slots (D-67), per-slot raw features, D4 augmentation, skipped single-action steps, no drop bonus, D-55 PPO settings, entropy 0.05→0.005, 1,000 updates × 8 episodes, 5 rollout workers, selection every 100 updates (D-66), seeds 42–45, commit `5bf5f68`.
+Exploratory development/validation run; reserved scenarios unopened. Multi-focus family with `--fleet-size 2`, thermal image model at 4 px per cell with ROS, parametric actions over fire-front slots (D-67), per-slot raw features, D4 augmentation, skipped single-action steps, no drop bonus, D-55 PPO settings, entropy 0.05→0.005, 1,000 updates × 8 episodes, 5 rollout workers, selection every 100 updates (D-66), seeds 42–45, commit `188dbf1`.
 
 Validation mean final burned area (ha), 24 EMSR590 scenarios: no intervention 121.21, random 65.94, containment 55.62, heuristic **54.25**; selected weights for seeds 42 / 43 / 44 / 45: **49.75 / 49.33 / 49.88 / 50.79** (mean 49.94, 4.3 ha or 8% below the heuristic). Before D-67 the best selected seed reached 54.54. Every seed has several evaluation points below the heuristic (seed 42: 400–900 updates between 49.75 and 52.17), so the result is not one lucky checkpoint, but scores still oscillate between evaluations (final weights 56.83 / 55.00 / 52.88 / 53.79). Because the selection scenarios also chose the weights, these figures are optimistic; a clean estimate needs an incident used neither for training nor for selection (D-65 holdout folds) before any performance claim.
 
 ### Clean holdout folds (D-68, 2026-10-05)
 
-Same configuration as the run above, seed 42, three folds run concurrently (3 rollout workers each), commit `e075f0a`. In each fold one development incident was excluded from training, the weights were selected on the validation split (EMSR590), and the selected policy and the baselines were then scored on the 32 scenarios of the excluded incident, which were used for neither training nor selection. Reserved scenarios remain unopened.
+Same configuration as the run above, seed 42, three folds run concurrently (3 rollout workers each), commit `45ee479`. In each fold one development incident was excluded from training, the weights were selected on the validation split (EMSR590), and the selected policy and the baselines were then scored on the 32 scenarios of the excluded incident, which were used for neither training nor selection. Reserved scenarios remain unopened.
 
 | Held-out incident | No intervention | Random | Containment | Heuristic | **Policy** | Policy − heuristic | Scenarios better / equal / worse than heuristic |
 |---|---|---|---|---|---|---|---|
@@ -469,7 +469,7 @@ refill metrics count completed services and actual travel within the episode;
 this correction changes those audit metrics, not the trained weights.
 ### Holdout folds after D-69 and D-70 (2026-10-05)
 
-The table above predates D-69 (causal burning state, horizon scoring) and D-70 (scoopable refill points 7–22 km away instead of nearby ponds), so its numbers are superseded. The same configuration was re-run on `runs/geographic-multi-ignition-family-d70-20261005` (all families regenerated with the D-70 refill points; imagery reused because grids are unchanged), seed 42, commit `99160c1`, 3 concurrent folds. Selection on validation (EMSR590, 24 scenarios): heuristic 112.62, containment 115.42, no intervention 144.33 ha; selected weights 105.54 / 105.12 / 103.75 ha. Summary from `python -m pandion.fold_report runs/geographic-holdout-folds-d70-20261005` (95% bootstrap interval, 10,000 resamples):
+The table above predates D-69 (causal burning state, horizon scoring) and D-70 (scoopable refill points 7–22 km away instead of nearby ponds), so its numbers are superseded. The same configuration was re-run on `runs/geographic-multi-ignition-family-d70-20261005` (all families regenerated with the D-70 refill points; imagery reused because grids are unchanged), seed 42, commit `ca9e05e`, 3 concurrent folds. Selection on validation (EMSR590, 24 scenarios): heuristic 112.62, containment 115.42, no intervention 144.33 ha; selected weights 105.54 / 105.12 / 103.75 ha. Summary from `python -m pandion.fold_report runs/geographic-holdout-folds-d70-20261005` (95% bootstrap interval, 10,000 resamples):
 
 | Held-out incident | Policy | Heuristic | Containment | Policy − heuristic (95% CI) | Better / equal / worse |
 |---|---|---|---|---|---|
