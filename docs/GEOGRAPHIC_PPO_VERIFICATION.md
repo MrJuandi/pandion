@@ -13,7 +13,7 @@
 
 ## Commands and checks
 
-Prepare the existing four-product real family as documented in [README.md](../README.md). Generated families, reports, weights, and logs stay under ignored `runs/` and `data/` paths.
+Prepare the existing four-product real family as documented in [USAGE.md](USAGE.md). Generated families, reports, weights, and logs stay under ignored `runs/` and `data/` paths.
 
 ```sh
 .venv/bin/python -m pip install -r requirements-standard.txt -r requirements-rl.txt
