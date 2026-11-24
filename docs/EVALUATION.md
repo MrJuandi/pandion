@@ -201,7 +201,7 @@ The learned policy failed to generalize its validation advantage to the reserved
 
 This confirms the hypothesis recorded in `DECISIONS.md` (O-11): the apparent 16x8 validation advantage was an artifact of adaptive validation reuse after the 8x8 run. The reserved scenarios are now opened and documented; they cannot be reused as an untouched test set for future iterations of this policy.
 
-Source and provenance: recorded from ignored artifact `runs/reserved-evaluation/report.json`, schema `nightjar-reserved-evaluation-0.1`, git working-tree code, PyTorch 2.2.2. Full replays for all policies and choice seeds are stored under `runs/reserved-evaluation/replays/`.
+Source and provenance: recorded from ignored artifact `runs/reserved-evaluation/report.json`, schema `nightjar-reserved-evaluation-0.1`, git working-tree code, PyTorch 2.2.2. Full replays for all policies and choice seeds are stored under `runs/reserved-evaluation/replays/`. Note (2026-11-24): the local `runs/reserved-evaluation/report.json` and its replays were later overwritten by a unit test that wrote mocked results to the default output path (fixed on this date); a copy archived on 2026-09-30 already held mocked results. The figures in this section are the record of the run; no surviving copy of the original artifact was found.
 
 
 ### Tactical PPO with Physical Forward Risk Heatmap and Macro-Action Space (2026-09-29)
@@ -314,7 +314,7 @@ Although the empirical mean reduction against the greedy heuristic (`+0.2500 ha`
 - Achieved **50.0% wins** and only **18.8% losses** against the containment heuristic, with a 95% bootstrap CI lower bound of `0.0000 ha`, rigorously confirming non-inferiority.
 - Executed **640 consecutive valid flight decisions** (100% feasibility, zero rejections).
 
-Source and provenance: recorded from artifact `runs/reserved-v2-evaluation/report.json`, schema `nightjar-reserved-evaluation-0.2`, git working-tree code, PyTorch 2.2.2. Complete per-episode replays are archived in `runs/reserved-v2-evaluation/replays/`. This completes the Stage 1 research question and closes its evaluation gate in the provisional synthetic simulator.
+Source and provenance: recorded from artifact `runs/reserved-v2-evaluation/report.json`, schema `nightjar-reserved-evaluation-0.2`, git working-tree code, PyTorch 2.2.2. Complete per-episode replays are archived in `runs/reserved-v2-evaluation/replays/`. This completes the Stage 1 research question and closes its evaluation gate in the provisional synthetic simulator. Note (2026-11-24): the local `runs/reserved-v2-evaluation/report.json` and its replays were later overwritten by a unit test that wrote mocked results to the default output path (fixed on this date); a copy archived on 2026-09-30 already held mocked results. The figures in this section are the record of the run; no surviving copy of the original artifact was found.
 
 
 ### Predeclared model improvement criteria (fixed before future evaluation)
@@ -482,7 +482,7 @@ With realistic refill distances the policy still beats containment on every fold
 
 ### Holdout folds with 20 development incidents (D-73, 2026-10-06)
 
-Same configuration and seed (42) on `runs/geographic-multi-ignition-family-d71-20261006` (20 development incidents, 640 scenarios; each fold trains on the other 19 incidents) with imagery `runs/geographic-imagery-s2-d71-px4-20261006`, commit `79d5a7b`, two batches of three concurrent folds (`runs/geographic-holdout-folds-d71-20261006/run.sh`). Regenerating the families re-drew foci and wind (D-73), so held-out and validation scenarios differ from the D-70 run and only policy-minus-baseline differences are comparable. Validation (EMSR590, 24 scenarios): heuristic 92.62, containment 92.50, no intervention 122.33 ha; selected weights 86.96–91.54 ha. `python -m pandion.fold_report runs/geographic-holdout-folds-d71-20261006`:
+Same configuration and seed (42) on `runs/geographic-multi-ignition-family-d71-20261006` (20 development incidents, 640 scenarios; each fold trains on the other 19 incidents) with imagery `runs/geographic-imagery-s2-d71-px4-20261006`, commit `79d5a7b` (unpublished working commit; its published counterpart `da057c3` includes later code), two batches of three concurrent folds (`runs/geographic-holdout-folds-d71-20261006/run.sh`). Regenerating the families re-drew foci and wind (D-73), so held-out and validation scenarios differ from the D-70 run and only policy-minus-baseline differences are comparable. Validation (EMSR590, 24 scenarios): heuristic 92.62, containment 92.50, no intervention 122.33 ha; selected weights 86.96–91.54 ha. `python -m pandion.fold_report runs/geographic-holdout-folds-d71-20261006`:
 
 | Held-out incident | Policy | Heuristic | Containment | Policy − heuristic (95% CI) | Better / equal / worse |
 |---|---|---|---|---|---|
@@ -528,7 +528,7 @@ Same benchmark on `runs/geographic-multi-ignition-family-d73-20261006` (43 devel
 
 ### Reference policy under D-74 (2026-10-06)
 
-One training run, same configuration as the D-73 sweep (two aircraft, parametric actions, thermal image with ROS, slot features, augmentation, 1,000 updates, seed 42), on `runs/geographic-multi-ignition-family-d72-20261006` (20 development incidents) with EMSR597 (Moros, never inspected) held out; `runs/geographic-reference-d72-20261006`, commit `173c794`. Validation (EMSR590, 24 scenarios): selected weights 23.08 ha against heuristic 23.2 and containment 23.5 (no intervention 26.0). Held-out EMSR597, 32 scenarios: policy 109.1 ha, heuristic 104.9, containment 105.5, no intervention 117.4; policy − heuristic +4.16 ha [+0.72, +9.06] (+4.0 %), better / equal / worse 8 / 7 / 17. Under the sourced drop effect the learned policy ties the heuristic on validation and is worse on the unseen incident; it has not learned to prefer targets where a drop can hold. One seed and one fold.
+One training run, same configuration as the D-73 sweep (two aircraft, parametric actions, thermal image with ROS, slot features, augmentation, 1,000 updates, seed 42), on `runs/geographic-multi-ignition-family-d72-20261006` (20 development incidents) with EMSR597 (Moros, never inspected) held out; `runs/geographic-reference-d72-20261006`, commit `173c794` (unpublished working commit; its published counterpart `0cd708f` includes later code). Validation (EMSR590, 24 scenarios): selected weights 23.08 ha against heuristic 23.2 and containment 23.5 (no intervention 26.0). Held-out EMSR597, 32 scenarios: policy 109.1 ha, heuristic 104.9, containment 105.5, no intervention 117.4; policy − heuristic +4.16 ha [+0.72, +9.06] (+4.0 %), better / equal / worse 8 / 7 / 17. Under the sourced drop effect the learned policy ties the heuristic on validation and is worse on the unseen incident; it has not learned to prefer targets where a drop can hold. One seed and one fold.
 
 ### Sensitivity to the water-effect parameters (2026-11-03)
 
@@ -728,6 +728,21 @@ Per seed (42, 43, 44), held out, branched − heuristic: −3.21, −3.27, −2.
 
 Reading: the seed 42 result holds across seeds. Branched advantages gain about 2 ha over Monte Carlo/GAE advantages with everything else fixed and bring the learned policy level with `hold_aware_heuristic`, but not past it. Limits: one held-out activation; three seeds.
 
+#### Branches weighted towards early decisions (D-88, 2026-11-18)
+
+`runs/geographic-vine-early-d86-20261118` (`run.sh`; code is the D-85 commit plus `uncommitted.diff`): the D-85 recipe with seed 42 and `--vine-weighting remaining`, so the four branched decisions of each episode are drawn with probability proportional to the time left. 9 workers, 16–34 s per update, about the cost of uniform branching. Selection score fell to 79.5 ha at update 225 (uniform branching, same seed: 77.6).
+
+| Selected weights, seed 42 | Held out: − heuristic | Held out: − hold-aware | Development sample: − heuristic | Development sample: − hold-aware |
+|---|---|---|---|---|
+| Time-weighted branches (D-88) | −2.42 [−3.82, −1.25] | +0.64 [−0.01, +1.33] | −3.27 [−4.98, −1.88] | −0.16 [−1.48, +1.44] |
+| Time-weighted − uniform branches (D-85), paired | +0.80 [+0.19, +1.48] | | −0.33 [−1.44, +1.11] | |
+
+Held out, the time-weighted policy is better than the uniform one in 43 scenarios, equal in 169 and worse in 76.
+
+Reading: concentrating branches on early decisions did not help. On the held-out incident it is 0.8 ha worse than uniform branching with the same seed; on the development sample the difference is within noise. One plausible reason is that uniform branching already reaches early decisions often enough, and the late decisions it also branches still teach the policy something the weighted scheme now sees less. Limits: one seed, so a difference of this size could partly be seed noise; `--vine-weighting` stays available with `uniform` as the default, and the D-85 recipe is unchanged.
+
+The run folder keeps its working number `d86`, assigned before D-86 became the project rename.
+
 #### Learned return decomposition against branched advantages (2026-11-19)
 
 Question: can a learned model assign each decision its share of the outcome, without simulating branches, well enough to grade the decisions that branched advantages (D-85) leave without a learning signal (all but four per episode)? The model is RUDDER-style return decomposition (Arjona-Medina et al., 2019): an LSTM reads the episode decision by decision (the policy's LSTM state and an embedding of the action taken: focus-slot features, aspect × distance and the D-82 action-target features) and predicts the episode return at every step; the change in its prediction when one action is swapped for another is that action's credit. Criterion written before any run (`CRITERION.md`): go on to training with branched advantages plus RUDDER credit at the other decisions only if RUDDER's sign agreement with a reference advantage is at least 70 % and no more than 10 points below single-branch vine.
@@ -763,3 +778,19 @@ On held-out EMSR837 the three D-85 seeds tie `hold_aware_heuristic` on average (
 Losses are not one repeated mistake. In the 19 consistent losses the policy drops more often on fronts that need three stacked drops (43 % against 29 % in the consistent wins) and on fronts that cannot be held (16 % against 2 %): they are higher-intensity fires, eight of them in AOI07, which burns 420–495 ha with any policy. Focus triage does not explain the losses in general: pairs of seeds that start on the same two foci end as far apart (5.1 ha) as pairs that start differently (4.4 ha), although single scenarios do turn on it (EMSR837_AOI06 scenario 03, three foci: 4 ha for the seed that starts on focus 1, 33–34 for the two that start on focus 2; the rule, 5 ha). In the two replays compared in detail (`replays/`, `viewer.html`; scenarios AOI16-07 and AOI15-02, policy 8 and 10 ha against 4) the drops occur at the same times as the rule's and only the targets differ: in AOI16-07 the policy works focus 3 first and puts three consecutive drops on cells that already hold, while the rule works focus 1 throughout.
 
 Reading: of the earlier defects, redundant drops fell (18 % of drops against 23–36 % before D-85) and now sit mostly where they cost nothing; drop distances beyond the front are still not used. HOLD is chosen in about half the decisions while the rule would always drop, but almost only once the fire is small or held, and the number of HOLDs in large fires is unrelated to the result (correlation 0.00). The remaining differences from the rule are scenario-specific and of both signs, and outcomes in large fires are sensitive to small changes in target choice (3 ha between seeds). For training this means that three quarters of the decisions, and therefore of the branched decisions, fall in scenarios where no choice changes the outcome; this agrees with the 72 % of branched comparisons with identical returns in the RUDDER measurement above. Limits: deterministic evaluation of three seeds on one held-out activation; the rule's choice is evaluated in the policy's states, not along its own trajectory.
+
+#### Branching by fire growth (D-89, 2026-11-19)
+
+D-85 recipe, seed 42, with `--vine-allocation growth`: the same 128 branched decisions per update, one per episode and the rest by fire growth. Branches ran forked (D-90). Run: `runs/geographic-vine-growth-d87-20261119` (`run.sh`, `seed42.log`, `seed42.json`; evaluation `audit-eval.json` with `eval_ckpt.py` of the D-85 run, both weights evaluated together). Selection mean burned area of the selected weights: 79.04 ha (update 175) against 77.59 ha for D-85 seed 42 (also update 175).
+
+| Policy (seed 42) | Held-out EMSR837 (288) | − `hold_aware_heuristic` | Development sample (120) | − `hold_aware_heuristic` |
+|---|---|---|---|---|
+| D-85 | 38.55 ha | −0.16 [−0.59, 0.27] | 43.38 ha | +0.17 [−0.75, 1.14] |
+| D-89 | 38.97 ha | +0.26 [−0.33, 0.81] | 43.75 ha | +0.53 [−0.55, 1.67] |
+| D-89 − D-85, paired | +0.42 [−0.01, 0.80]; better / equal / worse 36 / 158 / 94 | | +0.37 [−0.53, 1.25]; 15 / 68 / 37 | |
+
+References: `heuristic` 41.76 / 46.33 ha, `hold_aware_heuristic` 38.70 / 43.22 ha.
+
+Reading: negative. Moving branches to growing fires did not improve the policy; it is slightly worse than D-85 with the same seed on held-out, selection and development data, with more scenarios lost than won. More branched decisions with an effect per update (45.8 against 28.7 measured beforehand) did not translate into a better policy. A likely reason is that the episodes with large fires are also those whose branch returns are noisiest (3 ha between seeds in one scenario, previous section), so the extra signal there is mostly variance. Seeds 43 and 44 were not run, as agreed beforehand for a seed-42 result without improvement. D-85 stays the recipe; `--vine-allocation` keeps `uniform` as default. Forked branching (D-90) is kept: over the first 18 updates, 27.4 s of branching per update against 37.3 s in the replayed run that was aborted (`aborted/seed42.log`; 1.4×). The two logs show the same loss to four decimals in the first nine updates and drift apart from the tenth; returns were compared exactly only on 12 development episodes and in the unit tests, and the cause of the drift was not checked. Limits: one seed.
+
+The run folder keeps its working number `d87`, assigned before D-87 became the viewer language change; forked branching was D-88 in the working copy.
