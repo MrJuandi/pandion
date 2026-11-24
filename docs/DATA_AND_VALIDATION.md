@@ -96,7 +96,8 @@ For PPO/baseline replays the DEM is explicitly a visual overlay on flat-terrain 
 
 
 The workspace now accepts the D-71 development catalog (twenty areas) using
-the pinned registrations from training commit `79d5a7b`, including the fourteen
+the pinned registrations from training commit `79d5a7b` (unpublished working
+commit; `da057c3` has the same catalogue), including the fourteen
 additional development areas and existing OSM refill-source registrations.
 No acquisition was performed for this correction; archived family payloads and
 hashes are checked as stored. Fixed validation/reserved membership is unchanged.

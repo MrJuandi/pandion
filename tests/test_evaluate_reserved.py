@@ -123,7 +123,9 @@ class EvaluateReservedTests(unittest.TestCase):
                 mock_sac.return_value = mock_model
 
                 # Test v1
-                report_v1 = run_reserved_evaluation(ckpt_path, split_version="v1")
+                report_v1 = run_reserved_evaluation(
+                    ckpt_path, output_path=Path(tmpdir) / "v1" / "report.json",
+                    replays_dir=Path(tmpdir) / "v1" / "replays", split_version="v1")
                 self.assertEqual(len(evaluated_scenarios), 8)
                 self.assertTrue(all(sid.startswith("discrimination-reserved-") for sid in evaluated_scenarios))
                 self.assertEqual(report_v1["split"], "reserved")
@@ -131,7 +133,9 @@ class EvaluateReservedTests(unittest.TestCase):
 
                 # Test v2
                 evaluated_scenarios.clear()
-                report_v2 = run_reserved_evaluation(ckpt_path, split_version="v2")
+                report_v2 = run_reserved_evaluation(
+                    ckpt_path, output_path=Path(tmpdir) / "v2" / "report.json",
+                    replays_dir=Path(tmpdir) / "v2" / "replays", split_version="v2")
                 self.assertEqual(len(evaluated_scenarios), 32)
                 self.assertTrue(all(sid.startswith("discrimination-reserved-v2-") for sid in evaluated_scenarios))
                 self.assertEqual(report_v2["split"], "reserved_v2")

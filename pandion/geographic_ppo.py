@@ -12,6 +12,7 @@ from contextlib import ExitStack
 from copy import deepcopy
 import hashlib
 import json
+import os
 from pathlib import Path
 import random
 import time
@@ -24,7 +25,7 @@ from .geographic_benchmark import run_geographic_benchmark
 from .geographic_family import canonical_hash
 from .cems_catalog import ACTIVATIONS, incidents_for_split
 from .geographic_training_env import REWARD_REFERENCES, GeographicTrainingEnv
-from .vine import choose_vine_decisions, vine_episode
+from .vine import allocate_vine_states, choose_vine_decisions, remaining_time_weights, vine_episode
 from .model import (
     HAS_TORCH,
     SpatialActorCritic,
@@ -419,10 +420,12 @@ def rollout_geographic(
                     *inputs, mask, deterministic=deterministic
                 )
 
+        decision_time_s = float(observation["time_s"])
         next_obs, reward, done, _ = env.step_discrete(int(action.item()))
 
         if not inference_only:
             records.append({
+                "time_s": decision_time_s,
                 "inputs": tuple(t.squeeze(0) for t in inputs),
                 "mask": mask.squeeze(0),
                 "action": action.squeeze(0),
@@ -657,7 +660,8 @@ def _vine_task(task: tuple) -> list[dict[str, Any]]:
         _WORKER_MODELS[key] = model
     model.load_state_dict(state_dict)
     model.eval()
-    return vine_episode(model, scenario, decision_actions, chosen, **vine_kwargs)
+    # Workers run on CPU, so branches can be forked from one replay (D-90); results are identical.
+    return vine_episode(model, scenario, decision_actions, chosen, snapshot=hasattr(os, "fork"), **vine_kwargs)
 
 
 def attach_vine_samples(records: list[dict], branches: list[dict[str, Any]], device: Any = None) -> int:
@@ -727,6 +731,8 @@ def train_geographic_ppo(
     action_features: bool = False,
     vine_states: int = 0,
     vine_actions: int = 4,
+    vine_allocation: str = "uniform",
+    vine_weighting: str = "uniform",
 ) -> tuple[Any, list[float]]:
     """Train a geographic policy (legacy SpatialActorCritic or D-49 ImageActorCritic).
 
@@ -754,12 +760,21 @@ def train_geographic_ppo(
     are branched: ``vine_actions`` actions are sampled from the policy there and each is
     followed to the end with common random numbers; the policy term then uses these
     branched samples and their leave-one-out advantages instead of Monte Carlo ones.
+    ``vine_allocation="growth"`` (D-89) keeps the budget of ``vine_states`` per episode for the
+    batch but gives each episode one branched decision and the rest in proportion to how much its
+    fire grew (final minus initial burned area), so branching goes to fires a decision can change.
+    ``vine_weighting="remaining"`` (D-88) draws the branched decisions of an episode with
+    probability proportional to the simulated time left instead of uniformly.
     """
     _require_torch()
     if rollout_envs < 1 or rollout_workers < 0:
         raise ValueError("rollout_envs must be positive and rollout_workers nonnegative")
     if vine_states < 0 or (vine_states and vine_actions < 2):
         raise ValueError("vine_states must be nonnegative and vine_actions at least 2")
+    if vine_allocation not in ("uniform", "growth"):
+        raise ValueError("vine_allocation must be uniform or growth")
+    if vine_weighting not in ("uniform", "remaining"):
+        raise ValueError("vine_weighting must be uniform or remaining")
     if vine_states and (rollout_envs != 1 or gamma != 1.0 or input_mode not in ("image", "cells")):
         raise ValueError("vine sampling needs serial or worker collection (rollout_envs 1), gamma 1 "
                          "and image or cells inputs")
@@ -844,7 +859,7 @@ def train_geographic_ppo(
                 rollout_workers, mp_context=multiprocessing.get_context("spawn")))
         for update_idx in range(updates):
             started = time.monotonic()
-            batch_records = []
+            batch_records, batch_metrics = [], []
             rollout_kwargs = {"gae_lambda": gae_lambda, "normalize_advantages": not batch_normalized, "gamma": gamma,
                               "skip_forced": skip_forced, "drop_bonus_per_cell": drop_bonus_per_cell,
                               "reward_reference": reward_reference, **input_options}
@@ -862,12 +877,15 @@ def train_geographic_ppo(
                 state_dict = {k: v.detach().cpu() for k, v in model.state_dict().items()}
                 tasks = [(build_kwargs, state_dict, sc, rollout_kwargs, random.randrange(2**31))
                          for sc in chosen]
-                batch_records = [_to_device(records, device) for records, _ in pool.map(_rollout_task, tasks)]
+                for records, metrics in pool.map(_rollout_task, tasks):
+                    batch_records.append(_to_device(records, device))
+                    batch_metrics.append(metrics)
             else:
                 for scenario in chosen:
-                    records, _ = rollout_geographic(model, scenario, device=device, deterministic=False,
-                                                    **rollout_kwargs)
+                    records, metrics = rollout_geographic(model, scenario, device=device, deterministic=False,
+                                                          **rollout_kwargs)
                     batch_records.append(records)
+                    batch_metrics.append(metrics)
             if device is not None and str(device).startswith("mps"):
                 torch.mps.synchronize()
             elif device is not None and str(device).startswith("cuda"):
@@ -890,9 +908,18 @@ def train_geographic_ppo(
                 vine_kwargs = {"branch_actions": vine_actions, "skip_forced": skip_forced,
                                "drop_bonus_per_cell": drop_bonus_per_cell, "reward_reference": reward_reference,
                                **input_options}
+                if vine_allocation == "growth":
+                    growth = [m["final_burned_ha"] - m["initial_burned_ha"] for m in batch_metrics]
+                    per_episode = allocate_vine_states([len(r) for r in batch_records], growth, vine_states)
+                else:
+                    per_episode = [vine_states] * len(batch_records)
                 jobs = [(scenario, [int(r["action"]) for r in records],
-                         choose_vine_decisions(len(records), vine_states, random), random.randrange(2 ** 31))
-                        for scenario, records in zip(chosen, batch_records)]
+                         choose_vine_decisions(
+                             len(records), states, random,
+                             None if vine_weighting == "uniform" else remaining_time_weights(
+                                 [r["time_s"] for r in records], scenario["fire"]["horizon_s"])),
+                         random.randrange(2 ** 31))
+                        for scenario, records, states in zip(chosen, batch_records, per_episode)]
                 if pool is not None:
                     weights = {k: v.detach().cpu() for k, v in model.state_dict().items()}
                     branches = list(pool.map(_vine_task, [
@@ -1007,6 +1034,12 @@ def main() -> None:
                              "branched advantages with common random numbers (D-85); 0 = Monte Carlo/GAE")
     parser.add_argument("--vine-actions", type=int, default=4,
                         help="actions sampled from the policy at each branched decision (D-85)")
+    parser.add_argument("--vine-allocation", choices=("uniform", "growth"), default="uniform",
+                        help="uniform: --vine-states decisions in every episode (D-85); growth: same budget per "
+                             "batch, one per episode and the rest by how much each episode's fire grew (D-89)")
+    parser.add_argument("--vine-weighting", choices=("uniform", "remaining"), default="uniform",
+                        help="how branched decisions are chosen: uniformly, or with probability "
+                             "proportional to the simulated time left in the episode (D-88)")
     parser.add_argument("--entropy-coef-final", type=float,
                         help="decay the entropy bonus linearly to this value over the updates")
     parser.add_argument("--checkpoint-every", type=int, default=0,
@@ -1046,7 +1079,8 @@ def main() -> None:
                    "slot_features": args.slot_features, "eval_every": args.eval_every,
                    "image_checkpoint_chunk": args.image_checkpoint_chunk, "gamma": args.gamma,
                    "reward_reference": args.reward_reference,
-                   "vine_states": args.vine_states, "vine_actions": args.vine_actions}
+                   "vine_states": args.vine_states, "vine_actions": args.vine_actions,
+                   "vine_allocation": args.vine_allocation, "vine_weighting": args.vine_weighting}
     train_options = {**model_options, **ppo_options,
                      "checkpoint_path": args.checkpoint, "checkpoint_every": args.checkpoint_every,
                      "rollout_envs": args.rollout_envs, "rollout_workers": args.rollout_workers}
@@ -1055,7 +1089,8 @@ def main() -> None:
                              "target_kl": args.target_kl, "entropy_coef": args.entropy_coef,
                              "entropy_coef_final": args.entropy_coef_final, "gamma": args.gamma,
                              "reward_reference": args.reward_reference,
-                             "vine_states": args.vine_states, "vine_actions": args.vine_actions}, "input_mode": args.input_mode, "action_mode": args.action_mode, "include_ros": args.ros, "include_thermal": args.thermal, "fleet_size": args.fleet_size, "holdout_activation": args.holdout_activation,
+                             "vine_states": args.vine_states, "vine_actions": args.vine_actions,
+                             "vine_allocation": args.vine_allocation, "vine_weighting": args.vine_weighting}, "input_mode": args.input_mode, "action_mode": args.action_mode, "include_ros": args.ros, "include_thermal": args.thermal, "fleet_size": args.fleet_size, "holdout_activation": args.holdout_activation,
                      "drop_distances": list(args.drop_distances), "action_features": args.action_features,
                      "selection_activations": args.selection_activations,
                      "imagery_dir": str(args.imagery_dir) if args.imagery_dir else None,
