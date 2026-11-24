@@ -150,7 +150,8 @@ Archived reports remain marked legacy; their original association is not
 retroactively certified. For D-71 use `--skip-forced`, as recorded in `run.sh`.
 
 The D-71 registered catalog entries are carried forward from the training
-commit `79d5a7b` so its twenty development areas pass source/partition checks.
+commit `79d5a7b` (unpublished working commit; `da057c3` has the same catalogue) so its twenty development areas
+pass source/partition checks.
 This adds no new acquisitions and preserves the original package hashes.
 Refill arrivals and service intervals are separate track events. Missions still
 in progress at the horizon retain their actual position and water; completion
