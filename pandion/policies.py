@@ -18,10 +18,9 @@ def _is_burnable_fuel(val: Any) -> bool:
 # footprints overlap when their targets are within Manhattan distance 2.
 _DROP_FOOTPRINT = ((0, 0), (-1, 0), (1, 0), (0, -1), (0, 1))
 _OVERLAP_RADIUS = 2
-# A geographic cell may receive up to this many stacked drops (D-76; McFayden et al.
-# 2023 A8.5: three CL-415 drops hold open-fuel line up to 3,200 kW/m). Observations
-# announce their limit as ``max_stacked_drops``; without it a treated cell is never
-# targeted again, as in the synthetic integrated episode.
+# Default geographic cap (D-76). Observations announce the configured cap as
+# ``max_stacked_drops``: None allows unlimited stacking, and an absent key means
+# one drop per cell, as in the synthetic integrated episode.
 MAX_STACKED_DROPS = 3
 
 
@@ -101,7 +100,7 @@ def candidate_cells(observation: dict) -> list[list[int]]:
 
     Pre-wetting targets are observed unburned burnable cells adjacent to an
     observed reached cell. They can be targeted up to ``max_stacked_drops``
-    times (one drop when absent, D-76).
+    times (unlimited when None, one drop when absent).
 
     Only delivered cell records in ``observation['fire']['cells']`` are read;
     unknown cells never count as either burning or unburned. With several
