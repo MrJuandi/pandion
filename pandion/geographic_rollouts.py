@@ -56,6 +56,8 @@ class _Episode:
         if done:
             metrics = rollout_metrics(self.scenario, self.env.replay, self.rewards)
             metrics["steps_count"] = self.decisions
+            if self.options["action_mode"] == "frontier" and self.scenario.get("water_model", {}).get("burning_cells"):
+                metrics["frontier_truncated_decisions"] = self.env.frontier_truncated_decisions
             return {"reward": reward, "done": True, "metrics": metrics}
         mask = np.asarray(self.mapper.compute_mask(self.observation), dtype=np.bool_)
         if self.options.get("skip_forced", False) and int(np.count_nonzero(mask)) == 1:
