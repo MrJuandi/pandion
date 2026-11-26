@@ -25,6 +25,7 @@ from .geographic_benchmark import run_geographic_benchmark
 from .geographic_family import canonical_hash
 from .cems_catalog import ACTIVATIONS, incidents_for_split
 from .geographic_training_env import REWARD_REFERENCES, GeographicTrainingEnv
+from .parametric_actions import MAX_BURNING_FRONTIER
 from .vine import allocate_vine_states, choose_vine_decisions, remaining_time_weights, vine_episode
 from .model import (
     HAS_TORCH,
@@ -145,7 +146,8 @@ def build_policy_model(
                             image_channels=getattr(tensorizer, "image_channels", 3),
                             slot_raw_features=slot_features and action_mode == "parametric",
                             drop_distances=tuple(drop_distances) if action_mode in TARGET_MODES else (0,),
-                            action_feature_dim=tensorizer.num_action_features, action_skip=action_skip)
+                            action_feature_dim=tensorizer.num_action_features, action_skip=action_skip,
+                            frontier_ceiling=tensorizer.frontier_ceiling)
 
 
 def save_checkpoint(state: dict, path: Path | str) -> None:
@@ -176,6 +178,34 @@ def with_fleet(scenarios: list[dict[str, Any]], fleet_size: int) -> list[dict[st
         copy["scenario_hash"] = canonical_hash(copy)
         out.append(copy)
     return out
+
+
+def with_water_model(scenarios: list[dict[str, Any]], overrides: dict) -> list[dict[str, Any]]:
+    """Apply explicit water settings, preserving other settings and the input scenarios."""
+    if not overrides:
+        return scenarios
+    out = []
+    for scenario in scenarios:
+        copy = deepcopy(scenario)
+        copy.setdefault("water_model", {}).update(deepcopy(overrides))
+        copy.setdefault("provenance", {})["water_model_override"] = {
+            "water_model": deepcopy(overrides), "original_scenario_hash": scenario.get("scenario_hash")}
+        copy.pop("scenario_hash", None)
+        copy["scenario_hash"] = canonical_hash(copy)
+        out.append(copy)
+    return out
+
+
+def parse_drop_cap(value: str) -> int | None:
+    if value.lower() == "none":
+        return None
+    try:
+        cap = int(value)
+    except ValueError:
+        cap = 0
+    if cap < 1:
+        raise argparse.ArgumentTypeError("drop cap must be a positive integer or none")
+    return cap
 
 
 def resolve_device(name: str = "cpu") -> str:
@@ -405,6 +435,9 @@ def rollout_geographic(
     """
     _require_torch()
     action_mode = getattr(model, "action_mode", "tactical")
+    water_model = getattr(model, "_pandion_inference", {}).get("water_model")
+    if water_model and scenario.get("provenance", {}).get("water_model_override", {}).get("water_model") != water_model:
+        scenario = with_water_model([scenario], water_model)[0]
     env = GeographicTrainingEnv(scenario, drop_bonus_per_cell=drop_bonus_per_cell, action_mode=action_mode,
                                 drop_distances=getattr(model, "drop_distances", (0,)),
                                 reward_reference=reward_reference)
@@ -497,6 +530,8 @@ def rollout_geographic(
         "total_reward": round(float(total_reward), 4),
         "steps_count": len(records),
     }
+    if action_mode == "frontier" and scenario.get("water_model", {}).get("burning_cells"):
+        metrics["frontier_truncated_decisions"] = env.frontier_truncated_decisions
     return records, metrics
 
 
@@ -629,6 +664,8 @@ def holdout_evaluation(
     for scenario, metrics in zip(scenarios, policy):
         bench = run_geographic_benchmark(scenario, random_seeds=(42, 43))["policies"]
         rows.append({**scenario_entry(scenario), "policy_ha": metrics["final_burned_ha"],
+                     **({"frontier_truncated_decisions": metrics["frontier_truncated_decisions"]}
+                        if "frontier_truncated_decisions" in metrics else {}),
                      **{f"{name}_ha": bench[name]["final_burned_ha"] for name in names}})
     count = max(len(rows), 1)
     return {
@@ -668,7 +705,7 @@ def _rollout_task(task: tuple) -> tuple[list[dict], dict[str, Any]]:
     """Worker-process rollout on CPU with the current weights (D-64)."""
     build_kwargs, state_dict, scenario, rollout_kwargs, seed = task
     torch.set_num_threads(1)
-    key = repr(sorted(build_kwargs.items()))
+    key = repr((sorted(build_kwargs.items()), bool(scenario.get("water_model", {}).get("burning_cells"))))
     model = _WORKER_MODELS.get(key)
     if model is None:
         model = build_policy_model(scenario, **build_kwargs)
@@ -684,7 +721,7 @@ def _vine_task(task: tuple) -> list[dict[str, Any]]:
     """Worker-process branching of one collected episode on CPU (D-85)."""
     build_kwargs, state_dict, scenario, decision_actions, chosen, vine_kwargs = task
     torch.set_num_threads(1)
-    key = repr(sorted(build_kwargs.items()))
+    key = repr((sorted(build_kwargs.items()), bool(scenario.get("water_model", {}).get("burning_cells"))))
     model = _WORKER_MODELS.get(key)
     if model is None:
         model = build_policy_model(scenario, **build_kwargs)
@@ -825,6 +862,9 @@ def train_geographic_ppo(
                     **({"action_skip": True} if action_skip else {}), **input_options}
     augmented: dict[tuple[str, int], dict[str, Any]] = {}
     model = build_policy_model(dev_scenarios[0], **build_kwargs).to(device)
+    burning_frontier = action_mode == "frontier" and dev_scenarios[0].get("water_model", {}).get("burning_cells")
+    if burning_frontier:
+        model.training_frontier_truncated_decisions = 0
     if hasattr(model, "IMAGE_CHUNK"):
         model.IMAGE_CHUNK = image_checkpoint_chunk
     pool = None
@@ -876,9 +916,16 @@ def train_geographic_ppo(
             if checkpoint_path:
                 Path(checkpoint_path).parent.mkdir(parents=True, exist_ok=True)
                 save_checkpoint(best_state, Path(f"{checkpoint_path}.best"))
+        selection_truncations = {}
+        if burning_frontier:
+            selection_truncations["frontier_truncated_decisions"] = sum(
+                r["frontier_truncated_decisions"] for r in results)
         if history is not None:
-            history.append({"update": update_number, "mean_final_burned_ha": round(score, 4), "best": improved})
-        print(f"  [Select @ {update_number}] mean burned {score:.2f} ha{' (best)' if improved else ''}", flush=True)
+            history.append({"update": update_number, "mean_final_burned_ha": round(score, 4), "best": improved,
+                            **selection_truncations})
+        suffix = (f" [frontier truncated decisions: {selection_truncations['frontier_truncated_decisions']}]"
+                  if burning_frontier else "")
+        print(f"  [Select @ {update_number}] mean burned {score:.2f} ha{' (best)' if improved else ''}{suffix}", flush=True)
 
     scaler = RewardScaler(gamma) if reward_scaling else None
     # Legacy defaults keep per-episode advantage normalization; the improved
@@ -917,7 +964,7 @@ def train_geographic_ppo(
                 chosen = [augmented.setdefault((sc["scenario_id"], t), augment_scenario(sc, t))
                           for sc, t in zip(chosen, picks)]
             if backend is not None:
-                batch_records, _ = rollout_geographic_batch(
+                batch_records, batch_metrics = rollout_geographic_batch(
                     model, chosen, device=device, rollout_envs=rollout_envs,
                     backend=backend, **rollout_kwargs)
             elif pool is not None:
@@ -988,11 +1035,16 @@ def train_geographic_ppo(
                                          target_kl=target_kl, entropy_coef=current_entropy)
             losses.append(loss)
             elapsed = time.monotonic() - started
+            suffix = ""
+            if burning_frontier:
+                truncated = sum(m["frontier_truncated_decisions"] for m in batch_metrics)
+                model.training_frontier_truncated_decisions += truncated
+                suffix = f" [frontier truncated decisions: {truncated}]"
             print(f"  [Update {update_idx + 1:2d}/{updates}] PPO Loss: {loss:9.4f} "
                   f"(episodes: {len(batch_records)}, {elapsed:.1f} s) "
                   f"[rollout {rollout_seconds:.2f} s; "
                   f"{f'vine {vine_seconds:.2f} s; ' if vine_states else ''}"
-                  f"update {elapsed - rollout_seconds - vine_seconds:.2f} s]",
+                  f"update {elapsed - rollout_seconds - vine_seconds:.2f} s]{suffix}",
                   flush=True)
             if partial_path is not None and (update_idx + 1) % checkpoint_every == 0:
                 partial_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1051,6 +1103,9 @@ def main() -> None:
     parser.add_argument("--resume", type=Path, help="Path to checkpoint to resume weights from")
     parser.add_argument("--fleet-size", type=int, default=1,
                         help="number of identical aircraft (D-62); extra aircraft start at the water source")
+    parser.add_argument("--water-on-burning", action="store_true", help="enable direct drops on burning cells")
+    parser.add_argument("--drop-cap", type=parse_drop_cap, default=argparse.SUPPRESS, metavar="N|none",
+                        help="override stacked drops per cell; none allows unlimited drops")
     parser.add_argument("--device", choices=("cpu", "mps", "cuda", "auto"), default="cpu",
                         help="torch device; auto picks cuda, then Apple mps, then cpu")
     parser.add_argument("--ppo-epochs", type=int, default=1, help="passes over each batch of rollouts")
@@ -1118,8 +1173,17 @@ def main() -> None:
     random.seed(args.seed)
     torch.manual_seed(args.seed)
 
-    dev_scenarios = with_fleet(load_geographic_split("development", args.scenarios_dir, synthetic=args.synthetic),
-                               args.fleet_size)
+    water_model = {}
+    if args.water_on_burning:
+        water_model["burning_cells"] = True
+    if hasattr(args, "drop_cap"):
+        water_model["max_stacked_drops"] = args.drop_cap
+
+    def load_split(split: str, fleet_size: int, overrides: dict) -> list[dict]:
+        scenarios = load_geographic_split(split, args.scenarios_dir, synthetic=args.synthetic)
+        return with_water_model(with_fleet(scenarios, fleet_size), overrides)
+
+    dev_scenarios = load_split("development", args.fleet_size, water_model)
     input_options = {"input_mode": args.input_mode, "imagery_dir": args.imagery_dir, "include_ros": args.ros,
                      "include_thermal": args.thermal, "measured_intensity": args.measured_intensity,
                      "learned_speed": args.learned_speed, "learned_hold": args.learned_hold, "learned_burn": args.learned_burn}
@@ -1167,6 +1231,11 @@ def main() -> None:
                          "drop_bonus_per_cell": args.drop_bonus, "eval_every": args.eval_every,
                          "image_checkpoint_chunk": args.image_checkpoint_chunk,
                          "resume_checkpoint_sha256": hashlib.sha256(args.resume.read_bytes()).hexdigest() if args.resume else None}}
+    if water_model:
+        config_report["water_model"] = water_model
+    burning_frontier = args.action_mode == "frontier" and water_model.get("burning_cells")
+    if burning_frontier:
+        config_report["frontier_ceiling"] = MAX_BURNING_FRONTIER
 
     if args.smoke or (not args.train and not args.select and not args.eval):
         print(f"Running Geographic PPO smoke test (recurrent={recurrent})...")
@@ -1196,6 +1265,8 @@ def main() -> None:
             "loss": losses[0],
             "evaluation_metrics": metrics,
         }
+        if burning_frontier:
+            report["training_frontier_truncated_decisions"] = model.training_frontier_truncated_decisions
         rendered = json.dumps(report, indent=2)
         if args.output:
             args.output.parent.mkdir(parents=True, exist_ok=True)
@@ -1234,6 +1305,8 @@ def main() -> None:
             "final_loss": losses[-1] if losses else 0.0,
             "evaluation": eval_m,
         }
+        if burning_frontier:
+            report["training_frontier_truncated_decisions"] = model.training_frontier_truncated_decisions
         if args.output:
             args.output.parent.mkdir(parents=True, exist_ok=True)
             write_report(report, args.output, args.checkpoint)
@@ -1242,8 +1315,7 @@ def main() -> None:
 
     if args.select:
         selection_split = "selection" if selection_scenarios else "validation"
-        val_scenarios = selection_scenarios or with_fleet(
-            load_geographic_split("validation", args.scenarios_dir, synthetic=args.synthetic), args.fleet_size)
+        val_scenarios = selection_scenarios or load_split("validation", args.fleet_size, water_model)
         if args.eval_scenarios is not None:
             val_scenarios = val_scenarios[:args.eval_scenarios]
         print(f"Training {args.candidates} candidates on {len(dev_scenarios)} development scenarios...")
@@ -1286,6 +1358,10 @@ def main() -> None:
                 "losses": c_losses,
                 "selection_history": selection_history,
             })
+            if burning_frontier:
+                candidate_reports[-1]["training_frontier_truncated_decisions"] = cand_model.training_frontier_truncated_decisions
+                candidate_reports[-1]["selection_frontier_truncated_decisions"] = sum(
+                    result["frontier_truncated_decisions"] for result in val_results)
 
             print(f"Candidate {c_idx + 1} {selection_split} mean burned: {mean_burned:.2f} ha (total drops: {total_drops})")
 
@@ -1330,7 +1406,9 @@ def main() -> None:
         if not args.checkpoint or not args.checkpoint.exists():
             raise FileNotFoundError(f"Checkpoint file required for --eval: {args.checkpoint}")
         config = {**model_options, "recurrent": recurrent, "fleet_size": args.fleet_size,
-                  "skip_forced": args.skip_forced}
+                  "skip_forced": args.skip_forced, "water_model": water_model}
+        if burning_frontier:
+            config["frontier_ceiling"] = MAX_BURNING_FRONTIER
         artifact_info = None
         if args.training_report:
             from .policy_artifact import load_policy_artifact
@@ -1338,8 +1416,10 @@ def main() -> None:
                 load_geographic_split("development", args.scenarios_dir, synthetic=args.synthetic),
                 imagery_dir=args.imagery_dir, device=str(device), skip_forced=True if args.skip_forced else None)
             config = model._pandion_inference
-        target_scenarios = with_fleet(load_geographic_split(args.split, args.scenarios_dir, synthetic=args.synthetic),
-                                      config["fleet_size"])
+            configured_water = config.get("water_model", {})
+            if any(key not in configured_water or configured_water[key] != value for key, value in water_model.items()):
+                parser.error("water model flags conflict with the training report")
+        target_scenarios = load_split(args.split, config["fleet_size"], config.get("water_model", {}))
         if args.eval_scenarios is not None:
             target_scenarios = target_scenarios[:args.eval_scenarios]
         if not args.training_report:
@@ -1369,6 +1449,9 @@ def main() -> None:
         }
         if artifact_info is not None:
             evaluation_config["training_artifact"] = artifact_info
+        for key in ("water_model", "frontier_ceiling"):
+            if config.get(key):
+                evaluation_config[key] = config[key]
 
         print(f"Evaluating {args.checkpoint} against baselines on split '{args.split}' ({len(target_scenarios)} scenarios)...")
         eval_reports = []
@@ -1394,6 +1477,8 @@ def main() -> None:
                 "drops_count": rl_metrics["drops_count"],
                 "flight_km": rl_metrics["flight_distance_km"],
                 "rejected_orders": rl_metrics["rejected_orders"],
+                **({"frontier_truncated_decisions": rl_metrics["frontier_truncated_decisions"]}
+                   if "frontier_truncated_decisions" in rl_metrics else {}),
             })
 
         print("\n========================= Geographic Evaluation Summary =========================")

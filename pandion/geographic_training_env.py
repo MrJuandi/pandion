@@ -13,6 +13,7 @@ from typing import Any, Callable
 
 from .aircraft import tank_capacity_l
 from .geographic_integrated import geographic_episode, run_geographic_integrated
+from .parametric_actions import MAX_BURNING_FRONTIER, FrontierActionMapper
 from .policies import candidate_cells
 
 REWARD_REFERENCES = ("heuristic", "no_intervention")
@@ -90,6 +91,8 @@ class GeographicTrainingEnv:
         self._drop_bonus_per_cell = float(drop_bonus_per_cell)
         self._action_mode = action_mode
         self._reward_reference = reward_reference
+        self._burning_frontier = action_mode == "frontier" and bool(scenario.get("water_model", {}).get("burning_cells"))
+        self.frontier_truncated_decisions = 0
         self._reference: Callable[[float], float] | None = None
         self._reference_time = 0.0
         if reward_reference is not None:
@@ -149,6 +152,7 @@ class GeographicTrainingEnv:
             raise ValueError("reset seed must match scenario seed for reproducible replay")
         self._terminated = False
         self._replay = None
+        self.frontier_truncated_decisions = 0
         self._episode = geographic_episode(self._scenario, "heuristic", truncated=True,
                                            record_observations=False)
         observation, self._area_ha, drops = self._advance(None)
@@ -169,6 +173,8 @@ class GeographicTrainingEnv:
         valid = self._mask(self._observation)
         if not isinstance(action, dict) or action not in valid:
             raise ValueError(f"invalid action; choose one of the actions in info['action_mask']: {valid!r}")
+        if self._burning_frontier:
+            self.frontier_truncated_decisions += sum(order["type"] == "DROP" for order in valid) > MAX_BURNING_FRONTIER
 
         previous_observation = self._observation
         next_observation, new_area, new_drops = self._advance(deepcopy(action))
@@ -203,6 +209,8 @@ class GeographicTrainingEnv:
         """Return an ActionMapper matched to this geographic scenario's dimensions."""
         from .model import ActionMapper
         grid = self._scenario["grid"]
+        if self._burning_frontier:
+            return FrontierActionMapper(grid["cell_size_m"], self._drop_distances, ceiling=MAX_BURNING_FRONTIER)
         return ActionMapper(
             rows=int(grid["rows"]),
             cols=int(grid["cols"]),

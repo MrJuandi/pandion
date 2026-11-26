@@ -28,7 +28,8 @@ import math
 from typing import Any
 
 from .aircraft import tank_capacity_l
-from .policies import _is_burnable_fuel, candidate_cells, claimed_cells, full_cells
+from .policies import (_is_burnable_fuel, _observed_burning, _observed_unburned_fuel,
+                       candidate_cells, claimed_cells, full_cells)
 
 MAX_SLOTS = 4
 ASPECTS = ("HEAD", "FLANK_LEFT", "FLANK_RIGHT", "REAR")
@@ -238,20 +239,30 @@ class ParametricActionMapper:
 # front out of reach (52 % of the fair rule's drops in fast, steep fires), and repeated drops on a
 # watered head. Here every candidate cell is an action of its own, scored by the per-target head.
 MAX_FRONTIER = 160
+MAX_BURNING_FRONTIER = 320
 
 
-def frontier_cells(observation: dict) -> list[tuple[int, int, int, int]]:
-    """Candidate cells (row-major, at most ``MAX_FRONTIER``) with the outward step from the fire:
+def frontier_cells(observation: dict, ceiling: int | None = None) -> list[tuple[int, int, int, int]]:
+    """Candidate cells in row-major order with the outward step from the fire:
     (row, col, outward_row, outward_col). The outward step is from the 4-neighbour reached cell the
-    observed wind pushes hardest towards the target (diagonal neighbours when none is 4-adjacent)."""
+    observed wind pushes hardest towards the target (diagonal neighbours when none is 4-adjacent).
+    For a burning target the step instead points towards an observed unburned burnable 4-neighbour."""
     cells = observation["fire"]["cells"]
     reached = {(r, c) for r, line in enumerate(cells) for c, cell in enumerate(line)
                if isinstance(cell, dict) and cell.get("fire_detected") is True}
+    burning_enabled = observation.get("water_on_burning", False)
+    if ceiling is None:
+        ceiling = MAX_BURNING_FRONTIER if burning_enabled else MAX_FRONTIER
     east, north = observation.get("midflame_wind_to_m_s", [0.0, 0.0])
     out = []
-    for r, c in sorted(tuple(cand) for cand in candidate_cells(observation))[:MAX_FRONTIER]:
-        steps = [(-dr, -dc) for dr, dc in _FOUR if (r + dr, c + dc) in reached] or [
-            (-dr, -dc) for dr in (-1, 1) for dc in (-1, 1) if (r + dr, c + dc) in reached] or [(0, 0)]
+    for r, c in sorted(tuple(cand) for cand in candidate_cells(observation))[:ceiling]:
+        if burning_enabled and _observed_burning(cells[r][c]):
+            steps = [(dr, dc) for dr, dc in _FOUR
+                     if _observed_unburned_fuel(cells, observation["fuel_model"], r + dr, c + dc)]
+        else:
+            steps = [(-dr, -dc) for dr, dc in _FOUR if (r + dr, c + dc) in reached] or [
+                (-dr, -dc) for dr in (-1, 1) for dc in (-1, 1) if (r + dr, c + dc) in reached]
+        steps = steps or [(0, 0)]
         orow, ocol = max(steps, key=lambda s: (s[1] * east + s[0] * north) / math.hypot(*s) if any(s) else 0.0)
         out.append((r, c, orow, ocol))
     return out
@@ -263,16 +274,18 @@ class FrontierActionMapper(ParametricActionMapper):
 
     action_mode = "frontier"
 
-    def __init__(self, cell_size_m: float, distances_cells: Any = (0,)) -> None:
+    def __init__(self, cell_size_m: float, distances_cells: Any = (0,), *, ceiling: int = MAX_FRONTIER) -> None:
         if tuple(distances_cells) != (0,):
             raise ValueError("frontier actions drop on the candidate cell itself (distance 0)")
         self.cell_size_m = float(cell_size_m)
         self.distances = (0,)
-        self.num_actions = 2 + MAX_FRONTIER
-        self.action_names = ("HOLD", "RETURN_TO_REFILL") + tuple(f"DROP_C{j}" for j in range(MAX_FRONTIER))
+        self.ceiling = ceiling
+        self.num_actions = 2 + ceiling
+        self.action_names = ("HOLD", "RETURN_TO_REFILL") + tuple(f"DROP_C{j}" for j in range(ceiling))
 
     def target_details(self, observation: dict) -> dict:
-        return {2 + j: (r, c, orow, ocol, 0) for j, (r, c, orow, ocol) in enumerate(frontier_cells(observation))}
+        return {2 + j: (r, c, orow, ocol, 0)
+                for j, (r, c, orow, ocol) in enumerate(frontier_cells(observation, self.ceiling))}
 
     def target_cell(self, action_index: int, observation: dict) -> tuple[int, int]:
         targets = self.targets(observation)
