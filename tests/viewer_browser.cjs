@@ -113,15 +113,15 @@ write_viewer_html([base,long,third,static,high,fleet],Path(sys.argv[1]))
     await slider.fill('0');
     assert.equal(await page.locator('#scenario-select option').count(), 4);
     assert.equal(await slider.getAttribute('max'), '180');
-    assert.match(await page.locator('#m-water').textContent(), /6137|6.137/);
-    assert.match(await page.locator('#m-flight').textContent(), /1,5/);
+    assert.match(await page.locator('#m-water').textContent(), /6,137/);
+    assert.match(await page.locator('#m-flight').textContent(), /1\.5/);
     assert.equal(await page.locator('#environment-mode').textContent(), 'Station · intervals');
     assert.match(await page.locator('#environment-time').textContent(), /2025-08-15T12:00:00Z/);
     assert.match(await page.locator('#environment-wind').textContent(), /5(?:\.0)? m\/s · NE/);
     assert.match(await page.locator('#environment-temperature').textContent(), /24(?:\.0)? °C/);
     assert.equal(await page.locator('#environment-humidity').textContent(), '42 %');
-    assert.equal(await page.locator('#environment-rain').textContent(), '0,2 mm');
-    assert.match(await page.locator('#environment-moisture').textContent(), /8(?:,0)? %/);
+    assert.equal(await page.locator('#environment-rain').textContent(), '0.2 mm');
+    assert.match(await page.locator('#environment-moisture').textContent(), /8(?:\.0)? %/);
     assert.equal(await page.locator('#environment-elevation').textContent(), '300–340 m');
     assert.match(await page.locator('#environment-elevation-use').textContent(), /used by the physics/);
     assert.equal(await page.locator('#environment-observation').textContent(), 'Not available at this time.');
@@ -137,17 +137,17 @@ write_viewer_html([base,long,third,static,high,fleet],Path(sys.argv[1]))
     // Live state derived from the arrival raster and recorded aircraft data.
     await slider.fill('90');
     assert.equal(await page.locator('#live-area').textContent(), '2');
-    assert.match(await page.locator('#live-drops').textContent(), /1 descargas/);
-    assert.match(await page.locator('#live-phase').textContent(), /En espera/);
+    assert.match(await page.locator('#live-drops').textContent(), /1 drops recorded/);
+    assert.match(await page.locator('#live-phase').textContent(), /Standby/);
     await slider.fill('150');
-    assert.equal(await page.locator('#live-water').textContent(), '6137');
-    assert.match(await page.locator('#live-tank').textContent(), /0 \/ 6137 L/);
+    assert.equal(await page.locator('#live-water').textContent(), '6,137');
+    assert.match(await page.locator('#live-tank').textContent(), /0 \/ 6,137 L/);
     assert.equal(await page.evaluate(() => PandionViewer.views[0].renderer.aircraft.visible), true);
 
     // Independent aircraft tracks, water accounting and selected chase target.
     await page.selectOption('#scenario-select', 'fleet');
     await slider.fill('45');
-    assert.equal(await page.locator('#fleet-count').textContent(), '2 unidades');
+    assert.equal(await page.locator('#fleet-count').textContent(), '2 units');
     assert.equal(await page.locator('#fleet-body tr').count(), 2);
     assert.equal(await page.locator('#live-water').textContent(), '0');
     const planes = await page.evaluate(() => {
@@ -156,9 +156,18 @@ write_viewer_html([base,long,third,static,high,fleet],Path(sys.argv[1]))
     });
     assert.equal(planes.filter(p => p.visible).length, 2);
     assert.notDeepEqual(planes[0].position, planes[1].position);
+    await slider.fill('89');
+    const phaseBeforeDrop = await page.locator('#live-phase').textContent();
+    const tankBeforeDrop = await page.locator('#live-tank').textContent();
+    assert.equal(phaseBeforeDrop, 'Heading to drop');
+    assert.equal(tankBeforeDrop, '6,137 / 6,137 L');
     await slider.fill('90');
-    assert.equal(await page.locator('#live-water').textContent(), '6137');
-    assert.match(await page.locator('#fleet-body tr[data-aircraft-index="1"]').textContent(), /6137/);
+    assert.notEqual(await page.locator('#live-phase').textContent(), phaseBeforeDrop);
+    assert.notEqual(await page.locator('#live-tank').textContent(), tankBeforeDrop);
+    assert.equal(await page.locator('#live-phase').textContent(), 'Available');
+    assert.equal(await page.locator('#live-tank').textContent(), '0 / 6,137 L');
+    assert.equal(await page.locator('#live-water').textContent(), '6,137');
+    assert.match(await page.locator('#fleet-body tr[data-aircraft-index="1"]').textContent(), /6,137/);
     await slider.fill('120');
     assert.equal((await page.locator('#live-water').textContent()).replace(/[., ]/g, ''), '12274');
     await page.selectOption('#fleet-select', '1');
@@ -202,7 +211,7 @@ write_viewer_html([base,long,third,static,high,fleet],Path(sys.argv[1]))
     await page.selectOption('#terrain-style', 'elevation');
     assert.match(await page.locator('#terrain-color-key').textContent(), /300–340 m/);
     await page.selectOption('#terrain-style', 'slope');
-    assert.match(await page.locator('#terrain-color-key').textContent(), /Pendiente/);
+    assert.match(await page.locator('#terrain-color-key').textContent(), /Slope/);
     await page.selectOption('#terrain-style', 'fuel');
     await page.locator('#view-2d').click();
     await settle(page);
@@ -217,15 +226,15 @@ write_viewer_html([base,long,third,static,high,fleet],Path(sys.argv[1]))
     await slider.fill('120');
     assert.match(await page.locator('#environment-time').textContent(), /2025-08-15T12:02:00Z/);
     assert.match(await page.locator('#environment-wind').textContent(), /8(?:\.0)? m\/s · N/);
-    assert.equal(await page.locator('#environment-rain').textContent(), '1,5 mm');
-    assert.match(await page.locator('#environment-source').textContent(), /disponible al cierre t = 180 s/);
+    assert.equal(await page.locator('#environment-rain').textContent(), '1.5 mm');
+    assert.match(await page.locator('#environment-source').textContent(), /available at close t = 180 s/);
     assert.match(await page.locator('#environment-observation').textContent(), /24(?:\.0)? °C/);
     assert.equal(await page.locator('#inspector-action').textContent(), 'Hold');
     assert.match(await page.locator('#inspector-time').textContent(), /01:00/);
     assert.equal(await page.locator('.decision-item.current').count(), 1);
     await slider.fill('150');
     assert.match(await page.locator('#inspector-action').textContent(), /Drop/);
-    assert.match(await page.locator('#inspector-observation').textContent(), /2 celdas/);
+    assert.match(await page.locator('#inspector-observation').textContent(), /2 cells/);
     await slider.fill('120');
     const texture = () => page.evaluate(() => PandionViewer.views[0].renderer.painter.color.toDataURL());
     const simulator = await texture();
@@ -271,7 +280,7 @@ write_viewer_html([base,long,third,static,high,fleet],Path(sys.argv[1]))
     assert.equal(await page.locator('#environment-mode').textContent(), 'Initial conditions · no episode');
     assert.equal(await page.evaluate(() => PandionViewer.views[0].renderer.aircraft.visible), false);
     await page.locator('.nav-link[href="#comparacion"]').click();
-    assert.match(await page.locator('#comparison-results').textContent(), /no dispone de dos episodios/);
+    assert.match(await page.locator('#comparison-results').textContent(), /does not have two episodes/);
     await page.locator('.nav-link[href="#mapa"]').click();
 
     // Orbit drag, playback and reset.

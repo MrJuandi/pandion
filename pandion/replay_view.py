@@ -62,8 +62,10 @@ def normalize_replay(replay: dict) -> dict:
             if isinstance(index, bool) or not isinstance(index, int) or index < 0:
                 raise ValueError(f"{field}: {key} must be a nonnegative integer")
     for decision in out.get("decisions", []):
-        decision["completed_at_s"] = decision["time_s"]
-        decision["time_s"] = decision.get("decision_time_s", decision["time_s"])
+        if decision.get("completed_at_s") is None and "time_s" in decision:
+            decision["completed_at_s"] = decision["time_s"]
+        if decision.get("decision_time_s") is not None:
+            decision["time_s"] = decision["decision_time_s"]
         observation = decision.get("observation", {})
         if "fire_reports" not in observation:
             cells = observation.get("fire", {}).get("cells", [])
