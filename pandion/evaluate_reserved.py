@@ -142,7 +142,7 @@ def run_reserved_evaluation(
         raise FileNotFoundError(f"checkpoint not found: {checkpoint_path}")
 
     checkpoint_sha = _file_sha256(checkpoint_path)
-    checkpoint_data = torch.load(checkpoint_path, map_location=device or "cpu")
+    checkpoint_data = torch.load(checkpoint_path, map_location=device or "cpu", weights_only=True)
     model_config = checkpoint_data.get("model_config", {"grid_rows": 11, "grid_cols": 11})
     action_mode = model_config.get("action_mode", "tactical" if model_config.get("action_dim") in (8, len(TACTICAL_ACTION_NAMES)) else "spatial")
     action_dim = model_config.get("action_dim", len(TACTICAL_ACTION_NAMES) if action_mode == "tactical" else (2 + model_config["grid_rows"] * model_config["grid_cols"]))
@@ -333,12 +333,26 @@ def main() -> None:
     parser.add_argument("--split-version", choices=["v1", "v2"], default="v2")
     args = parser.parse_args()
 
-    report = run_reserved_evaluation(
-        args.checkpoint,
-        output_path=args.output,
-        replays_dir=args.replays_dir,
-        split_version=args.split_version,
-    )
+    if not args.checkpoint.exists():
+        parser.error(
+            f"checkpoint not found: {args.checkpoint}. "
+            "Train and select one first with: "
+            "python3 -m pandion.ppo --select --candidates 2 --updates 40 "
+            "--episodes-per-update 12 --seed 0 --recurrent --domain-randomization "
+            "--action-mode tactical --output runs/ppo-tactical-v2.json "
+            "--checkpoint runs/ppo-tactical-v2.pt "
+            "(or pass --checkpoint PATH)."
+        )
+
+    try:
+        report = run_reserved_evaluation(
+            args.checkpoint,
+            output_path=args.output,
+            replays_dir=args.replays_dir,
+            split_version=args.split_version,
+        )
+    except FileNotFoundError as exc:
+        parser.error(str(exc))
     rendered = json.dumps({
         "schema_version": report["schema_version"],
         "checkpoint": report["checkpoint"]["path"],

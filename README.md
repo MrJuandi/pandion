@@ -52,7 +52,7 @@ python3 -m pandion.viewer runs/integrated-heuristic.json --output runs/heuristic
 
 Open `runs/heuristic-viewer.html` in a browser. Run the tests with `python3 -m unittest discover -s tests -v`.
 
-To see the project page and the bundled 3D replay, run `python3 -m http.server` from the repository root and open `http://localhost:8000/site/`. Real-terrain scenarios, training and evaluation are covered in [USAGE.md](docs/USAGE.md).
+To see the project page and the bundled 3D replay, run `python3 -m http.server 8000 --bind 127.0.0.1 --directory site` and open `http://127.0.0.1:8000/`. Real-terrain scenarios, training and evaluation are covered in [USAGE.md](docs/USAGE.md).
 
 ## How it works
 
@@ -102,7 +102,7 @@ The project moves from one aircraft to two, and then to heterogeneous resources.
 - [REFERENCES.md](docs/REFERENCES.md) — related research and official data sources.
 - [PUBLICATION_CHECKLIST.md](docs/PUBLICATION_CHECKLIST.md) — checks before creating and publishing the GitHub repository.
 - [MAINTENANCE.md](docs/MAINTENANCE.md) — documentation ownership and change review rules.
-- [site/](site/index.html) — static project page. Serve the repository root with `python3 -m http.server` and open `/site/`. Its replay is copied, not recomputed, from a built workspace by `python3 site/extract_episode.py <workspace>/index.html`, which writes `site/data/` and `site/viewer.html`, the offline 3D viewer for the same scenario that the page links to.
+- [site/](site/index.html) — static project page. Serve `site/` locally with `python3 -m http.server 8000 --bind 127.0.0.1 --directory site` and open `http://127.0.0.1:8000/`. Its replay is copied, not recomputed, from a built workspace by `python3 site/extract_episode.py <workspace>/index.html`, which writes `site/data/` and `site/viewer.html`, the offline 3D viewer for the same scenario that the page links to.
 
 ## Scope and limitations
 
