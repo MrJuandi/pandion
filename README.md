@@ -4,7 +4,7 @@
 ![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)
 ![PyTorch](https://img.shields.io/badge/PyTorch-RL-EE4C2C?logo=pytorch&logoColor=white)
 
-**Where should the next drop go?** Pandion is a research simulator for wildfire response. A reinforcement-learning policy decides where and when water-dropping aircraft act, and is evaluated against transparent rules that receive the same delayed information.
+**Where should the next drop go?** Pandion is a research simulator for wildfire response. A reinforcement-learning policy decides where and when water-dropping aircraft act, and is evaluated against transparent rules that receive the same observation. In the reported experiments that observation is an idealised real-time sensor: the whole grid's current fire state and the current weather interval, with no delay or noise (D-49, D-85).
 
 ![The same fire under the learned policy, a downwind rule and no aircraft](docs/assets/three-controllers.gif)
 
@@ -14,11 +14,11 @@
 
 ## Research question
 
-Can a learned policy choose where and when to deploy firefighting resources more effectively than transparent baselines when all controllers receive the same delayed and uncertain information?
+Can a learned policy choose where and when to deploy firefighting resources more effectively than transparent baselines when all controllers receive the same information? The results below use perfect, instantaneous observation; delayed and partial observation exist in the code (`observation_mode="scheduled"`) but are not part of the reported results.
 
 ## Results
 
-Final burned area on 288 scenarios from one held-out activation (EMSR837), two aircraft, three training seeds. Paired difference, policy − reference, in hectares with 95 % bootstrap intervals; lower is better.
+Final burned area on 288 scenarios (nine mapped areas) from one held-out CEMS activation (EMSR837), two aircraft, three training seeds. The policies trained on 928 scenarios from 24 other Spanish fires and chose their weights on 128 scenarios from 4 more. Paired difference, policy − reference, in hectares with 95 % bootstrap intervals over those 288 scenarios (they all come from one activation, so the intervals do not cover variation between fires); lower is better.
 
 | Policy | − downwind heuristic | − hold-aware rule |
 |---|---|---|
