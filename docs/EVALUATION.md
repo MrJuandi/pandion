@@ -1057,3 +1057,15 @@ Water on burning cells (D-105, O-20; `runs/water-on-burning-20261126`, rules onl
 | `blind_hold_aware_heuristic` (fair rule) | 52.70 | −0.10 [−0.50, +0.25] | −3.84 [−4.80, −2.90] | −5.62 [−8.91, −3.03] |
 
 No intervention is 63.97 ha in every configuration. With burning targets only about 99 % of drops hit burning cells and the rules drop about 45 % less water (10,300 against 18,500 drops for the fair rule), because knocked-down fronts leave fewer targets. The gain is an upper bound of this prototype: a drop closes every outgoing edge of its 100 m cell and a knocked-down cell never rekindles. Mixing both kinds of target in the existing rank orders gains little, so the rules' ordering, not the physics, limits the mixed case.
+
+Free-water network (D-107, `runs/geographic-free-water-20261126`, criterion written first): the D-104 recipe from scratch (seed 42, 250 updates) on water on burning cells, no drop cap, no rekindling, with full freedom between pre-wetting and burning targets. Selection curve 75.54, 75.41, 73.66, 74.34, 72.63, 72.48, 72.70, 70.84, 71.92, 70.43 ha; weights of update 250 kept. No decision exceeded the 320-action ceiling. Flown deterministically on the same physics as the rules (`fly.py`, `compare.py`); policy minus rule, 95 % bootstrap over incident groups (better/equal/worse):
+
+| Mean burned ha | Selection (128) | Training scenarios (928) |
+|---|---|---|
+| Free-water policy | 70.43 | 43.38 |
+| Fair rule, mixed targets | 79.92 (−9.49 [−11.50, −7.48], 90/35/3) | 48.84 (−5.46 [−7.21, −3.93], 553/336/39) |
+| Fair rule, burning cells only | 73.90 (−3.47 [−7.38, −0.77], 49/63/16) | 45.44 (−2.06 [−3.40, −1.04], 298/527/103) |
+| `hold_aware_heuristic`, burning cells only (knows the hold limits) | 72.99 (−2.56 [−4.84, −0.86]) | 44.45 (−1.07 [−1.75, −0.45]) |
+| No intervention | 98.02 | 59.27 |
+
+The policy beats every rule on both sets, including the direct-attack rule that knows the hold limits, with intervals that exclude zero. Limits: one seed; selection also chose the weights and the policy trained on the other set, so this is "on development data"; the unseen activations were not flown; the physics is optimistic for direct attack (no rekindling), so the margin is for this simulator only.
