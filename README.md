@@ -27,6 +27,8 @@ Final burned area on 288 scenarios from one held-out activation (EMSR837), two a
 
 The learned policy beats the downwind heuristic and **ties, but does not beat,** the hold-aware rule. Branching the advantage estimates accounts for about 2 ha of the gain. Limits: one held-out activation, three seeds, simulator only. The full record, including negative results, is in [EVALUATION.md](docs/EVALUATION.md).
 
+That policy reads the fire spread formula. Without it (thermal image only, learned fire speed, water effect and arrival map, D-91–D-102), and allowed to drop on any cell of the front (D-104), a policy beats a rule that sees the same inputs: 77.45 against 79.52 ha on the 128 selection scenarios (−2.06 [−3.93, −0.70]) and 47.03 against 49.01 on the 928 training scenarios (−1.98 [−2.81, −1.16]). One seed; the held-out activations have not been flown for it.
+
 ## What is built
 
 - **Simulator:** surface-fire spread from standard fuel models, and a CL-415 reference aircraft that travels, drops, returns and refills.

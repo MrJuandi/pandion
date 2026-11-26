@@ -45,7 +45,8 @@ class _Episode:
                                          reward_reference=options.get("reward_reference"))
         self.mapper = self.env.action_mapper()
         self.tensorizer = make_input_tensorizer(
-            scenario, **options["inputs"], focus_slots=options["action_mode"] == "parametric",
+            scenario, **options["inputs"], focus_slots=options["action_mode"] in ("parametric", "frontier"),
+            frontier=options["action_mode"] == "frontier",
             action_features=options.get("action_features", False), drop_distances=drop_distances)
         self.rewards: list[float] = []
         self.decisions = 0
@@ -215,6 +216,9 @@ def rollout_geographic_batch(
     skip_forced: bool = False,
     input_mode: str = "legacy", imagery_dir: Any = None,
     include_ros: bool = False, include_thermal: bool = False,
+    measured_intensity: bool = False, learned_speed: Any = None,
+    learned_hold: Any = None,
+    learned_burn: Any = None,
     backend: RolloutBackend | None = None,
     reward_reference: str | None = None,
 ) -> tuple[list[list[dict]], list[dict]]:
@@ -239,7 +243,8 @@ def rollout_geographic_batch(
     if not scenarios:
         return [], []
     options = {"input_mode": input_mode, "imagery_dir": imagery_dir,
-               "include_ros": include_ros, "include_thermal": include_thermal}
+               "include_ros": include_ros, "include_thermal": include_thermal,
+               "measured_intensity": measured_intensity, "learned_speed": learned_speed, "learned_hold": learned_hold, "learned_burn": learned_burn}
     context = (nullcontext(backend) if backend is not None else RolloutBackend(
         action_mode=getattr(model, "action_mode", "tactical"), input_options=options,
         workers=min(rollout_workers, rollout_envs, len(scenarios)),

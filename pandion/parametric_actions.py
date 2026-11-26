@@ -232,3 +232,50 @@ class ParametricActionMapper:
             raise ValueError("observation is required to resolve parameterised drops")
         r, c = self.target_cell(action_index, observation)
         return {"type": "DROP", "target_m": [c * self.cell_size_m, r * self.cell_size_m]}
+
+
+# D-104: any front cell. The fixed four cells per front (head, flanks, rear) left most of a large
+# front out of reach (52 % of the fair rule's drops in fast, steep fires), and repeated drops on a
+# watered head. Here every candidate cell is an action of its own, scored by the per-target head.
+MAX_FRONTIER = 160
+
+
+def frontier_cells(observation: dict) -> list[tuple[int, int, int, int]]:
+    """Candidate cells (row-major, at most ``MAX_FRONTIER``) with the outward step from the fire:
+    (row, col, outward_row, outward_col). The outward step is from the 4-neighbour reached cell the
+    observed wind pushes hardest towards the target (diagonal neighbours when none is 4-adjacent)."""
+    cells = observation["fire"]["cells"]
+    reached = {(r, c) for r, line in enumerate(cells) for c, cell in enumerate(line)
+               if isinstance(cell, dict) and cell.get("fire_detected") is True}
+    east, north = observation.get("midflame_wind_to_m_s", [0.0, 0.0])
+    out = []
+    for r, c in sorted(tuple(cand) for cand in candidate_cells(observation))[:MAX_FRONTIER]:
+        steps = [(-dr, -dc) for dr, dc in _FOUR if (r + dr, c + dc) in reached] or [
+            (-dr, -dc) for dr in (-1, 1) for dc in (-1, 1) if (r + dr, c + dc) in reached] or [(0, 0)]
+        orow, ocol = max(steps, key=lambda s: (s[1] * east + s[0] * north) / math.hypot(*s) if any(s) else 0.0)
+        out.append((r, c, orow, ocol))
+    return out
+
+
+class FrontierActionMapper(ParametricActionMapper):
+    """HOLD, RETURN_TO_REFILL, then one drop action per candidate cell (D-104): index ``2 + j`` drops
+    on the j-th candidate in row-major order; unused indices are masked. Drops land on the cell itself."""
+
+    action_mode = "frontier"
+
+    def __init__(self, cell_size_m: float, distances_cells: Any = (0,)) -> None:
+        if tuple(distances_cells) != (0,):
+            raise ValueError("frontier actions drop on the candidate cell itself (distance 0)")
+        self.cell_size_m = float(cell_size_m)
+        self.distances = (0,)
+        self.num_actions = 2 + MAX_FRONTIER
+        self.action_names = ("HOLD", "RETURN_TO_REFILL") + tuple(f"DROP_C{j}" for j in range(MAX_FRONTIER))
+
+    def target_details(self, observation: dict) -> dict:
+        return {2 + j: (r, c, orow, ocol, 0) for j, (r, c, orow, ocol) in enumerate(frontier_cells(observation))}
+
+    def target_cell(self, action_index: int, observation: dict) -> tuple[int, int]:
+        targets = self.targets(observation)
+        if action_index not in targets:
+            raise ValueError(f"action {action_index} has no valid target cell")
+        return targets[action_index]

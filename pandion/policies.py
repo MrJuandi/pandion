@@ -122,13 +122,16 @@ def choose_order(
     ``containment_heuristic``, or ``hold_aware_heuristic``. The non-random
     policies use only observed cells and static fuel/aircraft data.
     ``hold_aware_heuristic`` takes an ``ObservedFireBehavior`` as ``behavior``
-    (created here when omitted).
+    (created here when omitted). ``blind_hold_aware_heuristic`` has no
+    knowledge of what water can hold (D-95): untreated cells first, then the dimmer bordering fire (D-96).
 
     With several aircraft, overlapping drops are excluded upstream by
     ``candidate_cells``; with no admissible target the aircraft holds.
     """
-    if policy not in {"no_intervention", "random_valid", "heuristic", "containment_heuristic", "hold_aware_heuristic"}:
-        raise ValueError("policy must be no_intervention, random_valid, heuristic, containment_heuristic, or hold_aware_heuristic")
+    if policy not in {"no_intervention", "random_valid", "heuristic", "containment_heuristic", "hold_aware_heuristic",
+                      "blind_hold_aware_heuristic"}:
+        raise ValueError("policy must be no_intervention, random_valid, heuristic, containment_heuristic, "
+                         "hold_aware_heuristic, or blind_hold_aware_heuristic")
     if policy == "no_intervention":
         return {"type": "HOLD"}
     aircraft = observation["aircraft"]
@@ -145,6 +148,8 @@ def choose_order(
         target = rng.choice(candidates)
     elif policy == "containment_heuristic":
         target = _containment_target(observation, candidates)
+    elif policy == "blind_hold_aware_heuristic":
+        target = _blind_hold_aware_target(observation, candidates)
     elif policy == "hold_aware_heuristic":
         if observation.get("fuel_moisture") is None:
             # Delayed observation before the first weather report: no fire behaviour yet.
@@ -213,6 +218,29 @@ def _hold_aware_target(observation: dict, candidates: list[list[int]], behavior:
         return None
     best = min(ranked)
     return [best[3], best[4]]
+
+
+def _blind_hold_aware_target(observation: dict, candidates: list[list[int]]) -> list[int]:
+    """Hold-aware rule without the hold limits (D-95, D-96).
+
+    Nothing is known to suffice or to be holdable, so no cell is skipped: untreated cells go first,
+    then the one whose brightest bordering fire is dimmest (a weak fire is the likelier to be held),
+    then the downwind rank. Reads ``thermal_byte`` only as an order, never against a threshold.
+    """
+    cells = observation["fire"]["cells"]
+    counts = treated_counts(observation)
+
+    def key(candidate: list[int]) -> tuple:
+        r, c = candidate
+        heat = 0
+        for dr in (-1, 0, 1):
+            for dc in (-1, 0, 1):
+                nr, nc = r + dr, c + dc
+                if (dr or dc) and 0 <= nr < len(cells) and 0 <= nc < len(cells[0]):
+                    heat = max(heat, (cells[nr][nc] or {}).get("thermal_byte") or 0)
+        return (1 if counts.get((r, c), 0) else 0, heat) + _downwind_rank(observation, candidate)
+
+    return min(candidates, key=key)
 
 
 def _containment_target(observation: dict, candidates: list[list[int]]) -> list[int]:

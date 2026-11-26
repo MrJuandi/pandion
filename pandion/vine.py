@@ -129,7 +129,10 @@ def _new_env(scenario: dict, model: Any, options: dict) -> tuple[Any, dict, Any,
                                        imagery_dir=options.get("imagery_dir"),
                                        include_ros=options.get("include_ros", False),
                                        include_thermal=options.get("include_thermal", False),
-                                       focus_slots=action_mode == "parametric",
+                                       measured_intensity=options.get("measured_intensity", False),
+                                       learned_speed=options.get("learned_speed"), learned_hold=options.get("learned_hold"), learned_burn=options.get("learned_burn"),
+                                       focus_slots=action_mode in ("parametric", "frontier"),
+                                       frontier=action_mode == "frontier",
                                        action_features=getattr(model, "action_feature_dim", 0) > 0,
                                        drop_distances=drop_distances)
     return env, observation, env.action_mapper(), tensorizer

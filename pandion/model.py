@@ -428,6 +428,10 @@ class ActionMapper:
             from .parametric_actions import ParametricActionMapper
             self._tactical = ParametricActionMapper(cell_size_m, drop_distances)
             self.num_actions = self._tactical.num_actions
+        elif action_mode == "frontier":
+            from .parametric_actions import FrontierActionMapper
+            self._tactical = FrontierActionMapper(cell_size_m, drop_distances)
+            self.num_actions = self._tactical.num_actions
         else:
             self._tactical = None
             self.num_actions = 2 + rows * cols

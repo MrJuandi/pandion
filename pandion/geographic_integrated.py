@@ -12,7 +12,7 @@ from copy import deepcopy
 from hashlib import sha256
 from heapq import heappop, heappush
 import json
-from math import atan2, degrees, hypot, isfinite
+from math import atan2, degrees, hypot, isfinite, log1p
 from pathlib import Path
 from random import Random
 import time
@@ -62,7 +62,22 @@ def drops_needed(intensity_kw_m: float) -> float:
     return float("inf")
 
 
-POLICIES = ("no_intervention", "random_valid", "heuristic", "containment_heuristic", "hold_aware_heuristic")
+# Thermal sensor (D-94): a burning cell is read as one brightness byte, log-scaled heat of the cell as a
+# whole (its largest fireline intensity in any direction) from 76 (0 kW/m) to 255 (20,000 kW/m and above),
+# clear of burned ground and halo (at most 51) and spread over most of the byte (D-96). It is what a camera could show, not an intensity per direction.
+THERMAL_SCALE_KW_M = 50.0
+THERMAL_MAX_KW_M = 20000.0
+THERMAL_FLOOR = 0.3
+
+
+def thermal_byte(intensity_kw_m: float) -> int:
+    """Brightness (0-255) of a burning cell with this heat."""
+    level = min(log1p(max(intensity_kw_m, 0.0) / THERMAL_SCALE_KW_M) / log1p(THERMAL_MAX_KW_M / THERMAL_SCALE_KW_M), 1.0)
+    return round(255 * (THERMAL_FLOOR + (1.0 - THERMAL_FLOOR) * level))
+
+
+POLICIES = ("no_intervention", "random_valid", "heuristic", "containment_heuristic", "hold_aware_heuristic",
+            "blind_hold_aware_heuristic")
 
 
 def run_geographic_integrated(
@@ -80,7 +95,7 @@ def run_geographic_integrated(
     Parameters:
     - scenario: dict matching 'nightjar-geographic-scenario-0.1/0.2' or 'nightjar-cems-scenario-0.1'.
     - policy: one of POLICIES ('no_intervention', 'random_valid', 'heuristic',
-      'containment_heuristic', or 'hold_aware_heuristic').
+      'containment_heuristic', 'hold_aware_heuristic' or 'blind_hold_aware_heuristic').
     - policy_seed: optional integer seed for randomized policies.
     - observation_mode: 'realtime' (default; full grid and current weather at
       every decision, no delivery delay) or 'scheduled' (legacy delayed
@@ -585,6 +600,19 @@ def geographic_episode(
         return is_burnable(r, c) and any(
             can_spread(r, c, dr, dc) and arrival[r + dr][c + dc] is None for dr, dc in NEIGHBORS)
 
+    def front_open(r: int, c: int) -> bool:
+        """Like ``front_active`` but water plays no part: whether a drop will hold a front is the
+        simulator's knowledge and must not show in what the camera sees (D-95)."""
+        return is_burnable(r, c) and any(
+            linked(r, c, dr, dc) and arrival[r + dr][c + dc] is None for dr, dc in NEIGHBORS)
+
+    def thermal_reading(r: int, c: int, time_s: float) -> int:
+        """Brightness a thermal camera shows on burning cell (r, c) now (D-94): the heat of the cell
+        as a whole, its largest intensity in any direction, so it depends neither on where the fire
+        can still go nor on water."""
+        index = segment_index(time_s)
+        return thermal_byte(max(fireline_intensity(r, c, dr, dc, index) for dr, dc in NEIGHBORS))
+
     def realtime_fire_view(time_s: float) -> dict:
         """Full-grid fire state at time_s: perfect, instantaneous observation.
 
@@ -592,6 +620,7 @@ def geographic_episode(
         crossing at head-fire rate plus Anderson residence) and for as long as the
         front is still advancing from it into a neighbour (D-67); otherwise
         ``burned``. Slow flank and rear fronts therefore stay visible as burning.
+        ``visible_state`` is the same without any dependence on water (D-95).
         """
         cells = []
         for r in range(rows):
@@ -604,9 +633,14 @@ def geographic_episode(
                     state = "burning"
                 else:
                     state = "burned"
+                visible = state
+                if state == "burned" and front_open(r, c):
+                    visible = "burning"  # stays alight whatever the water in front of it
                 line.append({
                     "fire_detected": reached,
                     "fire_state": state,
+                    "visible_state": visible,
+                    "thermal_byte": thermal_reading(r, c, time_s) if visible == "burning" else None,
                     "arrival_time_s": round(arrival[r][c], 6) if reached else None,
                     "observed_at_s": time_s,
                     "age_s": 0.0,
