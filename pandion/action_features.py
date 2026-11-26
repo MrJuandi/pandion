@@ -12,7 +12,7 @@ from .environment import MOISTURE_KEYS
 from .geographic_integrated import NEIGHBORS, drops_needed
 from .learned_hold import risk_before_and_after
 from .parametric_actions import ParametricActionMapper
-from .policies import stack_limit, treated_counts
+from .policies import drop_count_scale, treated_counts
 
 ACTION_FEATURE_NAMES = ("valid", "stacked", "need_one", "need_three", "breach", "remaining",
                         "sufficient", "reached_neighbours", "aircraft_distance", "water_distance",
@@ -137,7 +137,7 @@ def action_feature_array(observation: dict, mapper: ParametricActionMapper,
     reached = {(r, c) for r, line in enumerate(cells) for c, cell in enumerate(line)
                if isinstance(cell, dict) and cell.get("fire_detected") is True}
     counts = treated_counts(observation)
-    limit = stack_limit(observation)
+    limit = drop_count_scale(observation)
     ax, ay = (float(v) for v in aircraft["position_m"])
     wx, wy = (float(v) for v in observation.get("water_source_m", [ax, ay]))
     diagonal = hypot(rows * size, cols * size)

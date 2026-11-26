@@ -32,7 +32,7 @@ from .imagery_composite import compose_view, state_masks, thermal_view
 from .action_features import (NUM_ACTION_FEATURES, NUM_TARGET_FEATURES, ObservedFireBehavior, action_feature_array,
                               target_feature_array)
 from .parametric_actions import MAX_SLOTS, FrontierActionMapper, ParametricActionMapper, slot_masks
-from .policies import stack_limit
+from .policies import drop_count_scale
 
 # Fuel families from Scott & Burgan (2005) code ranges and Anderson (1982) 1-13.
 FUEL_FAMILIES = ("nonburnable", "grass", "grass_shrub", "shrub", "timber_understory", "timber_litter", "slash_blowdown")
@@ -250,7 +250,7 @@ class GeographicInputTensorizer:
                 rgb = rgb.astype(np.float32) / 255.0
 
         treated = np.zeros((self.rows, self.cols), dtype=np.float32)
-        limit = stack_limit(observation)
+        limit = drop_count_scale(observation)
         for r, c in observation.get("known_treated_cells", []):  # one entry per stacked drop (D-76)
             treated[r, c] = min(treated[r, c] + 1.0 / limit, 1.0)
         aircraft = observation["aircraft"]

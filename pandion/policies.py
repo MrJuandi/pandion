@@ -25,8 +25,20 @@ _OVERLAP_RADIUS = 2
 MAX_STACKED_DROPS = 3
 
 
-def stack_limit(observation: dict) -> int:
-    return int(observation.get("max_stacked_drops", 1))
+def stack_limit(observation: dict) -> float:
+    """Drops a cell may hold: the observation's ``max_stacked_drops``, one when absent (synthetic
+    episode), unlimited (``inf``) when the key is present with value None."""
+    if "max_stacked_drops" not in observation:
+        return 1
+    value = observation["max_stacked_drops"]
+    return float("inf") if value is None else int(value)
+
+
+def drop_count_scale(observation: dict) -> int:
+    """Divisor that maps a cell's drop count to a network input: the cap when there is one,
+    otherwise the three drops that hold the strongest front any water holds (D-76)."""
+    limit = stack_limit(observation)
+    return MAX_STACKED_DROPS if limit == float("inf") else int(limit)
 
 
 def full_cells(observation: dict) -> set[tuple[int, int]]:
