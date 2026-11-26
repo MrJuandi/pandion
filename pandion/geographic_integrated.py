@@ -156,6 +156,9 @@ def geographic_episode(
     observation_mode = observation_mode or scenario.get("observation_mode", "realtime")
     if observation_mode not in OBSERVATION_MODES:
         raise ValueError(f"Unknown observation_mode: {observation_mode}")
+    water_model = scenario.get("water_model", {})
+    water_on_burning = water_model.get("burning_cells", False)
+    burning_only = water_on_burning and water_model.get("candidates") == "burning_only"
 
     # Extract grid and fire parameters
     grid_meta = scenario["grid"]
@@ -342,6 +345,7 @@ def geographic_episode(
     arrival: list[list[float | None]] = [[None] * cols for _ in range(rows)]
     burnout: list[list[float | None]] = [[None] * cols for _ in range(rows)]
     drop_times: dict[tuple[int, int], list[float]] = {}  # times of the drops stacked on each treated cell
+    burning_drop_times: dict[tuple[int, int], list[float]] = {}
     best = [[float("inf")] * cols for _ in range(rows)]
     queue: list[tuple[float, int, int, int, int]] = []  # (time, row, col, source row, source col)
 
@@ -366,7 +370,7 @@ def geographic_episode(
         return ((r + dr, c + dc), (r + dr, c), (r, c + dc)) if dr and dc else ((r + dr, c + dc),)
 
     def edge_needed_drops(r: int, c: int, dr: int, dc: int) -> float:
-        """Drops a blocker of this edge needs to stop the front leaving reached cell (r, c).
+        """Drops needed to stop the front leaving reached cell (r, c) along this edge.
 
         The front's intensity is taken in the forcing interval in which (r, c)
         was reached, so whether an edge holds never depends on later forcing.
@@ -377,6 +381,8 @@ def geographic_episode(
     def edge_closed_at(r: int, c: int, dr: int, dc: int) -> float:
         """Time water on this edge started holding the front from (r, c); inf if it does not (D-74, D-76)."""
         stacked = [drop_times[cell] for cell in blockers(r, c, dr, dc) if cell in drop_times]
+        if (r, c) in burning_drop_times:
+            stacked.append(burning_drop_times[r, c])
         if not stacked:
             return float("inf")
         needed = edge_needed_drops(r, c, dr, dc)
@@ -461,28 +467,38 @@ def geographic_episode(
 
     # Water drop execution on physical landscape
     drops_log: list[dict[str, Any]] = []
+    known_burning_drops: list[list[int]] = []
 
     def apply_water_drop(drop_time: float, target_x_m: float, target_y_m: float, aircraft_index: int) -> list[list[int]]:
         """Add one CL-415 drop to the target cell (D-74, D-76); it may stack on earlier drops."""
         target_c = int(round(target_x_m / cell_size))
         target_r = int(round(target_y_m / cell_size))
         treated = []
-        drop_footprint = [(0, 0)]
-        for dr, dc in drop_footprint:
-            nr, nc = target_r + dr, target_c + dc
-            if 0 <= nr < rows and 0 <= nc < cols:
-                times = drop_times.setdefault((nr, nc), []) if is_burnable(nr, nc) and arrival[nr][nc] is None else None
-                if times is not None and len(times) < MAX_STACKED_DROPS:
+        burning_drop = False
+        r, c = target_r, target_c
+        if is_burnable(r, c):
+            reached_at = arrival[r][c]
+            if reached_at is None:
+                times = drop_times.setdefault((r, c), [])
+                if len(times) < MAX_STACKED_DROPS:
                     times.append(drop_time)
-                    treated.append([nr, nc])
+                    treated.append([r, c])
+            elif water_on_burning and reached_at <= drop_time and is_burning(r, c, drop_time):
+                times = burning_drop_times.setdefault((r, c), [])
+                if len(times) < MAX_STACKED_DROPS:
+                    times.append(drop_time)
+                    known_burning_drops.append([r, c])
+                    burning_drop = True
         drops_log.append({
             "time_s": round(drop_time, 2),
             "aircraft_index": aircraft_index, "water_l": capacity_l,
             "target_local_m": [round(target_x_m, 2), round(target_y_m, 2)],
             "target_utm_m": [round(target_x_m + origin_x, 2), round(target_y_m + origin_y, 2)],
-            "treated_cells_count": len(treated),
-            "treated_cells": treated,
+            "treated_cells_count": len(treated) + int(burning_drop),
+            "treated_cells": [[r, c]] if burning_drop else treated,
         })
+        if water_on_burning:
+            drops_log[-1]["burning_drop"] = burning_drop
         return treated
 
     # Observation schedule
@@ -606,6 +622,18 @@ def geographic_episode(
         return is_burnable(r, c) and any(
             linked(r, c, dr, dc) and arrival[r + dr][c + dc] is None for dr, dc in NEIGHBORS)
 
+    def is_burning(r: int, c: int, time_s: float) -> bool:
+        """Whether a reached cell is still burning at the given time."""
+        return (burnout[r][c] is not None and burnout[r][c] > time_s + 1e-9) or front_active(r, c)
+
+    def direct_attack_knocks_down(r: int, c: int) -> bool:
+        times = burning_drop_times.get((r, c))
+        if not times:
+            return False
+        open_edges = [(dr, dc) for dr, dc in NEIGHBORS
+                      if linked(r, c, dr, dc) and arrival[r + dr][c + dc] is None]
+        return bool(open_edges) and all(len(times) >= edge_needed_drops(r, c, dr, dc) for dr, dc in open_edges)
+
     def thermal_reading(r: int, c: int, time_s: float) -> int:
         """Brightness a thermal camera shows on burning cell (r, c) now (D-94): the heat of the cell
         as a whole, its largest intensity in any direction, so it depends neither on where the fire
@@ -620,7 +648,7 @@ def geographic_episode(
         crossing at head-fire rate plus Anderson residence) and for as long as the
         front is still advancing from it into a neighbour (D-67); otherwise
         ``burned``. Slow flank and rear fronts therefore stay visible as burning.
-        ``visible_state`` is the same without any dependence on water (D-95).
+        ``visible_state`` ignores pre-wetting (D-95) and can show direct knockdown.
         """
         cells = []
         for r in range(rows):
@@ -629,12 +657,15 @@ def geographic_episode(
                 reached = arrival[r][c] is not None and arrival[r][c] <= time_s + 1e-9
                 if not reached:
                     state = "unburned"
-                elif (burnout[r][c] is not None and burnout[r][c] > time_s + 1e-9) or front_active(r, c):
+                elif is_burning(r, c, time_s):
                     state = "burning"
                 else:
                     state = "burned"
                 visible = state
-                if state == "burned" and front_open(r, c):
+                # A camera can see direct knockdown (owner decision pending (O-20)).
+                if water_on_burning and reached and direct_attack_knocks_down(r, c):
+                    visible = "burned"
+                elif state == "burned" and front_open(r, c):
                     visible = "burning"  # stays alight whatever the water in front of it
                 line.append({
                     "fire_detected": reached,
@@ -705,6 +736,11 @@ def geographic_episode(
             "known_treated_cells": known_treated_cells,
             "max_stacked_drops": MAX_STACKED_DROPS,
         }
+        if water_on_burning:
+            current_obs["water_on_burning"] = True
+            current_obs["known_burning_drops"] = known_burning_drops
+            if burning_only:
+                current_obs["water_on_burning_candidates"] = "burning_only"
         if fleet_size > 1:
             current_obs["aircraft_index"] = ego
             current_obs["fleet"] = fleet_view(cur_sim_time)
