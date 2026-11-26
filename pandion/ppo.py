@@ -40,7 +40,7 @@ def _selection_key(metrics: list[dict], seed: int, index: int) -> tuple[float, i
 
 def _require_torch() -> None:
     if not HAS_TORCH:
-        raise ImportError("PyTorch is required for PPO; install requirements-rl.txt (torch>=2.0.0).")
+        raise ImportError("PyTorch is required for PPO; install requirements-rl.txt (torch>=2.6).")
 
 
 def returns_and_advantages(rewards: list[float], values: list[float], gamma: float = 0.99) -> tuple[Any, Any]:

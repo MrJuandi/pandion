@@ -114,7 +114,7 @@ class PPOTests(unittest.TestCase):
                 checkpoint=checkpoint,
             )
             self.assertTrue(checkpoint.exists())
-            saved = torch.load(checkpoint, weights_only=False)
+            saved = torch.load(checkpoint, weights_only=True)
             self.assertTrue(saved["model_config"]["recurrent"])
             self.assertEqual(result["trained_split"], "domain_randomized")
             self.assertTrue(result["config"]["recurrent"])

@@ -148,6 +148,14 @@ def build_policy_model(
                             action_feature_dim=tensorizer.num_action_features, action_skip=action_skip)
 
 
+def save_checkpoint(state: dict, path: Path | str) -> None:
+    """Write a state dict atomically: a crash mid-write never leaves a truncated checkpoint at ``path``."""
+    path = Path(path)
+    tmp = path.with_name(f".{path.name}.tmp-{os.getpid()}")
+    torch.save(state, tmp)
+    os.replace(tmp, path)
+
+
 def with_fleet(scenarios: list[dict[str, Any]], fleet_size: int) -> list[dict[str, Any]]:
     """Copies of ``scenarios`` flown by ``fleet_size`` identical aircraft (rehashed).
 
@@ -186,7 +194,7 @@ def resolve_device(name: str = "cpu") -> str:
 
 def _require_torch() -> None:
     if not HAS_TORCH:
-        raise ImportError("PyTorch is required for Geographic PPO; install requirements-rl.txt (torch>=2.0.0).")
+        raise ImportError("PyTorch is required for Geographic PPO; install requirements-rl.txt (torch>=2.6).")
 
 
 def load_geographic_split(
@@ -867,7 +875,7 @@ def train_geographic_ppo(
             best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
             if checkpoint_path:
                 Path(checkpoint_path).parent.mkdir(parents=True, exist_ok=True)
-                torch.save(best_state, Path(f"{checkpoint_path}.best"))
+                save_checkpoint(best_state, Path(f"{checkpoint_path}.best"))
         if history is not None:
             history.append({"update": update_number, "mean_final_burned_ha": round(score, 4), "best": improved})
         print(f"  [Select @ {update_number}] mean burned {score:.2f} ha{' (best)' if improved else ''}", flush=True)
@@ -988,7 +996,7 @@ def train_geographic_ppo(
                   flush=True)
             if partial_path is not None and (update_idx + 1) % checkpoint_every == 0:
                 partial_path.parent.mkdir(parents=True, exist_ok=True)
-                torch.save(model.state_dict(), partial_path)
+                save_checkpoint(model.state_dict(), partial_path)
             if eval_every > 0 and selection_scenarios and (
                     (update_idx + 1) % eval_every == 0 or update_idx + 1 == updates):
                 select(update_idx + 1)
@@ -1174,7 +1182,7 @@ def main() -> None:
         )
         if args.checkpoint:
             args.checkpoint.parent.mkdir(parents=True, exist_ok=True)
-            torch.save(model.state_dict(), args.checkpoint)
+            save_checkpoint(model.state_dict(), args.checkpoint)
             print(f"Saved trained checkpoint -> {args.checkpoint}")
         _, metrics = rollout_geographic(model, dev_scenarios[0], device=device, deterministic=True,
                                         **rollout_options)
@@ -1211,7 +1219,7 @@ def main() -> None:
         )
         if args.checkpoint:
             args.checkpoint.parent.mkdir(parents=True, exist_ok=True)
-            torch.save(model.state_dict(), args.checkpoint)
+            save_checkpoint(model.state_dict(), args.checkpoint)
             print(f"Saved trained checkpoint -> {args.checkpoint}")
 
         _, eval_m = rollout_geographic(model, dev_scenarios[0], device=device, deterministic=True,
@@ -1288,7 +1296,7 @@ def main() -> None:
 
         if args.checkpoint and best_candidate is not None:
             args.checkpoint.parent.mkdir(parents=True, exist_ok=True)
-            torch.save(best_candidate.state_dict(), args.checkpoint)
+            save_checkpoint(best_candidate.state_dict(), args.checkpoint)
             print(f"\nSaved best candidate checkpoint -> {args.checkpoint}")
 
         holdout_report = None

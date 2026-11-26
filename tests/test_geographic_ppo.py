@@ -407,7 +407,7 @@ class TestGeographicPPO(unittest.TestCase):
             self.assertEqual([h["update"] for h in history], [1, 2, 3])
             best = min(h["mean_final_burned_ha"] for h in history)
             self.assertEqual(sum(h["best"] for h in history if h["mean_final_burned_ha"] == best) >= 1, True)
-            saved = torch.load(f"{checkpoint}.best")
+            saved = torch.load(f"{checkpoint}.best", weights_only=True)
             for key, value in model.state_dict().items():
                 torch.testing.assert_close(value, saved[key])
             _, metrics = rollout_geographic(model, self.scenario, deterministic=True)
