@@ -29,8 +29,9 @@ import numpy as np
 from .environment import MOISTURE_KEYS
 from .geographic_integrated import DEFAULT_CAPACITY_L
 from .imagery_composite import compose_view, state_masks, thermal_view
-from .action_features import NUM_ACTION_FEATURES, ObservedFireBehavior, action_feature_array
-from .parametric_actions import MAX_SLOTS, ParametricActionMapper, slot_masks
+from .action_features import (NUM_ACTION_FEATURES, NUM_TARGET_FEATURES, ObservedFireBehavior, action_feature_array,
+                              target_feature_array)
+from .parametric_actions import MAX_SLOTS, FrontierActionMapper, ParametricActionMapper, slot_masks
 from .policies import stack_limit
 
 # Fuel families from Scott & Burgan (2005) code ranges and Anderson (1982) 1-13.
@@ -78,7 +79,9 @@ class GeographicInputTensorizer:
     def __init__(self, scenario: dict, base_image: np.ndarray | None, *, include_ros: bool = False,
                  explicit_fire: bool = False, include_thermal: bool = False,
                  focus_slots: bool = False, fleet_features: bool = False,
-                 action_features: bool = False, drop_distances: Any = (0,)) -> None:
+                 action_features: bool = False, drop_distances: Any = (0,),
+                 measured_intensity: bool = False, learned_speed: Any = None, learned_hold: Any = None,
+                 learned_burn: Any = None, frontier: bool = False) -> None:
         """``base_image=None`` with ``explicit_fire=True`` is the no-image ablation:
         fire state enters as per-cell channels and ``extract`` returns (cells, vector)."""
         grid = scenario["grid"]
@@ -99,7 +102,18 @@ class GeographicInputTensorizer:
             if base_image.shape[:2] != (self.rows * self.px_per_cell, self.cols * self.px_per_cell):
                 raise ValueError("base image must use the same pixels per cell on both axes")
         self.base_image = base_image
+        if include_ros and learned_speed:
+            raise ValueError("include_ros and learned_speed both fill the spread channel")
         self.include_ros = include_ros
+        self.learned_speed = learned_speed
+        self.learned_hold = learned_hold
+        self.learned_burn = learned_burn
+        self.arrival_outputs = 0
+        if learned_burn:
+            from .learned_burn import load_net
+            self.arrival_outputs = len(load_net(str(learned_burn))[3])  # 1: burn map only (D-100); more: arrival (D-102)
+        self.cruise_speed = float((scenario.get("aircraft") or {}).get("cruise_speed_m_s", 80.0))
+        self.measured_intensity = measured_intensity
         self.explicit_fire = explicit_fire
         if include_thermal and base_image is None:
             raise ValueError("the thermal band is part of the image input; it needs a base image")
@@ -110,12 +124,14 @@ class GeographicInputTensorizer:
         if action_features and not focus_slots:
             raise ValueError("action features belong to parametric actions (focus_slots)")
         self.action_features = action_features
-        self.num_action_features = NUM_ACTION_FEATURES if action_features else 0
+        self.num_action_features = 0 if not action_features else (NUM_TARGET_FEATURES + (4 if learned_hold else 0) + (2 if self.arrival_outputs > 1 else 0)) if measured_intensity else NUM_ACTION_FEATURES
         if action_features:
-            self._action_mapper = ParametricActionMapper(self.cell_size_m, drop_distances)
-            self._behavior = ObservedFireBehavior()
+            self._action_mapper = (FrontierActionMapper(self.cell_size_m) if frontier  # D-104
+                                   else ParametricActionMapper(self.cell_size_m, drop_distances))
+            self._behavior = None if measured_intensity else ObservedFireBehavior()
         self.num_vector_features = self.NUM_VECTOR_FEATURES + (self.FLEET_VECTOR if fleet_features else 0)
-        self.num_cell_channels = (self.BASE_CELL_CHANNELS + (1 if include_ros else 0)
+        self.num_cell_channels = (self.BASE_CELL_CHANNELS + (1 if include_ros or learned_speed else 0) + (1 if learned_burn else 0)
+                                  + (1 if self.arrival_outputs > 1 else 0)
                                   + (self.FLEET_CHANNELS if fleet_features else 0)
                                   + (self.FIRE_CHANNELS if explicit_fire else 0)
                                   + (MAX_SLOTS if focus_slots else 0))
@@ -178,6 +194,17 @@ class GeographicInputTensorizer:
             self._ros_cache[key] = out
         return self._ros_cache[key]
 
+    def learned_channel(self, observation: dict) -> np.ndarray:
+        """Like ``ros_channel`` but with the head speed learned from observed arrivals (D-92)."""
+        from .learned_spread import cached_head_speed
+
+        wind = tuple(float(v) for v in observation["midflame_wind_to_m_s"])
+        key = (wind, tuple(float(observation["fuel_moisture"][k]) for k in MOISTURE_KEYS))
+        if key not in self._ros_cache:
+            ros = cached_head_speed(observation, self.learned_speed) * 60.0  # m/min
+            self._ros_cache[key] = np.minimum(np.log1p(ros) / log1p(ROS_SCALE_M_MIN), 1.0).astype(np.float32)
+        return self._ros_cache[key]
+
     def fire_channels(self, observation: dict) -> np.ndarray:
         """Explicit [3, H, W] burning, burned and time-since-arrival / horizon."""
         out = np.zeros((self.FIRE_CHANNELS, self.rows, self.cols), dtype=np.float32)
@@ -210,11 +237,13 @@ class GeographicInputTensorizer:
             raise ValueError("image inputs require real-time observations (D-49)")
         rgb = None
         if self.base_image is not None:
-            masks = state_masks(observation) if self.include_thermal else None
+            state_key = "visible_state" if self.measured_intensity else "fire_state"
+            masks = state_masks(observation, state_key) if self.include_thermal or self.measured_intensity else None
             view = compose_view(self.base_image, observation, self.px_per_cell, masks=masks)
             rgb = np.moveaxis(view, -1, 0)
             if self.include_thermal:
-                heat = thermal_view(observation, self.px_per_cell, self.cell_size_m, masks=masks)
+                heat = thermal_view(observation, self.px_per_cell, self.cell_size_m, masks=masks,
+                                    measured=self.measured_intensity, state_key=state_key)
                 thermal_bytes = np.rint(heat * 255.0).astype(np.uint8)
                 rgb = np.concatenate([rgb, thermal_bytes[None]])
             if not byte_image:
@@ -230,6 +259,16 @@ class GeographicInputTensorizer:
         dynamic = [treated, np.clip(distance, 0.0, 1.5).astype(np.float32)]
         if self.include_ros:
             dynamic.append(self.ros_channel(observation))
+        elif self.learned_speed:
+            dynamic.append(self.learned_channel(observation))
+        arrival = None
+        if self.learned_burn:
+            from .learned_burn import burn_outputs
+            probs, minutes = burn_outputs(observation, self.horizon_s, self.learned_burn)
+            dynamic.append(probs[-1])
+            if self.arrival_outputs > 1:
+                dynamic.append(probs[int(np.argmin(np.abs(minutes - 10.0)))])  # reached within ten minutes (D-102)
+                arrival = (probs, minutes, self.cruise_speed)
         if self.fleet_features:
             dynamic.extend(self.fleet_channels(observation))
         parts = [self._static_channels(observation), np.stack(dynamic)]
@@ -259,7 +298,8 @@ class GeographicInputTensorizer:
             vector_array = np.concatenate([vector_array, self.fleet_vector(observation)]).astype(np.float32)
         arrays = [cells, vector_array] if rgb is None else [rgb, cells, vector_array]
         if self.action_features:
-            arrays.append(action_feature_array(observation, self._action_mapper, self._behavior))
+            arrays.append(target_feature_array(observation, self._action_mapper, fuel_family, self.learned_hold, self.horizon_s, arrival) if self.measured_intensity
+                          else action_feature_array(observation, self._action_mapper, self._behavior))
         return tuple(arrays)
 
     def _others(self, observation: dict) -> list[dict]:

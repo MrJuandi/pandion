@@ -794,3 +794,255 @@ References: `heuristic` 41.76 / 46.33 ha, `hold_aware_heuristic` 38.70 / 43.22 h
 Reading: negative. Moving branches to growing fires did not improve the policy; it is slightly worse than D-85 with the same seed on held-out, selection and development data, with more scenarios lost than won. More branched decisions with an effect per update (45.8 against 28.7 measured beforehand) did not translate into a better policy. A likely reason is that the episodes with large fires are also those whose branch returns are noisiest (3 ha between seeds in one scenario, previous section), so the extra signal there is mostly variance. Seeds 43 and 44 were not run, as agreed beforehand for a seed-42 result without improvement. D-85 stays the recipe; `--vine-allocation` keeps `uniform` as default. Forked branching (D-90) is kept: over the first 18 updates, 27.4 s of branching per update against 37.3 s in the replayed run that was aborted (`aborted/seed42.log`; 1.4×). The two logs show the same loss to four decimals in the first nine updates and drift apart from the tenth; returns were compared exactly only on 12 development episodes and in the unit tests, and the cause of the drift was not checked. Limits: one seed.
 
 The run folder keeps its working number `d87`, assigned before D-87 became the viewer language change; forked branching was D-88 in the working copy.
+
+### Scenario difficulty and clusters (2026-11-24)
+
+Characterisation, no training. The clusters are for stratified reporting: every comparison of controllers on this family is dominated by a minority of scenarios, and the mean hides where they differ. They are not a training input or a tactic.
+
+`runs/geographic-difficulty-clusters-20261124` (`evaluate.py`, `analyse.py`, `checks.py`, `outcome_groups.py`; per-scenario table `scenario_table.csv`): the 1,344 development and 24 validation scenarios of `runs/geographic-multi-ignition-family-d73-20261006`, two aircraft, one-hour horizon; reserved unopened. Controllers: no intervention, the three registered rules and the selected weights of the three D-85 seeds, deterministic. `evaluate.py` reproduces the 288 held-out scenarios of the D-85 evaluation exactly. Of the 1,368 scenarios, 928 were training scenarios and 128 chose the weights; only EMSR837 (288) and EMSR590 (24) were used for neither. The analysis needs pandas and scikit-learn (2.3.3 and 1.8.0 used), which the package does not require.
+
+**Difficulty.** Defined from a fixed reference, not from the policy under study: growth = no intervention − initial area; saved = share of the growth that `hold_aware_heuristic` avoids.
+
+| Class | Rule | Scenarios | Growth (ha) | Fireline intensity at the foci (kW/m) | Dead moisture | Shrub share |
+|---|---|---|---|---|---|---|
+| Trivial | growth ≤ 2 ha | 361 | 0.4 | 348 | 0.10 | 0.26 |
+| Easy | saved ≥ 75 % | 391 | 14.6 | 969 | 0.08 | 0.40 |
+| Medium | saved 25–75 % | 219 | 55.4 | 2,545 | 0.06 | 0.44 |
+| Hard | saved < 25 % | 397 | 150.8 | 5,376 | 0.06 | 0.57 |
+
+The largest potential intensity at the foci separates hard from easy with AUC 0.97; a two-level tree on intensity and spread rate classifies 93 % correctly on held-out incidents (majority class 50 %). From weather, fuel, terrain, foci and water alone, a random forest reaches AUC 0.90 on held-out incidents, with dead fuel moisture first (permutation importance 0.26), shrub share second (0.12) and everything else at most 0.014. Classes are stable to the cuts (80/20: 95 % unchanged; thirds: 93 %; best of six controllers instead of the rule: 91 %).
+
+**Clusters.** k-means on 16 standardised scenario characteristics within 1 km of the foci (log mean spread rate, log intensity at the foci, shares of cells under 1,000 and over 3,200 kW/m, dead moisture, mean wind, wind turn, slope, four fuel shares, unburnable share, foci, foci separation, distance to water). No outcome enters. k was chosen by the largest worst-case adjusted Rand index over 20 refits on 80 % of the incidents (k = 5: mean 0.92, worst 0.73; k = 2–8 tried). Areas are means in ha; intervals are 95 % bootstrap over incidents.
+
+| Cluster | Profile | n | Hard | No intervention | `heuristic` | `hold_aware` | D-85 (3 seeds) | Growth D-85 avoids | D-85 − `hold_aware` |
+|---|---|---|---|---|---|---|---|---|---|
+| C1 | Litter and unburnable mosaic | 192 | 9 % | 11.9 | 9.4 | 8.0 | 8.0 | 44 % | −0.04 [−0.09, +0.06] |
+| C2 | Moist shrub | 393 | 9 % | 13.6 | 8.9 | 7.9 | 7.8 | 54 % | −0.09 [−0.51, +0.18] |
+| C3 | Timber understory | 242 | 6 % | 13.7 | 8.0 | 7.0 | 6.6 | 66 % | −0.40 [−1.62, +0.28] |
+| C4 | Grass | 76 | 8 % | 45.4 | 35.2 | 27.9 | 27.1 | 43 % | −0.89 [−1.16, +0.00] |
+| C5 | Dry shrub, high intensity | 465 | 69 % | 145.3 | 133.3 | 125.2 | 124.7 | 14 % | −0.45 [−1.66, +0.97] |
+
+C5 is 34 % of the scenarios and 85 % of the growth. On the scenarios used for neither training nor selection the same comparison gives −0.09, +0.34, +0.21, 0.00 and −0.58 ha (n = 96, 72, 71, 4, 69; all intervals include zero).
+
+**Where seeds agree with the rule.** Per scenario and against a reference: tie, the three seeds within 1 ha; win or loss, all three better or worse by more than 1 ha; otherwise seed-dependent (the measure of the 2026-11-19 diagnostic; its 177 / 17 / 19 ties, wins and losses on EMSR837 are reproduced).
+
+| Cluster | Tie with `hold_aware` | Seed-dependent | Win | Loss | Mean s.d. between seeds (ha) | Scenarios with > 5 ha between seeds |
+|---|---|---|---|---|---|---|
+| C1 | 83 % | 13 % | 3 % | 2 % | 0.5 | 10 |
+| C2 | 77 % | 17 % | 4 % | 2 % | 0.7 | 22 |
+| C3 | 66 % | 24 % | 7 % | 3 % | 0.8 | 14 |
+| C4 | 76 % | 16 % | 5 % | 3 % | 2.6 | 15 |
+| C5 | 12 % | 47 % | 22 % | 20 % | 3.7 | 165 |
+| All | 736 | 377 | 143 | 112 | | 226 |
+
+Against `heuristic`: 633 ties, 273 seed-dependent, 418 wins (−5,604 ha in all) and 44 losses (+310 ha; 5 on EMSR837, +15 ha). Whether a scenario is a tie is predictable from its characteristics (AUC 0.93 on held-out incidents); whether a decisive one is won or lost against `hold_aware_heuristic` barely is (AUC 0.64). In C5 the seeds agree moderately on where they win and lose (correlation of their differences with the rule 0.52–0.68), so part of it belongs to the scenario and is not in these characteristics.
+
+Reading: hard fires are those whose front exceeds what stacked water holds (3,200 kW/m, D-74/D-76), so difficulty is largely a property of the drop model and of fuel and moisture. D-85 does not differ from `hold_aware_heuristic` in any cluster mean; in C5 it differs in single scenarios, in both directions.
+
+Limits: silhouette 0.19, so this is a continuum cut into parts rather than natural groups; C1 and C4 come from 4 and 6 incidents and C4 is bimodal. The synthetic wind range is narrow (cluster means 2.4–2.5 m/s), so wind not mattering here says nothing about wind in general. 17 % of the hard fires reach the map edge without intervention and their size is understated. Three seeds measure the spread of one scenario poorly, and the 1 ha tie threshold favours ties in small fires. Comparing D-85 with `hold_aware_heuristic` inside classes computed from `hold_aware_heuristic` is biased (it looks worse on easy and better on hard scenarios); in bands of growth, which neither controller defines, the difference is at most +0.12 ha except −1.04 [−2.58, +0.52] above 50 ha.
+
+#### Simulating before deciding (2026-11-25)
+
+Question: differences between seeds and against the rule concentrate in C5; can they be exploited without training, and without a rule written for C5? `lookahead.py` (`run_lookahead.sh`, output `lookahead_summary.txt` from `lookahead_analyse.py`; simulator code at commit cc23221) flies the D-85 selected weights with extra simulation. Settings were fixed before any result. "Forecast" means the same scenario with the current interval's wind and moisture repeated for the rest of the hour, so no future weather is read; fuel, terrain and the fire model are the simulator's own. The portfolio and the lookahead are therefore oracles of the dynamics, though not of the weather: the simulator is deterministic, all foci start at t = 0, and the branches are run in the environment that then scores the decision, so spread, drop effect and flight times are known exactly. These rows measure margin; they are not results of the policy, which alone stays at −0.03 ha. Only the ensemble uses no simulation.
+
+- **Ensemble:** mean of the three seeds' action probabilities at every decision. No simulation.
+- **Portfolio:** at t = 0 each candidate controller is flown in the forecast; the one with the smallest forecast area flies the real episode (ties: first in the list).
+- **Lookahead:** one seed; at each real decision the four most probable valid actions are simulated to the horizon in the forecast, the same policy continuing, and the best is taken (ties keep the policy's own choice).
+- **Full oracle** (seed 42): lookahead with the true future weather as well.
+
+EMSR837 and EMSR590 (312 scenarios, used neither for training nor for selection; `hold_aware_heuristic` 37.86 ha, D-85 37.83). Difference with `hold_aware_heuristic` in ha, 95 % bootstrap over base scenarios (map, weather and moisture; their four focus variants stay together); better / equal / worse counts.
+
+| Controller | All | C1 (96) | C2 (72) | C3 (71) | C5 (69) |
+|---|---|---|---|---|---|
+| D-85, 3 seeds | −0.03 | −0.09 | +0.34 | +0.21 | −0.58 |
+| Ensemble | −0.38 [−0.89, +0.13] 69/181/62 | −0.19 | +0.06 | +0.23 | −1.77 [−3.08, −0.53] |
+| Portfolio: two rules | +0.09 [+0.01, +0.23] 3/298/11 | +0.19 | 0.00 | +0.06 | +0.10 |
+| Portfolio: three seeds | −0.76 [−1.19, −0.36] 87/169/56 | −0.67 | −0.11 | 0.00 | −2.39 [−3.69, −1.25] |
+| Portfolio: three seeds and the rule | −0.79 [−1.21, −0.42] 77/204/31 | −0.64 | −0.22 | −0.13 | −2.33 [−3.70, −1.13] |
+| Best of those four in hindsight (bound) | −1.40 | −1.15 | −0.29 | −0.75 | −3.67 |
+| Lookahead, 3-seed mean | −1.06 [−1.60, −0.55] 104/156/52 | −1.56 [−2.61, −0.67] | −0.06 | −0.33 | −2.24 [−3.85, −0.45] |
+| Full oracle lookahead, seed 42 | −1.77 [−2.47, −1.12] 102/172/38 | −1.85 | −0.08 | −0.34 | −4.97 [−6.54, −3.38] |
+
+Per seed (42, 43, 44) the lookahead gives −1.01, −1.29 and −0.90 ha against the rule, every interval below zero, and −0.87, −1.07 and −1.17 against the same seed without it. It changed 331 of 6,703, 336 of 11,853 and 391 of 4,519 decisions: 16–19 % in C5 and 0–12 % in the other clusters. On all 1,368 scenarios (training incidents included) the three-seed portfolio gives −1.40 [−2.03, −0.95] ha against the rule and −2.80 [−3.93, −1.64] in C5.
+
+Reading: the spread between seeds in C5 is evidence of margin, since the same scenario ends differently under different decisions. Choosing with a forecast turns part of it into burned area, and does not need to know the cluster: where all options end the same, it changes nothing. The gain over the rule comes mainly from C5 and C1, and needs the learned policies in the sense that the two registered rules alone offer no choice worth making. Comparing the full oracle with the persistent-weather lookahead of the same seed, weather accounts for about 2.6 ha in C5 (−4.97 against −2.41).
+
+Variance is not what this removes. In C5 the mean spread between seeds rises from 2.8 ha to 3.5 ha with lookahead; scenarios lost to the rule by all three seeds fall from 12 to 5 of 69 and wins rise from 9 to 28, while seed-dependent ones are 28 against 38. A wrong forecast can cost a lot in one scenario: with lookahead seed 44 burned 101 ha more than without it in EMSR837_AOI07 scenario 06-00, and seeds 42 and 43 lost 31–42 ha in single AOI07 scenarios.
+
+Limits: the forecast uses the simulator's own fire model, so it is a perfect fire forecast apart from the weather; the gain would shrink under a model mismatch, which was not tested. The comparison is therefore not at equal information: neither the rule nor D-85 simulates (the dispatch/short-horizon-planner condition of the baselines section asks planners to disclose this). The same lookahead with `hold_aware_heuristic` as the continuing policy was not run, so how much of the gain belongs to the learned policy rather than to simulating is unknown. All 96 C1 scenarios come from three EMSR837 maps (AOI05, AOI08, AOI17). Computation was about 1–3 s per decision and 15–113 s per episode (seed means, nine processes in parallel). EMSR837 has been used for many earlier comparisons. The lookahead was not run on the training incidents.
+
+#### A spread model learned from observed arrivals (2026-11-25)
+
+Question: can spread and water effect be learned from what is observed, without the simulator's formula, well enough to compare the options of a decision? `runs/geographic-learned-spread-20261125` (`CRITERION.md` written before any result; `collect.py`, `spread.py`, `evaluate.py`, `analyse.py`, `diagnose.py`; output `summary.txt`, `diagnose.txt`). No policy was trained and the reserved split was not opened.
+
+A small network predicts the speed of each edge between neighbouring cells from fuel code, terrain, current-interval wind and moisture, and a multiplier for water (stacked drops on the cell or its flanks). It is fitted to arrival times alone, on the 928 training scenarios flown by no intervention, three rules and two random policies (296,290 ignition outcomes, 117,737 near water); the 128 selection scenarios stop the training. It receives no rate of spread, intensity, fuel parameters or hold thresholds. It does receive the structure of the simulator: spread between eight neighbours, earliest arrival wins, progress accumulates across wind intervals. Three initialisations. Test on EMSR837 and EMSR590 (312 scenarios).
+
+| Area without water from t = 0, MAE in ha at 15 / 30 / 60 min (true mean 5.98 / 15.59 / 46.13) | |
+|---|---|
+| Learned, true wind (3 initialisations) | 0.09–0.12 / 0.29–0.44 / 0.96–1.15 |
+| Learned, initial wind held constant | 0.09–0.12 / 2.09–2.25 / 7.39–7.67 |
+| Exact simulator, initial wind held constant | 0.00 / 2.11 / 7.27 |
+| No growth | 2.94 / 12.54 / 43.09 |
+
+Spread without water is learned almost exactly (overlap of newly burned cells 0.96 with true wind); with the wind held constant its error is that of the exact simulator, so the wind is what limits the forecast (C5: 25–26 ha for both). A fitted constant speed gives 52 ha, but is a poor baseline because area jumps with the ring reached.
+
+Water is learned worse. With the drops of real flights fixed and the true wind, the model predicts 6.5–6.9 ha saved by `hold_aware_heuristic` and the D-85 seeds against a real 8.0–8.5 (MAE 2.5–2.8, correlation 0.81–0.82). Of the treated cells that the model says would burn without water, it predicts as stopped 75–79 % of those really stopped and as reached 94–96 % of those really reached; with three drops, where 98 % stop, it is right in 77–79 %. The three-drop case is not rare in training (8,291 cells, 96 % not reached), so the cause of this error was not determined: candidates are the intensity, which decides it and is not observed, and the loss, which only asks for an arrival after the horizon.
+
+Decision test (criterion): 1,248 decisions of D-85 seed 42, its four most probable actions each, real branches flown with true weather, then replayed open loop from the true state with the current wind held constant; 1,140 pairs differ by at least 1 ha.
+
+| Forecast | Sign agreement | Predicted tie | Correlation of branch differences | Area of the chosen action − the policy's own |
+|---|---|---|---|---|
+| Exact simulator | 58 % [50, 64] | 35 % | 0.68 | −0.108 ha [−0.195, −0.047] |
+| Learned 1 | 40 % | 49 % | 0.26 | −0.026 [−0.125, +0.077] |
+| Learned 2 | 50 % | 42 % | 0.37 | −0.102 [−0.186, −0.039] |
+| Learned 3 | 48 % | 42 % | 0.26 | −0.084 [−0.167, −0.025] |
+| Constant speed | 25 % | 43 % | 0.00 | +0.095 [+0.030, +0.181] |
+| Best branch in hindsight | | | | −0.217 |
+
+Reading: criterion not met (sign agreement at least 70 % and at most 10 points below the exact simulator). The 70 % bar was badly set: the exact simulator with constant wind reaches 58 %, because ties count as disagreement (it predicts a tie in 35 %; where it predicts a difference, its sign is right in 89 %). The relative bar fails as well: the mean of the three is 46 %, 11.5 points below, and only one of three initialisations is within 10. By the value of the action chosen, two of three recover 78 % and 94 % of the exact simulator's gain and one 24 %, which was not the criterion and is a post hoc reading. Spread is therefore not the obstacle; water is, and the result varies with the initialisation. The learned closed-loop lookahead was not run.
+
+Limits: the model learns this simulator's law and says nothing about real fire; the simulator's structure was given; D-85 still receives rate of spread and drops needed as inputs. A first evaluation had a precision error in the branch test (arrivals stored in float32 made new cells stop spreading, area bias −8 ha); it was corrected, with the same models and criterion, and the two decisions taken at one instant are no longer merged; earlier outputs are in `before-fix/`. EMSR837 has been used for many earlier comparisons. The diagnosis of water was made after seeing the result.
+
+#### Why the learned water effect failed (2026-11-25)
+
+`cause1.py` to `cause3.py` and `spread2.py` in the same folder. Everything here uses the training and selection scenarios; the 312 unseen ones were not used to diagnose or to choose. The "stopped" and "reached" shares are taken over treated cells the model says would burn without water, with the true sources given.
+
+1. Not a lack of data or of generalisation: on the training fires themselves 18–46 % of the stopped cells are missed, while 83–98 % of the reached ones are right. With three drops about half of the misses are predicted arrivals before the last drop; with one or two, about half are arrivals in the last ten minutes of the hour.
+2. It is the water part, not the spread: keeping the learned spread and replacing only the water by the simulator's rule (diagnostic, selection) gives 98 % of the stopped cells and 99.5 % of the reached ones, against 74 % and 97 % for the learned water. Using that rule with the current wind instead of the wind when the source cell burned gives 87 % and 95 %.
+3. The missing input: the simulator decides whether water holds a front with the intensity of the interval in which the source cell was reached, and keeps that decision when the wind changes. The model only saw the current wind, so a hold that the simulator keeps looked uncertain. The intensity that the previous section named as a possible cause is not the limit: given the right interval, the network infers it well enough.
+4. The loss adds to it, but less: an error of a cell wrongly stopped costs up to about a hundred times one wrongly reached, so an uncertain cell is predicted late rather than stopped.
+
+| Change (one initialisation, selection) | Stopped recognised | Reached recognised |
+|---|---|---|
+| None | 73 % | 98 % |
+| Symmetric loss with classification (b) | 84 % | 95 % |
+| Weather of the source-arrival interval (a) | 95 % | 99 % |
+| Both (a, b) | 96 % | 99 % |
+| Source-arrival and current weather both given, the network chooses (c), three initialisations | 93–94 % | 99 % |
+
+Variant c was chosen for use because (a) would be the simulator's rule copied by hand; both weathers are observable. It is still a hint that came from looking at the rule, not from the data alone. Effect on decisions, selection scenarios (512 decisions of D-85 seed 42, 666 pairs with at least 1 ha; constant current wind; the policy was selected on these scenarios):
+
+| Forecast | Sign agreement | Correlation of branch differences | Area of the chosen action − the policy's own |
+|---|---|---|---|
+| Exact simulator | 55 % [48, 61] | 0.74 | −0.121 ha [−0.186, −0.061] |
+| Learned, original (three) | 41–44 % | 0.31–0.44 | +0.053 to +0.109 |
+| Learned, variant c (three) | 50–52 % | 0.58–0.63 | −0.096, +0.006, −0.104 |
+
+With true wind, the sign of differences of at least 1 ha between controllers (drops of real flights fixed) goes from 77–79 % to 91–93 %; with constant wind from 69–73 % to 77–78 %. Reading: the water error was mostly one missing input, and what remains is the wind forecast. One of the three initialisations gains nothing in the choice of action, so the result is still not stable across initialisations. Limits: no closed-loop flight, no evaluation on the unseen scenarios and one selection set (EMSR719, 892, 632, 457; C2, C4 and C5 only); the criterion of the previous section is unchanged and still not met by the models tested there.
+
+#### The corrected spread model on the unseen incidents (second look, 2026-11-25)
+
+`CRITERION2.md` (written before running), `eval_test_c.pkl`, `summary_test_c.txt`. Variant c, three initialisations, chosen on the selection scenarios; same 312 unseen scenarios, tests and criterion as the first evaluation, of which this is the second look. The model was not changed afterwards. Decision test, 1,248 decisions and 1,140 pairs of at least 1 ha, current wind held constant.
+
+| Forecast | Sign agreement | Predicted tie | Opposite | Correlation of branch differences | Area of the chosen action − the policy's own |
+|---|---|---|---|---|---|
+| Exact simulator | 57.6 % [51, 64] | 35 % | 7 % | 0.68 | −0.108 ha [−0.198, −0.045] |
+| Original model (first look) | 40 / 50 / 48 % | 42–49 % | 8–11 % | 0.26–0.37 | −0.026 / −0.102 / −0.084 |
+| Corrected 1 | 50.4 % [44, 57] | 42 % | 8 % | 0.43 | −0.097 [−0.184, −0.034] |
+| Corrected 2 | 49.9 % [43, 56] | 42 % | 8 % | 0.46 | −0.095 [−0.184, −0.031] |
+| Corrected 3 | 52.5 % [47, 58] | 39 % | 9 % | 0.37 | −0.104 [−0.198, −0.036] |
+| Mean of the three forecasts | 58.1 % [52, 64] | 32 % | 10 % | 0.45 | −0.107 [−0.203, −0.039] |
+
+Reading: the 70 % part is not met and could not be (exact simulator 57.6 %). The 10-point part is met: 50.9 % on average, 6.7 points below. So the criterion as written is not met and its informative half is. The three initialisations now agree (in choosing the action all are between −0.095 and −0.104 ha, every interval below zero, none distinguishable from the exact simulator: differences from −0.020 to +0.029). The correlation of the branch differences stays well below the exact simulator (0.37–0.46 against 0.68), so the size of the differences is predicted worse than their sign. Averaging the three forecasts is as good as the exact simulator in sign and value, but the average has fewer ties than integer areas and slightly more opposite answers (10 % against 7 %), so its sign agreement is not strictly comparable. In C5 the gain is −0.29 to −0.33 ha against −0.33 for the exact simulator.
+
+Controllers with fixed real drops, real difference of at least 1 ha, sign agreement: true wind 84–87 % (original 66–70 %); constant wind 65–69 % (61–63 %). Saved area: predicted 7.3–7.7 ha against 8.0–8.5 for the rule and the three seeds with true wind.
+
+Limits: one decision at a time, open loop, from the true state; no flight with the learned model, so nothing is said of the loss when errors accumulate in closed loop. The source-arrival wind came from looking at the simulator's rule; D-85 still receives rate of spread and drops needed; the simulator's neighbour structure is given. EMSR837 and EMSR590 have now been looked at twice for this model and many times for the policy.
+
+#### The measured-intensity sensor and its correction (2026-11-25)
+
+Mean burned area of the hold-aware rule on 928 development and 128 selection scenarios (EMSR837 and the reserved split not flown), bootstrap intervals over incidents. Scripts and outputs in `runs/thermal-intensity-design-20261125/` (`why_measured.py`, `why_analyse.py`, `why_linked_analyse.py`).
+
+| Sensor, minus `hold_aware_heuristic` (formula) | All 1,056 | Development (928, 24 incidents) | Selection (128, 4 incidents) |
+|---|---|---|---|
+| As first implemented (D-91) | −0.57 [−0.94, −0.22] | −0.39 [−0.78, −0.05] | −1.85 |
+| Corrected (D-93) | −0.24 [−0.69, +0.13] | −0.02 [−0.49, +0.33] | −1.80 |
+| First implementation − corrected | −0.33 [−0.55, −0.14] | −0.37 [−0.61, −0.15] | −0.05 |
+
+Reading: the first implementation excluded the directions in which water already holds the front, which the fire formula decides beforehand; that advantage is removed. With the corrected reading the measured rule ties the formula rule on the development incidents. The −1.80 ha on selection comes from four incidents, is not seen on the other 24, and its cause is not identified; intervals over four incidents are not reported. Follow-up on the same 1,056 scenarios (`variants.py`): the formula rule gives the same area as the measured rule when it is fed the largest directional intensity of each source's unreached neighbours instead of the direction towards the target (selection 78.32 against 78.30 ha; all 51.75 against 51.71), and giving it the wind interval in which each source was reached, which the simulator uses to decide whether water holds, does not change selection (80.15 against 80.10) and improves all of it by 0.25 ha [−0.48, +0.01]. So the difference on selection comes from how the rule summarises intensity, not from the sensor knowing more than the formula. Limits: perfect sensor; the 10 most favourable scenarios account for most of the mean of the first implementation (−0.16 ha without them); these sets also chose the reading.
+
+Two policies were trained with the flawed sensor (`runs/geographic-measured-intensity-20261125`, D-85 recipe, seed 42): best selection score 81.73 ha without the learned speed and 80.91 ha with it, against 77.59 for D-85 seed 42 (formula inputs), 80.10 for `hold_aware_heuristic` and 86.59 for `heuristic`. The training script also flew both on EMSR837 (288 scenarios): 40.72 and 40.12 ha against 38.70 for `hold_aware_heuristic` and 41.76 for `heuristic`. A rerun with the corrected sensor was stopped at update 49 of 250 when the owner ruled out exact intensity and drop numbers as inputs (D-94); it gave no result.
+
+Thermal brightness (D-94), same 1,056 scenarios (`brightness.py`): the hold-aware rule reading the byte burns 52.27 ha on all, against 51.95 with the formula (+0.32 [−0.12, +0.71]) and 56.02 for `heuristic` (−3.76 [−5.32, −2.32]). Development (24 incidents): +0.46 [+0.03, +0.85]; selection (4 incidents): −0.70. Reading: without the direction of the fire the rule loses about 0.3–0.5 ha to the formula and stays far ahead of `heuristic`. The policy that saw the fire only as this image (`runs/geographic-thermal-only-20261125`) was stopped before update 40 of 250, one selection score at update 25 (85.84 ha), because its image still depended on whether water would hold a front (D-95).
+
+Blind rule (D-95, D-96), same 1,056 scenarios (`blind.py`, `rule_brightness.py`): `blind_hold_aware_heuristic`, with no hold limit, burns 52.70 ha on all against 56.02 for `heuristic` (−3.32 [−5.17, −1.61]) and 51.95 for `hold_aware_heuristic`, which knows the simulator's limits (+0.76 [−0.09, +1.66]). Development (928): 49.01 against 51.81 for `heuristic` and 48.06 for the privileged rule (+0.95 [+0.04, +2.00]); selection (128, four incidents): 79.52 against 86.59 and 80.10. The order of brightness was chosen on the development scenarios among three (50.71 without brightness, 51.99 brightest first, 49.01 dimmest first). Reading: knowing only how strongly the bordering fire burns, not what water holds, the rule recovers most of the earlier advantage over `heuristic`. The policy with the same knowledge (`runs/geographic-no-limit-20261125`, old scale of 191–255) was stopped by the owner at update 189 of 250; its best selection score was 84.02 ha (update 150). It was trained before D-96 and does not see the wider scale; `runs/geographic-target-features-20261125` (D-96, D-97) was training when this was written.
+
+Leak checks of the blind rule (`leak.py`, 928 development scenarios): changing the wind of every weather interval after the first changes nothing the rule observes or orders before that interval (1,223 decisions in 116 scenarios, 0 differ). With the brightness values exchanged at random between burning cells it burns 50.24 ha, against 49.01 as it is (+1.23 [+0.22, +2.51]) and 50.71 without brightness (−0.47 [−1.09, +0.15]), so the gain does depend on which cell carries which value and the rest of the gain is not established. Ordering by the formula's directional intensity instead gives 52.44 ha (+3.44 [+1.44, +5.52]), so the brightness order is not a stand-in for the formula's order. The byte is a monotone function of the cell's largest fireline intensity, which the simulator computes with its formula: it is a perfect sensor (D-49), and a real camera would have noise and saturation. Limits: one rule family, four selection incidents, and the order was picked on these 928 scenarios.
+
+#### What D-85 uses the fire formula for (2026-11-25)
+
+D-85 seed 42 flown on its 128 selection scenarios with formula inputs set to zero (`runs/d85-formula-ablation-20261125`; selection incidents, not unseen). Intact: 77.59 ha. Without the speed channel: 80.01 (+2.41 [+1.41, +3.42]). Without the five drop-need columns: 84.05 (+6.45 [+2.75, +9.70]). Without both: 85.80 (+8.20 [+4.80, +11.29]). Reading: this fixed policy leans mostly on the drop needs, then on the speed. Zeroing is off its training distribution, so the losses show how much it relies on each input, not what a policy trained without it would score; four incidents.
+
+#### Learned effect of water (D-98, 2026-11-25)
+
+`runs/learned-hold-20261125` (criterion written first). From 2,784 flights over the 928 training scenarios (three rules), 751,879 rows of a cell bordering the fire; label, whether it burned by the end. Held-out incidents (5 of 29, 120,297 rows): log loss 0.204 (accuracy 0.912) against 0.248 (0.889) without the drop count and 0.571 (0.763) for a constant. Predicted risk falls with drops at equal brightness: for dim fire (byte under 150) 0.06, 0.002, 0, 0 for 0 to 3 drops; 150–200: 0.28, 0.12, 0.06, 0.02; over 200: 0.66, 0.51, 0.40, 0.23. The rows with one to three drops come from cells the rules chose to water, so the effect is not causal by design.
+
+| Rule, mean burned ha | All 1,056 | Development (928) | Selection (128) |
+|---|---|---|---|
+| Learned-water rule | 52.05 | 48.27 | 79.45 |
+| `blind_hold_aware_heuristic` | 52.70 | 49.01 | 79.52 |
+| `hold_aware_heuristic` (knows the limits) | 51.95 | 48.06 | 80.10 |
+| `heuristic` | 56.02 | 51.81 | 86.59 |
+
+Learned rule minus blind: −0.66 [−1.99, +0.75]; minus the privileged rule: +0.10 [−0.95, +1.21] (all). Reading: a tie with both. The policy with these inputs (`runs/geographic-learned-water-20261125`) had not been trained when this was written. The run with the target features alone (`runs/geographic-target-features-20261125`) reached 83.50 ha on selection (best, update 175) and was stopped at update 206 by the owner or the app.
+
+Diagnosis of the learned-water run at update 100 (`runs/learned-water-diagnosis-20261125`, 116 development training scenarios, unless stated): the network drops on cells that already have water in 46 % of its drops (the rule's choice: 17 %), and in 36 % of them the cell is already predicted safe (risk below 0.1). Its policy is spread (entropy 2.03 nats, top probability 0.36). It loses 3.4 ha to the rule on average, almost all of it in cluster C5 (+10.0 ha, 35 scenarios). In branches with the network's own continuation (48 fires, 288 decisions, two random seeds) the front target with the largest predicted gain returns +0.51 ha more than a random one [+0.06, +0.97] and +0.44 more than the network's choice [+0.10, +0.85]; a redundant drop is worth 0.56 ha less [+0.11, +1.17]; 54 % of pairs tie and the standard deviation of a pair is 3.4 ha. With the rule as continuation only the redundant drop is clearly worse (+0.55 [+0.16, +1.02]). Reading: the signal for single decisions exists but is small next to the spread, so the gain has to be read from the input for the policy to find it, and the columns ahead of the front were wrong (D-99). Checks: branches are on training scenarios, so the analysis fits nothing on unseen data. Corrections made while doing it: the first version of this analysis ranked the actions with the columns of D-98 ahead of the front, where they do not apply, and its numbers are superseded.
+
+Learned-water run, seed 42, complete (`runs/geographic-learned-water-20261125`, 250 updates, 128 selection scenarios, D-85 recipe): best selection score 80.76 ha (update 225), last 81.45; curve 84.07, 83.22, 83.16, 82.10, 83.39, 81.25, 81.11, 81.56, 80.76, 81.45 every 25 updates. References on the same scenarios: `blind_hold_aware_heuristic` 79.52, learned-water rule 79.45, `hold_aware_heuristic` (privileged) 80.10, D-85 seed 42 (formula) 77.59, `heuristic` 86.59, the earlier runs without formula 83.50 and 84.02. Reading: better than any earlier policy without formula or limit, 1.2 to 1.3 ha behind the fair rules, within 0.7 ha of the privileged one; the selection incidents also choose the weights, so the policy figure is optimistic, and there are only four of them; one seed. The risk features of this run were misleading ahead of the front (D-99); the corrected run is `runs/geographic-learned-water-b-20261125`. The 312 unseen scenarios have not been flown.
+
+#### Learned map of which cells burn (D-100, 2026-11-25)
+
+`runs/learned-burn-20261125` (criterion written first). Network of 25 observed grid channels, dilated convolutions, one probability per cell; 14,848 grids from four rules on the 928 training scenarios, checked on 5 held-out incidents. Overall AUC 0.992 and log loss 0.032 against 0.107 for the share burned by time left, but nearly all distant cells never burn, so the useful figures are by distance to the reached cells (one grid in three, held-out incidents): 0–2 cells, AUC 0.947, log loss 0.250 (a base of distance and wind, fitted on those same cells, 0.726 and 0.504); 2–4, 0.971 and 0.113 (0.798, 0.241); 4–8, 0.985 and 0.045 (0.861, 0.100); 8–16, 0.996 and 0.007 (0.951, 0.022). It reacts to water: cells next to the fire, 0.31 without extra drops and 0.06 with three. Limits: the outcomes include later drops of the rules that flew, so it is the risk under such flying, not of the cell alone; perfect observation; training stopped early, with the best validation loss at the second epoch, so the fit is short. Used in `runs/geographic-learned-burn-20261125`, not trained when this was written.
+
+Corrected-features run (`runs/geographic-learned-water-b-20261125`): selection 84.12, 83.52 and 81.38 ha at updates 25, 50 and 75 (the same recipe with the misleading features: 84.07, 83.22 and 83.16; D-85: 84.34, 82.44, 80.92), stopped at update 85 by the owner to train with the burn map (D-100); it had not finished, so it is not a result.
+
+#### Burn-map policy against the fair rule (2026-11-26)
+
+`runs/geographic-learned-burn-20261125` (D-99 features, learned speed, learned water, learned burn map; D-85 recipe, seed 42, 250 updates). Selection curve every 25 updates: 83.41, 82.16, 82.59, 81.41, 81.41, 80.98, 82.12, 79.87, 81.00, 79.97 ha; weights of update 200 kept. Flown deterministically on the 128 selection and the 928 training scenarios (`runs/fair-rule-comparison-20261126`, criterion written before flying):
+
+| Mean burned ha | Selection (128) | Training scenarios (928) |
+|---|---|---|
+| Burn-map policy | 79.87 | 47.88 |
+| `blind_hold_aware_heuristic` (fair rule) | 79.52 | 49.01 |
+| Learned-water rule | 79.45 | 48.27 |
+| `hold_aware_heuristic` (knows the limits) | 80.10 | 48.06 |
+| D-85, mean of three seeds (formula) | 78.01 | 47.91 |
+| `heuristic` | 86.59 | 51.81 |
+
+Policy minus fair rule: selection +0.35 [−0.13, +1.08] (better/equal/worse 62/38/28); training scenarios −1.13 [−1.95, −0.28] (418/400/110). Reading: it beats the fair rule on the scenarios it trained on and ties it on the selection incidents, so by the criterion it does not beat it yet. Both sets are optimistic for the policy; nothing here is unseen.
+
+Continuation of the burn-map policy (`runs/geographic-continue-a-20261126`): its selected weights resumed with the linear action path (D-101) and the entropy bonus lowered to 0.002 → 0.0005. Selection 79.71, 80.45, 80.41 and 81.56 ha at updates 25–100; stopped at update 108. Its best weights (update 25), flown: selection 79.71 against 79.52 for the fair rule (+0.20 [−1.14, +1.22]), training scenarios 48.33 against 49.01 (−0.68 [−1.75, +0.36]), so no better than the weights it started from (79.87 and 47.88). A first launch ignored `--resume` and was discarded (`v1.wrong-start.log`).
+
+Learned arrival map (D-102, `runs/learned-arrival-20261126`, criterion written first): 14,848 grids from four rules on the 928 training scenarios; held-out incidents, cells within three of the fire: reached within 1 minute 0.5 % (AUC 0.980), 3 minutes 1.7 % (0.985), 10 minutes 6.4 % (0.980), 30 minutes 14.3 % (0.962), by the end 17.9 % (0.952). A first fit labelled every cell as reached by the end and was redone. Run with it: `runs/geographic-arrival-b-20261126`.
+
+
+Arrival-map run B (`runs/geographic-arrival-b-20261126`: learned speed, learned water, learned arrival map with the two arrival target features, linear action path; D-85 recipe from scratch, seed 42, 250 updates). Selection curve: 83.84, 82.58, 80.64, 81.02, 81.71, 81.11, 79.47, 82.16, 80.08, 81.76 ha; weights of update 175 kept. Flown: selection 79.47 against 79.52 for the fair rule (−0.05 [−2.42, +2.77], 66/37/25); training scenarios 47.74 against 49.01 (−1.27 [−2.03, −0.53], 430/399/99). Same reading as the burn-map run: better on the scenarios it trained on, tied on selection.
+
+Where the selection tie comes from: against the fair rule, B gains 104 ha in total on EMSR632 and 33 on EMSR719 and loses 129 on EMSR892 and 2 on EMSR457; every loss larger than 10 ha is in cluster C5 (largest: emsr892-05-mf02, 2 ha for the rule and 57 for B; emsr892-00-mf00, 236 and 296). Cluster C2 gains 44 ha, C4 ties. With four incidents a single large fire moves the mean by half a hectare, which is the size of the gap.
+
+Ensemble of policies (`ensemble.py` in `runs/fair-rule-comparison-20261126`, members fixed in its criterion before flying: at each decision each member sees its own inputs and the action of highest mean probability is taken; no rule, no simulator). Burn-map policy plus B: selection 79.84 (+0.32 [−1.45, +2.44]), training scenarios 47.60 (−1.41 [−2.16, −0.59]). It does not help on selection. A one-member ensemble reproduced the single policy exactly.
+
+Run C, the same recipe with seed 43 (`runs/geographic-arrival-c-20261126`): selection curve 84.43, 81.30, 81.54, 79.68, 79.59, 78.74, 79.83, 79.99, 80.06, 81.17 ha; weights of update 150 kept. Flown: selection 78.74 against 79.52 (−0.77 [−1.55, +0.16], 67/37/24); training scenarios 47.99 against 49.01 (−1.02 [−1.81, −0.17], 425/393/110). Three-member ensemble (burn map, B, C; the one the criterion counts): selection 79.16 (−0.35 [−1.72, +1.02], 64/41/23), training scenarios 47.42 (−1.59 [−2.37, −0.73], 432/407/89).
+
+Reading of the three policies without the formula (burn map, B, C) and their ensemble: all four are better than the fair rule on the 928 scenarios they trained on, by 1.0 to 1.6 ha, with intervals that exclude zero; on the 128 selection scenarios the means go from +0.35 to −0.77 ha and every interval includes zero. The selection figures are optimistic because those scenarios also chose the weights. So the learned policy is at least level with the fair rule and ahead of it where it trained, but it has not been shown to beat it on scenarios it did not train on. The 312 unseen scenarios have not been flown. Run D, seed 44 (`runs/geographic-arrival-d-20261126`, started after the ensemble criterion, so not a member): curve 84.27, 84.62, 80.12, 80.02, 82.30, 80.55, 80.62, 80.39, 81.46, 81.59 ha; weights of update 100 kept. Flown: selection 80.02 (+0.51 [−0.48, +1.50], 52/37/39), training scenarios 48.42 (−0.58 [−1.60, +0.44], 343/409/176), so this seed does not beat the rule even where it trained. Mean of the three seeds of the arrival recipe: selection 79.41, training scenarios 48.05, against 79.52 and 49.01 for the fair rule.
+
+Where the ensemble wins and loses against the fair rule (`why_lose.py`, `ens_vs_fair_table.csv` in `runs/fair-rule-comparison-20261126`; 1,056 selection and training scenarios). Against the rule it is better by more than 5 ha in 167 fires (−1,879 ha in total), worse by more than 5 in 47 (+1,023 ha), within 5 ha in 842. Among the 461 fires that grow by more than 20 ha without aircraft, the losses concentrate in fast and steep fires: spread rate over 16 m/min and slope over 25 %, losses in 25 % of 97 fires and wins in 20 % (mean +3.0 ha); in the other three combinations losses are 4–13 % and the mean is −3.1 to −4.0 ha. Losses rise with spread rate (0 % below 8 m/min, 20 % above 20), with dryness (dead moisture under 4 %: 17 %; over 6 %: none) and with size without aircraft (over 200 ha: 22 %). Drop by drop on the 40 largest losses and the 40 largest wins (same number of drops for both, first drop at 0.4 min): in the losses 42 % of the cells the ensemble waters burn later anyway (rule 30 %); in the wins 32 % for the ensemble and 33 % for the rule, but the ensemble repeats drops on the same cell (26 % of its drops, rule none) and the rule waters more cells that are lost. The largest losses are fires the rule holds small for the whole hour (2 ha; 10 ha) and the ensemble also holds for 20–30 minutes before one front escapes (58 ha; 71 ha).
+
+Run with more fast, steep training fires (D-103, `runs/geographic-hard-fires-20261126`, criterion written first): the recipe of B, seed 42, with those 75 fires drawn three times as often. Selection curve: 84.30, 82.66, 81.95, 82.81, 80.91, 81.02, 81.61, 80.94, 80.17, 79.67 ha; weights of update 250 kept. Flown: selection 79.67 against 79.52 for the fair rule (+0.16 [−1.28, +1.59], 61/42/25); training scenarios 48.12 against 49.01 (−0.89 [−1.88, +0.08], 421/402/105). On the 75 fast, steep training fires it is +5.17 ha against the rule (22 losses and 13 wins over 5 ha; B: +5.96, 24 and 8) and on the other 853 −1.42 (B: −1.91); on selection, fast-steep −2.86 (B −3.05) and the rest +0.78 (B +0.58). Reading: negative. Three times the practice on those fires barely moves them (0.8 ha, inside the spread between seeds) and costs about as much on the rest, so the gap is not a lack of episodes of that kind. One seed.
+
+The run copied the working package instead of B's frozen code, which had the automatic holdout report switched off, so at the end it flew its selected weights on the 288 EMSR837 scenarios and printed policy 39.80 ha (`heuristic` 41.76, `hold_aware_heuristic` 38.70, no intervention 47.34; the fair rule was not in that report). This was not decided by the owner; the figure was not used for any choice, and nothing else of the unseen incidents was flown. The other differences between the two code copies are speedups that keep results identical (memoised slots and candidate cells, a speed cache filled before forking).
+
+Why fronts escape (`reach.py`, `escape.py` in `runs/fair-rule-comparison-20261126`; no training). The network chooses, per front, among four cells (head, two flanks, rear, by the observed wind) and three distances; the fair rule chooses any candidate cell. Along the rule's own flights (19,138 drops, 1,056 scenarios) the network could have made 80 % of the rule's drops; 96 % in the first 15 minutes, while fires are small, and fewer later as fronts grow: in the fast, steep fires 52 % (42 candidate cells per decision against about 10 the network can address), in the fires the ensemble loses by more than 5 ha 42 % after 15 minutes, in those it wins 53 %. Never more than four fronts, so the slot limit does not bind. In the 20 largest losses, the first cell that burns under the ensemble and never under the rule: in every case candidate cells next to it existed in the three decisions before, in 18 the network could aim there, in 12 it did and the rule would have in 16. In the four largest, the first decision decides it: at the start every candidate cell is addressable, and the ensemble splits between the rule's cell and a neighbour (emsr704-00-mf02: 0.47 against 0.51; emsr704-02-mf01: 0.26 against 0.70; emsr900_aoi01-05-mf03: 0.19 against 0.57 for a front 1 km farther). The two cells have the same bordering brightness; the rule's is the more downwind one, or the nearer one when tied. The network reaches the rule's cell at its next drop about six minutes later, just after the front has passed it (escape at 5.9–6.0 minutes). Across those 20 fires, 18 % of the ensemble's drops land on a cell already watered while an unwatered candidate exists (the rule never does), and it never drops ahead of the front (distances 1 and 2 unused). Reading: in small fast fires the losses are an early choice between neighbouring cells that the network has not learned, not a cell it could not reach; in large fires the fixed four cells per front leave most of the front out of reach.
+
+Any-cell frontier actions (D-104, `runs/geographic-frontier-20261126`, criterion written first): the recipe of B, seed 42, with one action per candidate cell instead of four per front. Selection curve every 25 updates: 80.24, 80.95, 78.52, 80.94, 79.20, 79.88, 77.85, 78.15, 77.98, 77.45 ha (mean of the ten 79.12; B 81.33); weights of update 250 kept, the last one. Flown deterministically:
+
+| Mean burned ha | Selection (128) | Training scenarios (928) |
+|---|---|---|
+| Frontier policy (D-104) | 77.45 | 47.03 |
+| `blind_hold_aware_heuristic` (fair rule) | 79.52 | 49.01 |
+| Learned-water rule | 79.45 | 48.27 |
+| `hold_aware_heuristic` (knows the limits) | 80.10 | 48.06 |
+| D-85, mean of three seeds (formula) | 78.01 | 47.91 |
+| B (four cells per front, seed 42) | 79.47 | 47.74 |
+
+Policy minus fair rule: selection −2.06 [−3.93, −0.70] (better/equal/worse 75/38/15), training scenarios −1.98 [−2.81, −1.16] (454/402/72); minus the learned-water rule −2.00 [−4.61, −0.61] and −1.24 [−2.59, −0.24]. Fast, steep group against the fair rule: training +1.64 ha (14 losses, 20 wins over 5 ha; B +5.96, 24 and 8), selection −4.32 (B −3.05); the other fires −2.30 on training (B −1.91) and −1.59 on selection (B +0.58). Reading: the first policy without the formula that beats the fair rule on both sets with intervals that exclude zero, and it also has lower means than the rule that knows the limits and than D-85 with the formula. Caveats: one seed; the selection incidents (four) also chose the weights, although the kept weights are the last ones; nothing here is unseen (the holdout report is off in this run's code copy and EMSR837/EMSR590 were not flown).

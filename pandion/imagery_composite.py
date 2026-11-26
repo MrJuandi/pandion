@@ -36,6 +36,9 @@ THERMAL_BURNED_PEAK = 0.7
 THERMAL_COOLING_S = 900.0
 THERMAL_HALO_PEAK = 0.5
 THERMAL_HALO_LENGTH_M = 75.0
+# With the measured brightness (D-94, D-96) burned ground and halo are compressed to this level, so a burning
+# cell (76-255 of 255) is clearly apart from ground that is not burning and its own range is wide.
+THERMAL_GROUND_MAX = 0.2
 
 
 def _bilinear_upsample(grid: np.ndarray, px_per_cell: int) -> np.ndarray:
@@ -52,23 +55,25 @@ def _bilinear_upsample(grid: np.ndarray, px_per_cell: int) -> np.ndarray:
 
 
 def thermal_view(observation: dict, px_per_cell: int, cell_size_m: float,
-                 masks: dict[str, np.ndarray] | None = None) -> np.ndarray:
+                 masks: dict[str, np.ndarray] | None = None, measured: bool = False,
+                 state_key: str = "fire_state") -> np.ndarray:
     """Float32 [rows*px, cols*px] thermal band in [0, 1], row 0 south.
 
-    Burning cells are 1. Burned cells start at 0.7 and cool as
+    Burning cells are 1, or with ``measured`` show the sensor's ``thermal_byte`` / 255 and burned ground and halo
+    are scaled below 0.2 (D-94, D-96). Burned cells start at 0.7 and cool as
     exp(-(t - arrival) / 900 s). Around burning cells radiant heat adds
     0.5 * exp(-d / 75 m), d being the distance to the nearest burning cell
     centre. Cell values are resampled bilinearly and burning cells are then
     drawn as sharp full-intensity blocks. Uses only the controller observation.
     """
     if masks is None:
-        masks = state_masks(observation)
+        masks = state_masks(observation, state_key)
     rows, cols = masks["burning"].shape
     now = float(observation.get("time_s", 0.0))
     field = np.zeros((rows, cols), dtype=np.float64)
     for r, line in enumerate(observation["fire"]["cells"]):
         for c, cell in enumerate(line):
-            if cell["fire_state"] == "burned" and cell.get("arrival_time_s") is not None:
+            if cell[state_key] == "burned" and cell.get("arrival_time_s") is not None:
                 age = max(now - float(cell["arrival_time_s"]), 0.0)
                 field[r, c] = THERMAL_BURNED_PEAK * np.exp(-age / THERMAL_COOLING_S)
     burning = np.argwhere(masks["burning"])
@@ -81,8 +86,17 @@ def thermal_view(observation: dict, px_per_cell: int, cell_size_m: float,
             nearest = np.minimum(nearest, d.min(axis=1))
         halo = THERMAL_HALO_PEAK * np.exp(-nearest.reshape(rows, cols) * cell_size_m / THERMAL_HALO_LENGTH_M)
         field = np.maximum(field, halo)
+    if measured:
+        field *= THERMAL_GROUND_MAX / THERMAL_BURNED_PEAK  # burned ground and halo stay well under any burning cell (D-96)
     image = _bilinear_upsample(field, px_per_cell)
-    image[_upsample(masks["burning"], px_per_cell)] = THERMAL_BURNING
+    if not measured:
+        image[_upsample(masks["burning"], px_per_cell)] = THERMAL_BURNING
+    else:
+        heat = np.zeros((rows, cols))
+        for r, c in burning:
+            heat[r, c] = float(observation["fire"]["cells"][r][c]["thermal_byte"]) / 255.0
+        mask = _upsample(masks["burning"], px_per_cell)
+        image[mask] = np.repeat(np.repeat(heat, px_per_cell, 0), px_per_cell, 1)[mask]
     return np.clip(image, 0.0, 1.0).astype(np.float32)
 
 
@@ -96,8 +110,10 @@ def _blend(image: np.ndarray, mask: np.ndarray, rgb: tuple[int, int, int], alpha
         image[mask] = (1.0 - alpha) * image[mask] + alpha * colour
 
 
-def state_masks(observation: dict) -> dict[str, np.ndarray]:
+def state_masks(observation: dict, state_key: str = "fire_state") -> dict[str, np.ndarray]:
     """Boolean [rows, cols] masks for burning, burned and treated cells.
+
+    ``state_key`` is ``fire_state`` (D-67) or ``visible_state``, which does not depend on water (D-95).
 
     Requires the real-time observation (``fire_state`` per cell); delayed
     observations have no burning/burned distinction and are rejected.
@@ -110,8 +126,8 @@ def state_masks(observation: dict) -> dict[str, np.ndarray]:
         for c, cell in enumerate(line):
             if not isinstance(cell, dict) or "fire_state" not in cell:
                 raise ValueError("composite requires real-time observations with fire_state per cell")
-            burning[r, c] = cell["fire_state"] == "burning"
-            burned[r, c] = cell["fire_state"] == "burned"
+            burning[r, c] = cell[state_key] == "burning"
+            burned[r, c] = cell[state_key] == "burned"
     treated = np.zeros((rows, cols), dtype=bool)
     for r, c in observation.get("known_treated_cells", []):
         treated[r, c] = True

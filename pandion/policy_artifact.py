@@ -44,7 +44,7 @@ def inference_config(report: dict) -> dict:
     input_mode = report.get("input_mode", "legacy")
     action_mode = report.get("action_mode", "tactical")
     fleet_size = report.get("fleet_size", 1)
-    if input_mode not in ("legacy", "image", "cells") or action_mode not in ("tactical", "spatial", "parametric"):
+    if input_mode not in ("legacy", "image", "cells") or action_mode not in ("tactical", "spatial", "parametric", "frontier"):
         raise ValueError("unsupported policy input/action configuration")
     if isinstance(fleet_size, bool) or not isinstance(fleet_size, int) or fleet_size < 1:
         raise ValueError("invalid policy fleet_size")
@@ -62,6 +62,13 @@ def inference_config(report: dict) -> dict:
         inference["drop_distances"] = list(report["drop_distances"])
     if report.get("action_features"):
         inference["action_features"] = True
+    if report.get("action_skip"):
+        inference["action_skip"] = True
+    if report.get("measured_intensity"):
+        inference["measured_intensity"] = True
+    for key in ("learned_speed", "learned_hold", "learned_burn"):
+        if report.get(key):
+            inference[key] = report[key]
     return inference
 
 
@@ -156,7 +163,11 @@ def load_policy_artifact(checkpoint: Path, report_path: Path, scenarios: list[di
                                ("input_mode", "action_mode", "recurrent", "include_ros", "include_thermal", "slot_features")},
                                imagery_dir=image_path,
                                drop_distances=tuple(config.get("drop_distances", (0,))),
-                               action_features=bool(config.get("action_features", False)))
+                               action_features=bool(config.get("action_features", False)),
+                               **({"action_skip": True} if config.get("action_skip") else {}),
+                               measured_intensity=bool(config.get("measured_intensity", False)),
+                               learned_speed=config.get("learned_speed"),
+                               learned_hold=config.get("learned_hold"), learned_burn=config.get("learned_burn"))
     try:
         model.load_state_dict(state)
     except RuntimeError as exc:

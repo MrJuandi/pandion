@@ -19,13 +19,15 @@ Inputs come from ``policy_inputs.GeographicInputTensorizer``:
 5. Parametric mode with ``action_feature_dim`` > 0 adds a per-action term: a small
    MLP over (trunk features at the drop's target cell, per-action features, latent),
    scaled by the action's valid flag. Its output layer is zero-initialised.
+6. Frontier mode (D-104) has no slot head: HOLD/REFILL come from the latent and every candidate
+   cell's logit from that per-target MLP alone, so any cell of any front can be chosen.
 """
 from __future__ import annotations
 
 from typing import Any
 
 from .model import TACTICAL_ACTION_NAMES
-from .parametric_actions import ASPECTS, MAX_SLOTS, num_actions as parametric_actions, validate_distances
+from .parametric_actions import ASPECTS, MAX_FRONTIER, MAX_SLOTS, num_actions as parametric_actions, validate_distances
 
 try:
     import torch
@@ -79,12 +81,15 @@ if HAS_TORCH:
             slot_raw_features: bool = False,
             drop_distances: tuple[int, ...] = (0,),
             action_feature_dim: int = 0,
+            action_skip: bool = False,
         ) -> None:
             super().__init__()
-            if action_mode not in ("tactical", "spatial", "parametric"):
+            if action_mode not in ("tactical", "spatial", "parametric", "frontier"):
                 raise ValueError(f"Unknown action_mode: {action_mode}")
-            if action_feature_dim and action_mode != "parametric":
-                raise ValueError("action features belong to parametric actions")
+            if action_feature_dim and action_mode not in ("parametric", "frontier"):
+                raise ValueError("action features belong to parametric or frontier actions")
+            if action_mode == "frontier" and not action_feature_dim:
+                raise ValueError("frontier actions are scored from their target features (action_feature_dim > 0)")
             self.config = {k: v for k, v in locals().items() if k not in ("self", "__class__")}
             self.action_mode = action_mode
             self.grid_rows, self.grid_cols = grid_rows, grid_cols
@@ -95,7 +100,8 @@ if HAS_TORCH:
             # D-79: parametric drops may aim several cells beyond the front.
             self.drop_distances = validate_distances(drop_distances)
             self.action_dim = {"tactical": len(TACTICAL_ACTION_NAMES),
-                               "parametric": parametric_actions(self.drop_distances)}.get(
+                               "parametric": parametric_actions(self.drop_distances),
+                               "frontier": 2 + MAX_FRONTIER}.get(
                 action_mode, 2 + grid_rows * grid_cols)
             # Parametric mode: the last MAX_SLOTS cell channels are focus-slot masks.
             self.slot_channels = MAX_SLOTS if action_mode == "parametric" else 0
@@ -126,6 +132,20 @@ if HAS_TORCH:
             self.critic_head = nn.Linear(head_dim, 1)
             if action_mode == "tactical":
                 self.actor_head = nn.Linear(head_dim, self.action_dim)
+            elif action_mode == "frontier":
+                # D-104: HOLD/REFILL from the latent; each candidate cell from the per-target head.
+                # The output layer is zero at start, so every valid action starts equally likely.
+                self.global_actor_head = nn.Linear(head_dim, 2)
+                self.target_actor_head = nn.Sequential(
+                    nn.Linear(width + action_feature_dim + head_dim, 64), nn.LeakyReLU(0.01), nn.Linear(64, 1))
+                nn.init.zeros_(self.target_actor_head[-1].weight)
+                nn.init.zeros_(self.target_actor_head[-1].bias)
+                nn.init.zeros_(self.global_actor_head.weight)
+                nn.init.zeros_(self.global_actor_head.bias)
+                if action_skip:
+                    self.target_skip = nn.Linear(action_feature_dim, 1)
+                    nn.init.zeros_(self.target_skip.weight)
+                    nn.init.zeros_(self.target_skip.bias)
             elif action_mode == "parametric":
                 self.global_actor_head = nn.Linear(head_dim, 2)
                 extra = (cell_channels + 1) if slot_raw_features else 0
@@ -136,6 +156,11 @@ if HAS_TORCH:
                         nn.Linear(width + action_feature_dim + head_dim, 64), nn.LeakyReLU(0.01), nn.Linear(64, 1))
                     nn.init.zeros_(self.target_actor_head[-1].weight)
                     nn.init.zeros_(self.target_actor_head[-1].bias)
+                    if action_skip:
+                        # D-101: a linear path from the action features straight to the logit, zero at start.
+                        self.target_skip = nn.Linear(action_feature_dim, 1)
+                        nn.init.zeros_(self.target_skip.weight)
+                        nn.init.zeros_(self.target_skip.bias)
             else:
                 self.global_actor_head = nn.Linear(head_dim, 2)
                 self.cell_condition = nn.Linear(head_dim, width)
@@ -200,6 +225,8 @@ if HAS_TORCH:
             values = self.critic_head(h).squeeze(-1)
             if self.action_mode == "tactical":
                 return self.actor_head(h), values
+            if self.action_mode == "frontier":
+                return torch.cat([self.global_actor_head(h), self._target_logits(features, h)], dim=-1), values
             if self.action_mode == "parametric":
                 # Focus k's logits come from cell features pooled over its mask, plus the latent.
                 masks = self._slot_masks
@@ -213,17 +240,25 @@ if HAS_TORCH:
                 slot_in = torch.cat(parts, dim=-1)
                 slot_logits = self.slot_actor_head(slot_in).flatten(1)
                 if self.action_feature_dim:
-                    actions = self._actions                                   # [B, A, 1 + F]
-                    feats = actions[..., 1:]
-                    flat = features.flatten(2)                                # [B, C, H*W]
-                    index = actions[..., 0].long().clamp(0, flat.shape[-1] - 1)
-                    gathered = torch.gather(flat, 2, index[:, None, :].expand(-1, flat.shape[1], -1)).transpose(1, 2)
-                    target_in = torch.cat([gathered, feats, h[:, None, :].expand(-1, feats.shape[1], -1)], dim=-1)
-                    slot_logits = slot_logits + self.target_actor_head(target_in).squeeze(-1) * feats[..., 0]
+                    slot_logits = slot_logits + self._target_logits(features, h)
                 return torch.cat([self.global_actor_head(h), slot_logits], dim=-1), values
             conditioned = F.leaky_relu(features + self.cell_condition(h)[:, :, None, None], 0.01)
             cell_logits = self.cell_actor_head(conditioned).flatten(1)
             return torch.cat([self.global_actor_head(h), cell_logits], dim=-1), values
+
+        def _target_logits(self, features: torch.Tensor, h: torch.Tensor) -> torch.Tensor:
+            """Per-action term from (trunk features at the target cell, action features, latent),
+            times the action's valid flag (D-82, D-101)."""
+            actions = self._actions                                   # [B, A, 1 + F]
+            feats = actions[..., 1:]
+            flat = features.flatten(2)                                # [B, C, H*W]
+            index = actions[..., 0].long().clamp(0, flat.shape[-1] - 1)
+            gathered = torch.gather(flat, 2, index[:, None, :].expand(-1, flat.shape[1], -1)).transpose(1, 2)
+            target_in = torch.cat([gathered, feats, h[:, None, :].expand(-1, feats.shape[1], -1)], dim=-1)
+            logits = self.target_actor_head(target_in).squeeze(-1) * feats[..., 0]
+            if hasattr(self, "target_skip"):
+                logits = logits + self.target_skip(feats).squeeze(-1) * feats[..., 0]
+            return logits
 
         def forward(self, *inputs: torch.Tensor,
                     state: tuple[torch.Tensor, torch.Tensor] | None = None) -> tuple:

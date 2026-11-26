@@ -132,7 +132,7 @@ def policy_replay(model, scenario: dict) -> dict:
     replays = []
     rollout_geographic(model, scenario, deterministic=True, inference_only=True, replay_out=replays,
                        **{key: config[key] for key in ("device", "input_mode", "imagery_dir",
-                          "include_ros", "include_thermal", "skip_forced") if key in config})
+                          "include_ros", "include_thermal", "measured_intensity", "learned_speed", "learned_hold", "learned_burn", "skip_forced") if key in config})
     replay = replays[0]
     replay["policy"] = "Geographic PPO"
     return replay
