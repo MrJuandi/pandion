@@ -1321,30 +1321,46 @@ def main() -> None:
     if args.eval:
         if not args.checkpoint or not args.checkpoint.exists():
             raise FileNotFoundError(f"Checkpoint file required for --eval: {args.checkpoint}")
-        target_scenarios = with_fleet(load_geographic_split(args.split, args.scenarios_dir, synthetic=args.synthetic),
-                                      args.fleet_size)
-        if args.eval_scenarios is not None:
-            target_scenarios = target_scenarios[:args.eval_scenarios]
-
+        config = {**model_options, "recurrent": recurrent, "fleet_size": args.fleet_size,
+                  "skip_forced": args.skip_forced}
+        artifact_info = None
         if args.training_report:
             from .policy_artifact import load_policy_artifact
             model, artifact_info = load_policy_artifact(args.checkpoint, args.training_report,
                 load_geographic_split("development", args.scenarios_dir, synthetic=args.synthetic),
                 imagery_dir=args.imagery_dir, device=str(device), skip_forced=True if args.skip_forced else None)
             config = model._pandion_inference
-            target_scenarios = with_fleet(load_geographic_split(args.split, args.scenarios_dir, synthetic=args.synthetic), config["fleet_size"])
-            if args.eval_scenarios is not None:
-                target_scenarios = target_scenarios[:args.eval_scenarios]
-            rollout_options = {key: config[key] for key in ("input_mode", "imagery_dir", "include_ros", "include_thermal", "measured_intensity", "learned_speed", "learned_hold", "learned_burn", "skip_forced") if key in config}
-            config_report.update({key: config[key] for key in ("input_mode", "action_mode", "recurrent", "include_ros", "include_thermal", "fleet_size", "slot_features", "skip_forced")})
-            config_report["imagery_dir"] = str(config["imagery_dir"]) if config["imagery_dir"] else None
-            config_report["action_features"] = bool(config.get("action_features", False))
-            config_report["device"] = str(device)
-            config_report["training_artifact"] = artifact_info
-        else:
+        target_scenarios = with_fleet(load_geographic_split(args.split, args.scenarios_dir, synthetic=args.synthetic),
+                                      config["fleet_size"])
+        if args.eval_scenarios is not None:
+            target_scenarios = target_scenarios[:args.eval_scenarios]
+        if not args.training_report:
             model = build_policy_model(target_scenarios[0], recurrent=recurrent, **model_options).to(device)
             model.load_state_dict(torch.load(args.checkpoint, weights_only=True, map_location=device))
             model.eval()
+
+        input_mode = config["input_mode"]
+        rollout_options = {
+            "input_mode": input_mode,
+            "imagery_dir": config["imagery_dir"] if input_mode == "image" else None,
+            "include_ros": input_mode != "legacy" and config["include_ros"],
+            "include_thermal": input_mode == "image" and config["include_thermal"],
+            "measured_intensity": input_mode != "legacy" and config.get("measured_intensity", False),
+            **{key: config.get(key) if input_mode != "legacy" else None
+               for key in ("learned_speed", "learned_hold", "learned_burn")},
+            "skip_forced": config["skip_forced"],
+        }
+        evaluation_config = {
+            **{key: str(value) if isinstance(value, Path) else value for key, value in rollout_options.items()},
+            "device": str(device), "recurrent": model.recurrent, "fleet_size": config["fleet_size"],
+            "action_mode": getattr(model, "action_mode", "tactical"),
+            "drop_distances": list(getattr(model, "drop_distances", (0,))),
+            "slot_features": getattr(model, "slot_raw_features", False),
+            "action_features": getattr(model, "action_feature_dim", 0) > 0,
+            "action_skip": hasattr(model, "target_skip"),
+        }
+        if artifact_info is not None:
+            evaluation_config["training_artifact"] = artifact_info
 
         print(f"Evaluating {args.checkpoint} against baselines on split '{args.split}' ({len(target_scenarios)} scenarios)...")
         eval_reports = []
@@ -1380,7 +1396,7 @@ def main() -> None:
 
         if args.output:
             args.output.parent.mkdir(parents=True, exist_ok=True)
-            write_report({"schema_version": EVAL_SCHEMA_VERSION, "recurrent": recurrent, **config_report,
+            write_report({"schema_version": EVAL_SCHEMA_VERSION, "seed": args.seed, **evaluation_config,
                           "dataset": _dataset_report(args.scenarios_dir, {args.split: target_scenarios}),
                           "reports": eval_reports}, args.output, args.checkpoint, attach_sidecar=False)
             print(f"Wrote evaluation report -> {args.output}")
