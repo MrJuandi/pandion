@@ -513,7 +513,10 @@ def geographic_episode(
             "observed_at_s": obs_t,
             "available_at_s": avail_t,
             "delivered_at_s": avail_t,
-            "coverage_cells": [[r, c] for r in range(rows) for c in range(cols)],
+            # Explicit coverage is kept (scheduled mode); absent or "all" means the whole grid.
+            "coverage_cells": ([[int(r), int(c)] for r, c in item["coverage_cells"]]
+                               if item.get("coverage_cells") is not None and item.get("coverage") != "all"
+                               else [[r, c] for r in range(rows) for c in range(cols)]),
         })
     schedule = sorted(schedule, key=lambda x: x["observed_at_s"])
 
@@ -796,6 +799,9 @@ def geographic_episode(
                                        **({"aircraft_index": ego} if fleet_size > 1 else {})})
 
         elif order_type == "DROP":
+            if aircraft_water < capacity_l:
+                # The executor enforces the tank, whatever the caller filtered (one full load per drop).
+                raise ValueError(f"DROP ordered for aircraft {ego} with {aircraft_water} L; a drop needs {capacity_l} L")
             target_x, target_y = order["target_m"]
             dist = hypot(target_x - aircraft_pos[0], target_y - aircraft_pos[1])
             drop_time = decided_at + dist / cruise_speed
