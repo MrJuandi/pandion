@@ -66,7 +66,10 @@ def audit_independence(splits: dict[str, list[dict]]) -> list[str]:
     for split, entries in splits.items():
         for entry in entries:
             tokens = [("scenario", entry.get("scenario_hash")), ("content", entry.get("content_sha256")),
-                      ("incident", entry.get("incident_group")), ("source_product", entry.get("source_product_code"))]
+                      ("incident", entry.get("incident_group")), ("source_zip", entry.get("source_zip_sha256"))]
+            activation, product = entry.get("activation_id"), entry.get("source_product_code")
+            if activation and product:
+                tokens.append(("source_product", f"{activation}|{product}"))
             tokens += [("lineage", v) for v in entry.get("lineage", {}).values() if isinstance(v, str)]
             for kind, value in tokens:
                 if not value:
