@@ -10,7 +10,7 @@ import argparse
 import json
 from pathlib import Path
 from statistics import mean
-from typing import Any
+from typing import Any, Sequence
 
 from .geographic_integrated import run_geographic_integrated
 
