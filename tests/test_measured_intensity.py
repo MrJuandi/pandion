@@ -9,6 +9,7 @@ from pandion.action_features import ObservedFireBehavior
 from pandion.geographic_integrated import NEIGHBORS, run_geographic_integrated, thermal_byte
 from pandion.imagery_composite import thermal_view
 from pandion.learned_spread import cached_head_speed, learned_head_speed
+from pandion.model import HAS_TORCH
 from tests.test_geographic_integrated import growing_fire_scenario, with_weather
 
 
@@ -162,6 +163,7 @@ class LearnedHoldTests(unittest.TestCase):
             self.assertAlmostEqual(float(before[0]), float(after[0]))
 
 
+@unittest.skipUnless(HAS_TORCH, "torch not installed")
 class LearnedBurnTests(unittest.TestCase):
     def test_the_map_is_a_probability_with_reached_and_nonburnable_cells_fixed(self):
         from pandion.learned_burn import NUM_CHANNELS, burn_channels, burn_map, load_net
@@ -187,6 +189,7 @@ class LearnedBurnTests(unittest.TestCase):
         self.assertEqual(float(prob[(x[0] == 0) & (x[24] == 0)].max(initial=0.0)), 0.0)
 
 
+@unittest.skipUnless(HAS_TORCH, "torch not installed")
 class ArrivalTests(unittest.TestCase):
     def test_arrival_outputs_are_ordered_and_feed_two_target_columns(self):
         from pandion.action_features import NUM_TARGET_FEATURES, target_feature_array
@@ -217,6 +220,7 @@ class ArrivalTests(unittest.TestCase):
         self.assertTrue((table[valid, -2] <= table[valid, -1] + 1e-6).all())  # flights here last under ten minutes
 
 
+@unittest.skipUnless(HAS_TORCH, "torch not installed")
 class ActionSkipTests(unittest.TestCase):
     def test_the_linear_path_starts_at_zero_and_loads_onto_a_model_without_it(self):
         import torch
