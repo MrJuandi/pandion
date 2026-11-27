@@ -108,7 +108,7 @@ The project moves from one aircraft to two, and then to heterogeneous resources.
 
 ## Scope and limitations
 
-Pandion is a research environment. Early scenarios will use a mixture of observed and modeled data, with each layer labeled. No model should be used to direct real firefighting operations without independent physical validation, operational review, and appropriate human oversight.
+Pandion is a research environment. Scenarios use a mixture of observed and modeled data, with each layer labeled. The fire model is the conventional surface-fire model (Rothermel spread, Scott & Burgan fuels) used as is. Crown fire, spotting, rekindling after direct attack and independent validation against observed perimeters are outside this project's scope (D-108, D-109). Results compare controllers inside this simulator. No model should be used to direct real firefighting operations without independent physical validation, operational review, and appropriate human oversight.
 
 ## License and citation
 

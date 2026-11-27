@@ -6,7 +6,6 @@ import math
 from pathlib import Path
 import unittest
 
-from pandion.aircraft import CAPACITY_L
 from pandion.integrated import run_integrated
 from pandion.model import ActionMapper, HAS_TORCH, ObservationTensorizer, SpatialActorCritic, TacticalActionMapper, TACTICAL_ACTION_NAMES
 from pandion.policies import candidate_cells
@@ -196,7 +195,6 @@ class ModelTests(unittest.TestCase):
 
     @unittest.skipUnless(HAS_TORCH, "PyTorch required for SpatialActorCritic tests")
     def test_spatial_actor_critic_forward_and_masking(self):
-        import torch
         model = SpatialActorCritic(
             grid_rows=self.rows,
             grid_cols=self.cols,

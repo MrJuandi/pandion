@@ -4,7 +4,7 @@ import random
 import unittest
 
 from pandion.model import HAS_TORCH, ActionMapper
-from pandion.parametric_actions import MAX_FRONTIER, FrontierActionMapper, ParametricActionMapper, frontier_cells
+from pandion.parametric_actions import MAX_FRONTIER, FrontierActionMapper, ParametricActionMapper
 from pandion.policies import candidate_cells
 from tests.test_parametric_actions import BIG, observation
 

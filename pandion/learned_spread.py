@@ -10,7 +10,6 @@ from __future__ import annotations
 from functools import lru_cache
 from hashlib import blake2b
 from pathlib import Path
-from typing import Any
 
 import numpy as np
 

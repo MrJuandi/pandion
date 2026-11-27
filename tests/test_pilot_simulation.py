@@ -9,7 +9,6 @@ from tempfile import TemporaryDirectory
 import sys
 import unittest
 from unittest.mock import patch
-from zipfile import ZipFile
 
 import numpy as np
 

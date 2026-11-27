@@ -11,7 +11,6 @@ This module implements the Phase 0 geographic pilot pipeline:
 from __future__ import annotations
 
 import argparse
-from copy import deepcopy
 import json
 import math
 from pathlib import Path

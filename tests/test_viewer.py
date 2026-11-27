@@ -3,7 +3,24 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from pandion.viewer import build_viewer_html, write_viewer_html
+from pandion.viewer import build_viewer_html, strip_local_paths, write_viewer_html
+
+
+class StripLocalPathsTests(unittest.TestCase):
+    def test_nested_values_paths_and_unchanged_strings(self):
+        original = {
+            "nested": ["/private/tmp/work/data/file.json", r"C:\Users\name\data\run.json",
+                       "D:/Users/name/data/other.json",
+                       "runs/x.json", "plain text", "https://example.org/a/b", 12, True, None],
+        }
+        result = strip_local_paths(original)
+        self.assertEqual(result, {
+            "nested": ["file.json", "run.json", "other.json", "runs/x.json", "plain text",
+                       "https://example.org/a/b", 12, True, None],
+        })
+        self.assertEqual(original["nested"][0], "/private/tmp/work/data/file.json")
+        self.assertIsNot(result, original)
+        self.assertIsNot(result["nested"], original["nested"])
 
 
 class Viewer3DTests(unittest.TestCase):

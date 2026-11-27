@@ -2,6 +2,16 @@
 
 No dates or performance targets are promised. A stage advances when its evidence gate passes.
 
+## Current status (2026-11-27)
+
+- **Scope:** decision research inside a conventional surface-fire simulator (D-109). Independent physical validation (O-18) and rekindling after direct attack (O-20, D-108) are out of scope and kept as future work.
+- **Stage 0:** the data, geodesy, provenance and reproducibility contract is closed for the geographic families. The physical-evidence part of the gate is not pursued under D-109.
+- **Stage 1:** closed for the provisional synthetic simulator (2026-09-29). Superseded in practice by the geographic two-aircraft work below.
+- **Stage 2:** two identical aircraft fly every reported geographic experiment since D-61–D-63. The learned policy beats the downwind heuristic on a held-out activation and ties the hold-aware rule (README, [EVALUATION.md](EVALUATION.md)). The open items are listed under Stage 2.
+- **Stage 3:** not started.
+
+The stage sections below are kept as a chronological record; their entries describe what was done when, not the current state.
+
 ## Stage 0 — reproducible foundation
 
 - Specify the first candidate spread equation and aircraft reference, including their limits, in [PHYSICAL_MODEL_V0.md](PHYSICAL_MODEL_V0.md).
@@ -50,10 +60,10 @@ The geographic landscape/data contract (incident sources, provenance, axes, crop
 
 ## Stage 2 — two aircraft coordination
 
-- Generalize resource roster, order schema, water-source contention, and mission assignment.
-- Implement an assignment heuristic or auction and an independent-controller baseline.
-- Measure duplicate work, response time, utilization, and resource balance.
-- Evaluate variable starting positions, different loads/speeds, and loss of one aircraft.
+- Done: a fleet of identical aircraft (`--fleet-size`, D-62) with an event-driven decision loop, and a rule that no drop may overlap another aircraft's pending drop, applied to every policy (D-63).
+- Done: uncoordinated and coordinated (D-63) heuristic baselines; one central learned controller decides for whichever aircraft is free. Results from D-61 onwards are two-aircraft results.
+- Open: measure duplicate work, response time, utilization and resource balance per aircraft.
+- Open: evaluate variable starting positions, different loads or speeds, and loss of one aircraft.
 
 **Gate:** evidence explains whether joint coordination improves outcomes and when it does not.
 

@@ -2,7 +2,6 @@ from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from math import inf
 import unittest
-from unittest.mock import patch
 
 from pandion.environment import (build_station_environment, delivered_weather,
                                   edge_arrival, equilibrium_moisture, validate_forcing)

@@ -19,7 +19,6 @@ import argparse
 from copy import deepcopy
 from hashlib import sha256
 import json
-import math
 from math import hypot
 from pathlib import Path
 import random
@@ -31,13 +30,11 @@ from .cems_catalog import (
     ACTIVATIONS,
     SCOOPING_SOURCES,
     build_cems_scenario,
-    fetch_cems_package,
     incidents_for_split,
     landcover_filename,
     raw_package_name,
-    universal_clc_to_scott_burgan,
 )
-from .geodesy import epsg_for_utm_zone, wgs84_to_utm
+from .geodesy import epsg_for_utm_zone
 
 FAMILY_SCHEMA_VERSION = "nightjar-geographic-family-0.1"
 

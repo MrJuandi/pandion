@@ -1,6 +1,5 @@
 """Tests for the leave-one-incident-out fold report (D-71)."""
 
-from copy import deepcopy
 import json
 from pathlib import Path
 import tempfile

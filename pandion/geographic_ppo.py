@@ -18,9 +18,8 @@ import random
 import time
 from typing import Any
 
-from .identity import scenario_entry, partition_holdout, content_hash
+from .identity import scenario_entry, partition_holdout
 from .policy_artifact import write_report
-from .aircraft import CAPACITY_L
 from .geographic_benchmark import run_geographic_benchmark
 from .geographic_family import canonical_hash
 from .cems_catalog import ACTIVATIONS, incidents_for_split
@@ -612,7 +611,6 @@ def ppo_update_geographic(
             optimizer.zero_grad()
             group_loss = 0.0
             for index in group:
-                ep = episodes[index]
                 tensors = packed[index]
                 inputs, masks, actions = tensors["inputs"], tensors["mask"], tensors["action"]
                 old_log_probs, returns = tensors["log_prob"], tensors["return"]
