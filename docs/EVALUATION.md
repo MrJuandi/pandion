@@ -1069,3 +1069,14 @@ Free-water network (D-107, `runs/geographic-free-water-20261126`, criterion writ
 | No intervention | 98.02 | 59.27 |
 
 The policy beats every rule on both sets, including the direct-attack rule that knows the hold limits, with intervals that exclude zero. Limits: one seed; selection also chose the weights and the policy trained on the other set, so this is "on development data"; the unseen activations were not flown; the physics is optimistic for direct attack (no rekindling), so the margin is for this simulator only.
+
+Two more seeds of the same recipe (43, 44; run in parallel, `seeds.sh`): selection bests 71.18 and 71.08 ha (updates 225), flown on the same scenarios. Policy minus rule per seed, then for the mean of the three seeds per scenario:
+
+| Seed | Selection − fair rule | Selection − burning-only rule | Training − fair rule | Training − burning-only rule | Training − hold-aware burning-only |
+|---|---|---|---|---|---|
+| 42 | −9.49 [−11.50, −7.48] | −3.47 [−7.38, −0.77] | −5.46 [−7.21, −3.93] | −2.06 [−3.40, −1.04] | −1.07 [−1.75, −0.45] |
+| 43 | −8.74 [−10.29, −7.38] | −2.72 [−6.48, +0.86] | −6.09 [−7.99, −4.49] | −2.70 [−4.03, −1.64] | −1.71 [−2.47, −1.03] |
+| 44 | −8.84 [−9.77, −7.58] | −2.82 [−5.63, −0.12] | −5.39 [−7.10, −3.90] | −1.99 [−3.20, −1.01] | −1.00 [−1.55, −0.35] |
+| Mean of 3 (70.90 / 43.19 ha) | −9.03 [−10.33, −7.68] | −3.00 [−6.52, +0.01] | −5.65 [−7.40, −4.15] | −2.25 [−3.51, −1.27] | −1.26 [−1.82, −0.67] |
+
+Reading: all three seeds beat the fair rule on both sets with wide margins, and beat both burning-only rules on the 928 training scenarios. On the 128 selection scenarios (four incidents) every seed is about 3 ha better than the burning-only rule, but the interval of seed 43 and of the three-seed mean reaches zero, so against that rule the selection win is not established. Against `hold_aware_heuristic` burning-only all intervals exclude zero. Development data only; the unseen activations have not been flown.
