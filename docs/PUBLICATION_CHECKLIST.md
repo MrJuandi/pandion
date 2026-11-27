@@ -15,7 +15,7 @@ The owner will decide when to publish the repository after reviewing it. Git his
 
 - [x] README commands match working code as of 2026-09-27; commands were executed locally. New commands require a fresh check.
 - [x] CI runs the standard-library unit suite on push and pull request. External-data tests skip when their raw source is absent.
-- [ ] Configuration, seeds, source versions, and expected outputs are documented.
+- [x] Configuration, seeds, source versions, and expected outputs are documented for the headline result ([REPRODUCING.md](REPRODUCING.md), 2026-11-27). Publishing its checkpoints and data is still open.
 - [ ] No large generated checkpoints, private data, credentials, caches, or local paths are committed.
 - [ ] Claims in README match reproducible experiment artifacts.
 - [ ] Public issue and contribution templates are added only if maintainers intend to use them.

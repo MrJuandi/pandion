@@ -52,7 +52,7 @@ python3 -m pandion.integrated examples/synthetic_integrated.json --policy heuris
 python3 -m pandion.viewer runs/integrated-heuristic.json --output runs/heuristic-viewer.html
 ```
 
-Open `runs/heuristic-viewer.html` in a browser. Run the tests with `python3 -m unittest discover -s tests -v`.
+Open `runs/heuristic-viewer.html` in a browser. For the geographic and learning paths, install the pinned extras with `python3.12 -m pip install -e ".[standard,rl]"`; [REPRODUCING.md](docs/REPRODUCING.md) rebuilds the results table. Run the tests with `python3 -m unittest discover -s tests -v`.
 
 To see the project page and the bundled 3D replay, run `python3 -m http.server 8000 --bind 127.0.0.1 --directory site` and open `http://127.0.0.1:8000/`. Real-terrain scenarios, training and evaluation are covered in [USAGE.md](docs/USAGE.md).
 
@@ -89,6 +89,7 @@ The project moves from one aircraft to two, and then to heterogeneous resources.
 ## Documentation
 
 - [USAGE.md](docs/USAGE.md) — full command reference: scenario families, training, evaluation, 3D workspace and interface notes.
+- [REPRODUCING.md](docs/REPRODUCING.md) — pinned environment, input hashes and the commands that rebuild the results table from the published checkpoints.
 - [RESEARCH_WORKFLOWS.md](docs/RESEARCH_WORKFLOWS.md) — reproducible scenario seeds, current checkpoint inference, multi-aircraft replay, searchable artifact catalog and incident-group report audits.
 - [ARCHITECTURE.md](docs/ARCHITECTURE.md) — state, observation, actions, reward, policy, and growth to multiple resources.
 - [PHYSICAL_MODEL_V0.md](docs/PHYSICAL_MODEL_V0.md) — sourced surface-fire and CL-415 references, implemented FM1 subset, and remaining validation limits.
