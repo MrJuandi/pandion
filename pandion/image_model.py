@@ -82,6 +82,7 @@ if HAS_TORCH:
             drop_distances: tuple[int, ...] = (0,),
             action_feature_dim: int = 0,
             action_skip: bool = False,
+            frontier_ceiling: int = MAX_FRONTIER,
         ) -> None:
             super().__init__()
             if action_mode not in ("tactical", "spatial", "parametric", "frontier"):
@@ -101,7 +102,7 @@ if HAS_TORCH:
             self.drop_distances = validate_distances(drop_distances)
             self.action_dim = {"tactical": len(TACTICAL_ACTION_NAMES),
                                "parametric": parametric_actions(self.drop_distances),
-                               "frontier": 2 + MAX_FRONTIER}.get(
+                               "frontier": 2 + frontier_ceiling}.get(
                 action_mode, 2 + grid_rows * grid_cols)
             # Parametric mode: the last MAX_SLOTS cell channels are focus-slot masks.
             self.slot_channels = MAX_SLOTS if action_mode == "parametric" else 0

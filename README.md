@@ -29,6 +29,8 @@ The learned policy beats the downwind heuristic and **ties, but does not beat,**
 
 That policy reads the fire spread formula. Without it (thermal image only, learned fire speed, water effect and arrival map, D-91–D-102), and allowed to drop on any cell of the front (D-104), a policy beats a rule that sees the same inputs: 77.45 against 79.52 ha on the 128 selection scenarios (−2.06 [−3.93, −0.70]) and 47.03 against 49.01 on the 928 training scenarios (−1.98 [−2.81, −1.16]). One seed; the held-out activations have not been flown for it.
 
+With an opt-in water model in which drops may also fall on burning cells and there is no cap on drops per cell (D-105, D-107; no rekindling, so direct attack is optimistic), the same recipe trained with full freedom over targets burns 70.90 / 43.19 ha (mean of three seeds) on the selection / training scenarios, against 79.92 / 48.84 for the fair rule and 73.90 / 45.44 for the same rule restricted to burning cells. The training-set win holds against every rule; on selection the interval against the burning-only rule reaches zero. On the 312 unseen scenarios (EMSR837, EMSR590) it burns 35.02 ha against 38.68 for the fair rule (−3.66 [−5.38, −2.21]) and 35.35 for the burning-only rule (−0.32 [−0.67, −0.01]): clearly better than the fair rule, about as good as direct attack alone.
+
 ## What is built
 
 - **Simulator:** surface-fire spread from standard fuel models, and a CL-415 reference aircraft that travels, drops, returns and refills.

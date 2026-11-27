@@ -1057,3 +1057,39 @@ Water on burning cells (D-105, O-20; `runs/water-on-burning-20261126`, rules onl
 | `blind_hold_aware_heuristic` (fair rule) | 52.70 | −0.10 [−0.50, +0.25] | −3.84 [−4.80, −2.90] | −5.62 [−8.91, −3.03] |
 
 No intervention is 63.97 ha in every configuration. With burning targets only about 99 % of drops hit burning cells and the rules drop about 45 % less water (10,300 against 18,500 drops for the fair rule), because knocked-down fronts leave fewer targets. The gain is an upper bound of this prototype: a drop closes every outgoing edge of its 100 m cell and a knocked-down cell never rekindles. Mixing both kinds of target in the existing rank orders gains little, so the rules' ordering, not the physics, limits the mixed case.
+
+Free-water network (D-107, `runs/geographic-free-water-20261126`, criterion written first): the D-104 recipe from scratch (seed 42, 250 updates) on water on burning cells, no drop cap, no rekindling, with full freedom between pre-wetting and burning targets. Selection curve 75.54, 75.41, 73.66, 74.34, 72.63, 72.48, 72.70, 70.84, 71.92, 70.43 ha; weights of update 250 kept. No decision exceeded the 320-action ceiling. Flown deterministically on the same physics as the rules (`fly.py`, `compare.py`); policy minus rule, 95 % bootstrap over incident groups (better/equal/worse):
+
+| Mean burned ha | Selection (128) | Training scenarios (928) |
+|---|---|---|
+| Free-water policy | 70.43 | 43.38 |
+| Fair rule, mixed targets | 79.92 (−9.49 [−11.50, −7.48], 90/35/3) | 48.84 (−5.46 [−7.21, −3.93], 553/336/39) |
+| Fair rule, burning cells only | 73.90 (−3.47 [−7.38, −0.77], 49/63/16) | 45.44 (−2.06 [−3.40, −1.04], 298/527/103) |
+| `hold_aware_heuristic`, burning cells only (knows the hold limits) | 72.99 (−2.56 [−4.84, −0.86]) | 44.45 (−1.07 [−1.75, −0.45]) |
+| No intervention | 98.02 | 59.27 |
+
+The policy beats every rule on both sets, including the direct-attack rule that knows the hold limits, with intervals that exclude zero. Limits: one seed; selection also chose the weights and the policy trained on the other set, so this is "on development data"; the unseen activations were not flown; the physics is optimistic for direct attack (no rekindling), so the margin is for this simulator only.
+
+Two more seeds of the same recipe (43, 44; run in parallel, `seeds.sh`): selection bests 71.18 and 71.08 ha (updates 225), flown on the same scenarios. Policy minus rule per seed, then for the mean of the three seeds per scenario:
+
+| Seed | Selection − fair rule | Selection − burning-only rule | Training − fair rule | Training − burning-only rule | Training − hold-aware burning-only |
+|---|---|---|---|---|---|
+| 42 | −9.49 [−11.50, −7.48] | −3.47 [−7.38, −0.77] | −5.46 [−7.21, −3.93] | −2.06 [−3.40, −1.04] | −1.07 [−1.75, −0.45] |
+| 43 | −8.74 [−10.29, −7.38] | −2.72 [−6.48, +0.86] | −6.09 [−7.99, −4.49] | −2.70 [−4.03, −1.64] | −1.71 [−2.47, −1.03] |
+| 44 | −8.84 [−9.77, −7.58] | −2.82 [−5.63, −0.12] | −5.39 [−7.10, −3.90] | −1.99 [−3.20, −1.01] | −1.00 [−1.55, −0.35] |
+| Mean of 3 (70.90 / 43.19 ha) | −9.03 [−10.33, −7.68] | −3.00 [−6.52, +0.01] | −5.65 [−7.40, −4.15] | −2.25 [−3.51, −1.27] | −1.26 [−1.82, −0.67] |
+
+Reading: all three seeds beat the fair rule on both sets with wide margins, and beat both burning-only rules on the 928 training scenarios. On the 128 selection scenarios (four incidents) every seed is about 3 ha better than the burning-only rule, but the interval of seed 43 and of the three-seed mean reaches zero, so against that rule the selection win is not established. Against `hold_aware_heuristic` burning-only all intervals exclude zero. Development data only; the unseen activations have not been flown.
+
+Unseen incidents for the free-water seeds (`UNSEEN_CRITERION.md`, written before flying; `unseen.py`, `unseen_compare.py`): the three frozen seeds and the rules on EMSR837 (288 scenarios) and EMSR590 (24), same physics, two aircraft; intervals resample AOI blocks (EMSR590 is one block, so it has no interval). EMSR837 is unseen by these weights but was used in earlier comparisons.
+
+| Mean burned ha (312) | Value | Three-seed policy minus it |
+|---|---|---|
+| Policy, mean of three seeds | 35.02 | — |
+| Fair rule, mixed targets (primary) | 38.68 | −3.66 [−5.38, −2.21] (204/102/6) |
+| Fair rule, burning cells only | 35.35 | −0.32 [−0.67, −0.01] (72/189/51) |
+| `hold_aware_heuristic`, burning cells only | 35.51 | −0.49 [−0.78, −0.23] (72/186/54) |
+| `heuristic`, mixed | 39.70 | |
+| No intervention | 46.13 | |
+
+Every seed beats the fair rule on its own (−3.56 to −3.81). Against the burning-only rule the margin is small: −0.28, −0.22, −0.47 for seeds 42, 43, 44, with only seed 44's interval below zero; on EMSR837 alone the three-seed interval reaches zero (−0.25 [−0.58, +0.05]); on EMSR590 the policy is 1.21 ha better (no interval). So on unseen incidents the learned policy clearly beats the fair rule and is about as good as the simplest direct-attack rule, a little better on average. Two activations only.

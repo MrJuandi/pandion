@@ -18,15 +18,26 @@ def _is_burnable_fuel(val: Any) -> bool:
 # footprints overlap when their targets are within Manhattan distance 2.
 _DROP_FOOTPRINT = ((0, 0), (-1, 0), (1, 0), (0, -1), (0, 1))
 _OVERLAP_RADIUS = 2
-# A geographic cell may receive up to this many stacked drops (D-76; McFayden et al.
-# 2023 A8.5: three CL-415 drops hold open-fuel line up to 3,200 kW/m). Observations
-# announce their limit as ``max_stacked_drops``; without it a treated cell is never
-# targeted again, as in the synthetic integrated episode.
+# Default geographic cap (D-76). Observations announce the configured cap as
+# ``max_stacked_drops``: None allows unlimited stacking, and an absent key means
+# one drop per cell, as in the synthetic integrated episode.
 MAX_STACKED_DROPS = 3
 
 
-def stack_limit(observation: dict) -> int:
-    return int(observation.get("max_stacked_drops", 1))
+def stack_limit(observation: dict) -> float:
+    """Drops a cell may hold: the observation's ``max_stacked_drops``, one when absent (synthetic
+    episode), unlimited (``inf``) when the key is present with value None."""
+    if "max_stacked_drops" not in observation:
+        return 1
+    value = observation["max_stacked_drops"]
+    return float("inf") if value is None else int(value)
+
+
+def drop_count_scale(observation: dict) -> int:
+    """Divisor that maps a cell's drop count to a network input: the cap when there is one,
+    otherwise the three drops that hold the strongest front any water holds (D-76)."""
+    limit = stack_limit(observation)
+    return MAX_STACKED_DROPS if limit == float("inf") else int(limit)
 
 
 def full_cells(observation: dict) -> set[tuple[int, int]]:
@@ -89,7 +100,7 @@ def candidate_cells(observation: dict) -> list[list[int]]:
 
     Pre-wetting targets are observed unburned burnable cells adjacent to an
     observed reached cell. They can be targeted up to ``max_stacked_drops``
-    times (one drop when absent, D-76).
+    times (unlimited when None, one drop when absent).
 
     Only delivered cell records in ``observation['fire']['cells']`` are read;
     unknown cells never count as either burning or unburned. With several

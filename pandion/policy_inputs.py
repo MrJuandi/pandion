@@ -29,10 +29,11 @@ import numpy as np
 from .environment import MOISTURE_KEYS
 from .geographic_integrated import DEFAULT_CAPACITY_L
 from .imagery_composite import compose_view, state_masks, thermal_view
-from .action_features import (NUM_ACTION_FEATURES, NUM_TARGET_FEATURES, ObservedFireBehavior, action_feature_array,
-                              target_feature_array)
-from .parametric_actions import MAX_SLOTS, FrontierActionMapper, ParametricActionMapper, slot_masks
-from .policies import stack_limit
+from .action_features import (BURNING_FEATURE_NAMES, NUM_ACTION_FEATURES, NUM_TARGET_FEATURES,
+                              ObservedFireBehavior, action_feature_array, target_feature_array)
+from .parametric_actions import (MAX_BURNING_FRONTIER, MAX_FRONTIER, MAX_SLOTS, FrontierActionMapper,
+                                 ParametricActionMapper, slot_masks)
+from .policies import drop_count_scale
 
 # Fuel families from Scott & Burgan (2005) code ranges and Anderson (1982) 1-13.
 FUEL_FAMILIES = ("nonburnable", "grass", "grass_shrub", "shrub", "timber_understory", "timber_litter", "slash_blowdown")
@@ -90,6 +91,8 @@ class GeographicInputTensorizer:
         fire = scenario.get("fire", scenario)
         self.horizon_s = float(fire.get("horizon_s", scenario.get("horizon_s", 3600.0)))
         self.capacity_l = float(scenario.get("aircraft", {}).get("tank_capacity_l", DEFAULT_CAPACITY_L))
+        burning_enabled = scenario.get("water_model", {}).get("burning_cells", False)
+        self.frontier_ceiling = MAX_BURNING_FRONTIER if burning_enabled else MAX_FRONTIER
         if base_image is None and not explicit_fire:
             raise ValueError("without a base image, fire state must enter as explicit channels")
         self.px_per_cell = 0
@@ -124,14 +127,20 @@ class GeographicInputTensorizer:
         if action_features and not focus_slots:
             raise ValueError("action features belong to parametric actions (focus_slots)")
         self.action_features = action_features
-        self.num_action_features = 0 if not action_features else (NUM_TARGET_FEATURES + (4 if learned_hold else 0) + (2 if self.arrival_outputs > 1 else 0)) if measured_intensity else NUM_ACTION_FEATURES
+        self.num_action_features = 0
         if action_features:
-            self._action_mapper = (FrontierActionMapper(self.cell_size_m) if frontier  # D-104
+            self.num_action_features = NUM_ACTION_FEATURES
+            if measured_intensity:
+                self.num_action_features = NUM_TARGET_FEATURES + (4 if learned_hold else 0) + (2 if self.arrival_outputs > 1 else 0)
+            if burning_enabled:
+                self.num_action_features += len(BURNING_FEATURE_NAMES)
+            self._action_mapper = (FrontierActionMapper(self.cell_size_m, ceiling=self.frontier_ceiling)
+                                   if frontier  # D-104
                                    else ParametricActionMapper(self.cell_size_m, drop_distances))
             self._behavior = None if measured_intensity else ObservedFireBehavior()
         self.num_vector_features = self.NUM_VECTOR_FEATURES + (self.FLEET_VECTOR if fleet_features else 0)
         self.num_cell_channels = (self.BASE_CELL_CHANNELS + (1 if include_ros or learned_speed else 0) + (1 if learned_burn else 0)
-                                  + (1 if self.arrival_outputs > 1 else 0)
+                                  + (1 if self.arrival_outputs > 1 else 0) + int(burning_enabled)
                                   + (self.FLEET_CHANNELS if fleet_features else 0)
                                   + (self.FIRE_CHANNELS if explicit_fire else 0)
                                   + (MAX_SLOTS if focus_slots else 0))
@@ -211,7 +220,8 @@ class GeographicInputTensorizer:
         now = float(observation.get("time_s", 0.0))
         for r, line in enumerate(observation["fire"]["cells"]):
             for c, cell in enumerate(line):
-                state = cell["fire_state"]
+                state = (cell.get("visible_state", cell["fire_state"])
+                         if observation.get("water_on_burning") else cell["fire_state"])
                 out[0, r, c] = state == "burning"
                 out[1, r, c] = state == "burned"
                 if cell.get("arrival_time_s") is not None:
@@ -235,10 +245,12 @@ class GeographicInputTensorizer:
         """Build policy arrays, optionally retaining image channels as exact bytes."""
         if observation.get("observation_mode") != "realtime":
             raise ValueError("image inputs require real-time observations (D-49)")
+        burning_enabled = observation.get("water_on_burning", False)
         rgb = None
         if self.base_image is not None:
-            state_key = "visible_state" if self.measured_intensity else "fire_state"
-            masks = state_masks(observation, state_key) if self.include_thermal or self.measured_intensity else None
+            use_visible = self.measured_intensity or burning_enabled
+            state_key = "visible_state" if use_visible else "fire_state"
+            masks = state_masks(observation, state_key) if self.include_thermal or use_visible else None
             view = compose_view(self.base_image, observation, self.px_per_cell, masks=masks)
             rgb = np.moveaxis(view, -1, 0)
             if self.include_thermal:
@@ -250,7 +262,7 @@ class GeographicInputTensorizer:
                 rgb = rgb.astype(np.float32) / 255.0
 
         treated = np.zeros((self.rows, self.cols), dtype=np.float32)
-        limit = stack_limit(observation)
+        limit = drop_count_scale(observation)
         for r, c in observation.get("known_treated_cells", []):  # one entry per stacked drop (D-76)
             treated[r, c] = min(treated[r, c] + 1.0 / limit, 1.0)
         aircraft = observation["aircraft"]
@@ -271,6 +283,11 @@ class GeographicInputTensorizer:
                 arrival = (probs, minutes, self.cruise_speed)
         if self.fleet_features:
             dynamic.extend(self.fleet_channels(observation))
+        if burning_enabled:
+            direct = np.zeros_like(treated)
+            for r, c in observation.get("known_burning_drops", []):
+                direct[r, c] += 1
+            dynamic.append(np.minimum(direct / limit, 1.0))
         parts = [self._static_channels(observation), np.stack(dynamic)]
         if self.explicit_fire:
             parts.append(self.fire_channels(observation))

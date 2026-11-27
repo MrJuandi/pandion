@@ -42,8 +42,7 @@ DEFAULT_CAPACITY_L = 6137
 # and A8.5), one cell edge. A treated cell stops a front only if the fireline
 # intensity of the spread reaching it is within what its stacked drops hold in the
 # open grass fuel type (A8.5 O-1a): one drop up to 1,000 kW/m, three up to
-# 3,200 kW/m; stronger fronts breach whatever the water. Up to MAX_STACKED_DROPS
-# drops can be stacked on a cell.
+# 3,200 kW/m; stronger fronts breach whatever the water.
 DROP_HOLD_LIMITS_KW_M = ((1, 1000.0), (3, 3200.0))  # (drops needed, intensity held)
 # A front that breaches a treated cell is delayed by the time it needs to heat the
 # cell's water to boiling and evaporate it (D-78): delay = water mass x energy per kg
@@ -157,6 +156,13 @@ def geographic_episode(
     if observation_mode not in OBSERVATION_MODES:
         raise ValueError(f"Unknown observation_mode: {observation_mode}")
     water_model = scenario.get("water_model", {})
+    max_stacked_drops = water_model.get("max_stacked_drops", MAX_STACKED_DROPS)
+    if max_stacked_drops is not None and (
+        isinstance(max_stacked_drops, bool)
+        or not isinstance(max_stacked_drops, int)
+        or max_stacked_drops < 1
+    ):
+        raise ValueError("water_model.max_stacked_drops must be a positive integer or None")
     water_on_burning = water_model.get("burning_cells", False)
     burning_only = water_on_burning and water_model.get("candidates") == "burning_only"
 
@@ -318,7 +324,15 @@ def geographic_episode(
     ac_config = scenario.get("aircraft", {})
     capacity_l = int(ac_config.get("tank_capacity_l", DEFAULT_CAPACITY_L))
     cruise_speed = float(ac_config.get("cruise_speed_m_s", DEFAULT_CRUISE_SPEED_M_S))
-    refill_service_s = float(ac_config.get("refill_service_time_s", DEFAULT_REFILL_SERVICE_S))
+    try:
+        refill_service_s = float(ac_config.get("refill_service_time_s", DEFAULT_REFILL_SERVICE_S))
+    except (TypeError, ValueError, OverflowError) as exc:
+        if max_stacked_drops is not None:
+            raise
+        raise ValueError("aircraft.refill_service_time_s must be positive and finite with unlimited drops") from exc
+    # An instantaneous refill at the target can otherwise repeat a drop indefinitely.
+    if max_stacked_drops is None and (not isfinite(refill_service_s) or refill_service_s <= 0):
+        raise ValueError("aircraft.refill_service_time_s must be positive and finite with unlimited drops")
 
     # Refill location in grid local meters [x, y]
     # If coordinates given in UTM, translate relative to origin
@@ -480,12 +494,12 @@ def geographic_episode(
             reached_at = arrival[r][c]
             if reached_at is None:
                 times = drop_times.setdefault((r, c), [])
-                if len(times) < MAX_STACKED_DROPS:
+                if max_stacked_drops is None or len(times) < max_stacked_drops:
                     times.append(drop_time)
                     treated.append([r, c])
             elif water_on_burning and reached_at <= drop_time and is_burning(r, c, drop_time):
                 times = burning_drop_times.setdefault((r, c), [])
-                if len(times) < MAX_STACKED_DROPS:
+                if max_stacked_drops is None or len(times) < max_stacked_drops:
                     times.append(drop_time)
                     known_burning_drops.append([r, c])
                     burning_drop = True
@@ -737,7 +751,7 @@ def geographic_episode(
             "cell_size_m": cell_size,
             "elevation_m": deepcopy(elevation_input) if elevation_input is not None else deepcopy(scenario.get("elevation_m", [[0.0] * cols for _ in range(rows)])),
             "known_treated_cells": known_treated_cells,
-            "max_stacked_drops": MAX_STACKED_DROPS,
+            "max_stacked_drops": max_stacked_drops,
         }
         if water_on_burning:
             current_obs["water_on_burning"] = True

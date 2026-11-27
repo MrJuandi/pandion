@@ -68,6 +68,21 @@ def inference_config(report: dict) -> dict:
     for key in ("learned_speed", "learned_hold", "learned_burn"):
         if report.get(key):
             inference[key] = report[key]
+    if report.get("water_model"):
+        water_model = report["water_model"]
+        if not isinstance(water_model, dict):
+            raise ValueError("water_model must be an object")
+        if "burning_cells" in water_model and not isinstance(water_model["burning_cells"], bool):
+            raise ValueError("water_model.burning_cells must be boolean")
+        cap = water_model.get("max_stacked_drops")
+        if cap is not None and (type(cap) is not int or cap < 1):
+            raise ValueError("water_model.max_stacked_drops must be a positive integer or null")
+        inference["water_model"] = water_model
+        if action_mode == "frontier" and water_model.get("burning_cells"):
+            from .parametric_actions import MAX_BURNING_FRONTIER
+            if report.get("frontier_ceiling") != MAX_BURNING_FRONTIER:
+                raise ValueError("unsupported burning frontier ceiling")
+            inference["frontier_ceiling"] = report["frontier_ceiling"]
     return inference
 
 
@@ -130,8 +145,9 @@ def load_policy_artifact(checkpoint: Path, report_path: Path, scenarios: list[di
         training_dataset = report.get("training_artifact", {}).get("dataset", training_dataset)
     entries = training_dataset.get("splits", {}).get("development", [])
     config = inference_config(report)
-    from .geographic_ppo import with_fleet, build_policy_model
-    available = {s["scenario_id"]: s["scenario_hash"] for s in with_fleet(scenarios, config["fleet_size"])}
+    from .geographic_ppo import with_fleet, with_water_model, build_policy_model
+    configured = with_water_model(with_fleet(scenarios, config["fleet_size"]), config.get("water_model", {}))
+    available = {s["scenario_id"]: s["scenario_hash"] for s in configured}
     if not entries or len({e.get("scenario_id") for e in entries}) != len(entries) or any(
             available.get(e.get("scenario_id")) != e.get("scenario_hash") for e in entries):
         raise ValueError("training report does not match the verified development family")
@@ -166,8 +182,7 @@ def load_policy_artifact(checkpoint: Path, report_path: Path, scenarios: list[di
         if expected and content_hash(json.loads(manifest.read_text())) != expected:
             raise ValueError("imagery manifest content differs from training report")
     member_ids = {e["scenario_id"] for e in entries}
-    training_scenario = next(s for s in scenarios if s["scenario_id"] in member_ids)
-    scenario = with_fleet([training_scenario], config["fleet_size"])[0]
+    scenario = next(s for s in configured if s["scenario_id"] in member_ids)
     model = build_policy_model(scenario, **{k: config[k] for k in
                                ("input_mode", "action_mode", "recurrent", "include_ros", "include_thermal", "slot_features")},
                                imagery_dir=image_path,

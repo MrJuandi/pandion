@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from math import atan2, degrees, hypot, isfinite
 from typing import Any
 
@@ -12,12 +13,13 @@ from .environment import MOISTURE_KEYS
 from .geographic_integrated import NEIGHBORS, drops_needed
 from .learned_hold import risk_before_and_after
 from .parametric_actions import ParametricActionMapper
-from .policies import stack_limit, treated_counts
+from .policies import _observed_burning, drop_count_scale, treated_counts
 
 ACTION_FEATURE_NAMES = ("valid", "stacked", "need_one", "need_three", "breach", "remaining",
                         "sufficient", "reached_neighbours", "aircraft_distance", "water_distance",
                         "downwind", "offset")
 NUM_ACTION_FEATURES = len(ACTION_FEATURE_NAMES)
+BURNING_FEATURE_NAMES = ("target_burning", "burning_stacked")
 WATER_DISTANCE_SCALE_M = 20000.0
 
 
@@ -127,7 +129,9 @@ def action_feature_array(observation: dict, mapper: ParametricActionMapper,
     Rows of invalid actions are zero, matching ``mapper.compute_mask``. With ``behavior`` None
     the five drop-need columns are zero (D-94): the policy must judge the fire from the image.
     """
-    out = np.zeros((mapper.num_actions - 2, 1 + NUM_ACTION_FEATURES), dtype=np.float32)
+    burning_enabled = observation.get("water_on_burning", False)
+    extra = len(BURNING_FEATURE_NAMES) if burning_enabled else 0
+    out = np.zeros((mapper.num_actions - 2, 1 + NUM_ACTION_FEATURES + extra), dtype=np.float32)
     aircraft = observation["aircraft"]
     if aircraft["phase"] != "idle" or aircraft["water_l"] <= 0:
         return out
@@ -137,7 +141,8 @@ def action_feature_array(observation: dict, mapper: ParametricActionMapper,
     reached = {(r, c) for r, line in enumerate(cells) for c, cell in enumerate(line)
                if isinstance(cell, dict) and cell.get("fire_detected") is True}
     counts = treated_counts(observation)
-    limit = stack_limit(observation)
+    burning_counts = Counter(map(tuple, observation.get("known_burning_drops", []))) if burning_enabled else {}
+    limit = drop_count_scale(observation)
     ax, ay = (float(v) for v in aircraft["position_m"])
     wx, wy = (float(v) for v in observation.get("water_source_m", [ax, ay]))
     diagonal = hypot(rows * size, cols * size)
@@ -145,14 +150,16 @@ def action_feature_array(observation: dict, mapper: ParametricActionMapper,
     wind_len = hypot(east, north)
     for index, (r, c, orow, ocol, d) in mapper.target_details(observation).items():
         row = out[index - 2]
-        have = counts.get((r, c), 0)
-        if behavior is None:
+        direct = burning_enabled and _observed_burning(cells[r][c])
+        nr, nc = (r + orow, c + ocol) if direct else (r, c)
+        have = 0 if direct else counts.get((r, c), 0)
+        if behavior is None or direct:
             need = 0.0
         elif d == 0:
             need = behavior.needed_at(observation, r, c)
         else:
             need = behavior.needed_from(observation, r - orow, c - ocol, orow, ocol)
-        neighbours = sum(1 for dr, dc in NEIGHBORS if (r + dr, c + dc) in reached)
+        neighbours = sum(1 for dr, dc in NEIGHBORS if (nr + dr, nc + dc) in reached)
         row[0] = r * cols + c
         row[1] = 1.0  # valid
         row[2] = have / limit
@@ -162,10 +169,13 @@ def action_feature_array(observation: dict, mapper: ParametricActionMapper,
         row[6] = 1.0 if need == float("inf") else min(max(need - have, 0.0), 3.0) / 3.0
         row[7] = 1.0 if (isfinite(need) and need > 0 and have >= need) else 0.0
         row[8] = neighbours / 8.0
-        row[9] = min(hypot(c * size - ax, r * size - ay) / diagonal, 1.5)
-        row[10] = min(hypot(c * size - wx, r * size - wy) / WATER_DISTANCE_SCALE_M, 1.5)
+        row[9] = min(hypot(nc * size - ax, nr * size - ay) / diagonal, 1.5)
+        row[10] = min(hypot(nc * size - wx, nr * size - wy) / WATER_DISTANCE_SCALE_M, 1.5)
         row[11] = (ocol * east + orow * north) / wind_len if wind_len > 1e-6 else 0.0
         row[12] = d / 2.0
+        if burning_enabled:
+            row[-2] = direct
+            row[-1] = min(burning_counts.get((r, c), 0) / limit, 1.0)
     return out
 
 
@@ -189,9 +199,14 @@ def target_feature_array(observation: dict, mapper: ParametricActionMapper, fuel
     the front (``distance`` 0, where the prediction was fitted); a target ahead of it has them at zero and
     ``has_risk`` 0 (D-99). With ``arrival`` = (probabilities [K, rows, cols], minutes [K], cruise speed m/s) of
     ``pandion.learned_burn.burn_outputs``, two more columns: the learned probability that the fire reaches the
-    target before this aircraft can drop on it, and within ten minutes (D-102).
+    target before this aircraft can drop, and within ten minutes (D-102). For direct attack the
+    feature cell is the protected neighbour, with slope and wind from the chosen outgoing edge.
+    Learned hold still predicts the effect of pre-wetting that neighbour.
     """
-    extra = (4 if learned_hold else 0) + (2 if arrival is not None else 0)
+    burning_enabled = observation.get("water_on_burning", False)
+    arrival_col = 1 + NUM_TARGET_FEATURES + (4 if learned_hold else 0)
+    extra = (4 if learned_hold else 0) + (2 if arrival is not None else 0) + (
+        len(BURNING_FEATURE_NAMES) if burning_enabled else 0)
     out = np.zeros((mapper.num_actions - 2, 1 + NUM_TARGET_FEATURES + extra), dtype=np.float32)
     base = action_feature_array(observation, mapper, None)
     if not base[:, 1].any():
@@ -200,6 +215,10 @@ def target_feature_array(observation: dict, mapper: ParametricActionMapper, fuel
     rows, cols = len(cells), len(cells[0])
     size = mapper.cell_size_m
     east, north = (float(v) for v in observation.get("midflame_wind_to_m_s", [0.0, 0.0]))
+    if arrival is not None:
+        from .learned_burn import reached_before
+        probs, minutes, cruise = arrival
+        ax, ay = (float(v) for v in observation["aircraft"]["position_m"])
 
     def heat(r: int, c: int) -> int:
         cell = cells[r][c] if 0 <= r < rows and 0 <= c < cols else None
@@ -216,8 +235,12 @@ def target_feature_array(observation: dict, mapper: ParametricActionMapper, fuel
         row = out[index - 2]
         row[0] = base[index - 2, 0]
         row[1:8] = base[index - 2, keep]
+        direct = burning_enabled and bool(base[index - 2, -2])
+        nr, nc = (r + orow, c + ocol) if direct else (r, c)
+        if burning_enabled:
+            row[-2:] = base[index - 2, -2:]
         if d == 0:
-            near = [(heat(r - dr, c - dc), dr, dc) for dr, dc in NEIGHBORS]
+            near = [(heat(nr - dr, nc - dc), dr, dc) for dr, dc in NEIGHBORS]
             lit = [h for h, _, _ in near if h]
             hottest, dr, dc = max(near)
             mean = sum(lit) / len(lit) if lit else 0.0
@@ -231,33 +254,29 @@ def target_feature_array(observation: dict, mapper: ParametricActionMapper, fuel
                     steps = back
                     break
             mean = float(hottest)
-        if hottest == 0:
+        if direct or hottest == 0:
             dr, dc, steps = orow, ocol, 1
         row[8], row[9] = hottest / 255.0, mean / 255.0
-        sr, sc = r - steps * dr, c - steps * dc
+        sr, sc = nr - steps * dr, nc - steps * dc
         length = steps * hypot(dr, dc) * size
         if 0 <= sr < rows and 0 <= sc < cols and length:
-            row[10] = max(-1.0, min(1.0, (float(elevation[r][c]) - float(elevation[sr][sc])) / length))
+            row[10] = max(-1.0, min(1.0, (float(elevation[nr][nc]) - float(elevation[sr][sc])) / length))
             row[11] = max(-1.5, min(1.5, (dc * east + dr * north) / hypot(dr, dc) / 10.0))
-        family = fuel_family(int(fuel[r][c]))
+        family = fuel_family(int(fuel[nr][nc]))
         row[12 + family] = 1.0
         if learned_hold and hottest and d == 0:
             near_share = sum(1 for v, _, _ in near if v) / 8.0
             hold_rows.append([row[8], row[9], near_share, row[10], row[11], wind_speed, left,
-                              min(counts.get((r, c), 0), 3) / 3.0] + moisture + [1.0 if family == k else 0.0 for k in range(7)])
+                              min(counts.get((nr, nc), 0), 3) / 3.0] + moisture + [1.0 if family == k else 0.0 for k in range(7)])
             hold_index.append(index - 2)
+        if arrival is not None:
+            flight_min = hypot(c * size - ax, r * size - ay) / float(cruise) / 60.0
+            row[arrival_col] = reached_before(probs, minutes, nr, nc, flight_min)
+            row[arrival_col + 1] = reached_before(probs, minutes, nr, nc, 10.0)
     if hold_rows:
         before, after = risk_before_and_after(np.asarray(hold_rows, dtype=np.float32), learned_hold)
         out[hold_index, 1 + NUM_TARGET_FEATURES] = before
         out[hold_index, 2 + NUM_TARGET_FEATURES] = after
         out[hold_index, 3 + NUM_TARGET_FEATURES] = before - after  # gain of one more drop
         out[hold_index, 4 + NUM_TARGET_FEATURES] = 1.0  # has_risk
-    if arrival is not None:
-        from .learned_burn import reached_before
-        probs, minutes, cruise = arrival
-        ax, ay = (float(v) for v in observation["aircraft"]["position_m"])
-        for index, (r, c, _, _, _) in mapper.target_details(observation).items():
-            flight_min = hypot(c * size - ax, r * size - ay) / float(cruise) / 60.0
-            out[index - 2, -2] = reached_before(probs, minutes, r, c, flight_min)
-            out[index - 2, -1] = reached_before(probs, minutes, r, c, 10.0)
     return out
