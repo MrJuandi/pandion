@@ -1080,3 +1080,16 @@ Two more seeds of the same recipe (43, 44; run in parallel, `seeds.sh`): selecti
 | Mean of 3 (70.90 / 43.19 ha) | −9.03 [−10.33, −7.68] | −3.00 [−6.52, +0.01] | −5.65 [−7.40, −4.15] | −2.25 [−3.51, −1.27] | −1.26 [−1.82, −0.67] |
 
 Reading: all three seeds beat the fair rule on both sets with wide margins, and beat both burning-only rules on the 928 training scenarios. On the 128 selection scenarios (four incidents) every seed is about 3 ha better than the burning-only rule, but the interval of seed 43 and of the three-seed mean reaches zero, so against that rule the selection win is not established. Against `hold_aware_heuristic` burning-only all intervals exclude zero. Development data only; the unseen activations have not been flown.
+
+Unseen incidents for the free-water seeds (`UNSEEN_CRITERION.md`, written before flying; `unseen.py`, `unseen_compare.py`): the three frozen seeds and the rules on EMSR837 (288 scenarios) and EMSR590 (24), same physics, two aircraft; intervals resample AOI blocks (EMSR590 is one block, so it has no interval). EMSR837 is unseen by these weights but was used in earlier comparisons.
+
+| Mean burned ha (312) | Value | Three-seed policy minus it |
+|---|---|---|
+| Policy, mean of three seeds | 35.02 | — |
+| Fair rule, mixed targets (primary) | 38.68 | −3.66 [−5.38, −2.21] (204/102/6) |
+| Fair rule, burning cells only | 35.35 | −0.32 [−0.67, −0.01] (72/189/51) |
+| `hold_aware_heuristic`, burning cells only | 35.51 | −0.49 [−0.78, −0.23] (72/186/54) |
+| `heuristic`, mixed | 39.70 | |
+| No intervention | 46.13 | |
+
+Every seed beats the fair rule on its own (−3.56 to −3.81). Against the burning-only rule the margin is small: −0.28, −0.22, −0.47 for seeds 42, 43, 44, with only seed 44's interval below zero; on EMSR837 alone the three-seed interval reaches zero (−0.25 [−0.58, +0.05]); on EMSR590 the policy is 1.21 ha better (no interval). So on unseen incidents the learned policy clearly beats the fair rule and is about as good as the simplest direct-attack rule, a little better on average. Two activations only.
