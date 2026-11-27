@@ -728,6 +728,8 @@ Per seed (42, 43, 44), held out, branched − heuristic: −3.21, −3.27, −2.
 
 Reading: the seed 42 result holds across seeds. Branched advantages gain about 2 ha over Monte Carlo/GAE advantages with everything else fixed and bring the learned policy level with `hold_aware_heuristic`, but not past it. Limits: one held-out activation; three seeds.
 
+Reproduction check (2026-11-27, D-110): scoring these six selected checkpoints with `experiments/headline-d85/evaluate.sh` (packaged `pandion.headline_eval`, current code) gives the same per-scenario final areas as `audit-eval.json` and `audit-eval-43-44.json` and the same three-seed summary; see [REPRODUCING.md](REPRODUCING.md).
+
 #### Branches weighted towards early decisions (D-88, 2026-11-18)
 
 `runs/geographic-vine-early-d86-20261118` (`run.sh`; code is the D-85 commit plus `uncommitted.diff`): the D-85 recipe with seed 42 and `--vine-weighting remaining`, so the four branched decisions of each episode are drawn with probability proportional to the time left. 9 workers, 16–34 s per update, about the cost of uniform branching. Selection score fell to 79.5 ha at update 225 (uniform branching, same seed: 77.6).

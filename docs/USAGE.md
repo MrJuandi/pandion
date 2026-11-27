@@ -278,3 +278,7 @@ directories are never overwritten. Water sources can lie outside the tactical
 map; aircraft remain at the source when the policy issues HOLD after refilling.
 Refill tracks distinguish arrival from service, and unfinished missions at the
 episode horizon do not teleport or complete a refill.
+
+## Headline evaluation
+
+`python -m pandion.headline_eval evaluate --report REPORT.json --scenarios-dir FAMILY --imagery-dir IMAGERY --checkpoint LABEL=PATH [...] --output EVAL.json` scores checkpoints deterministically against `heuristic`, `hold_aware_heuristic` and `no_intervention` on the report's held-out activation and on a seeded development sample (`--sample 120 --sample-seed 0`), with paired 95 % bootstrap intervals. `python -m pandion.headline_eval summarize --evaluation EVAL.json --policy NAME=L1,L2,L3 [--pair A B] --output SUMMARY.json` averages seeds per scenario before the bootstrap. The README table is rebuilt by `experiments/headline-d85/evaluate.sh` ([REPRODUCING.md](REPRODUCING.md)).
