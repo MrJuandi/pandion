@@ -1,5 +1,7 @@
 # Gate before the first policy-training run
 
+**Update 2026-11-27:** under D-109 this project does not pursue the physical-validation rows below; they stay as the gate for any future physical or operational claim. Reported results are comparisons of controllers inside the simulator (README, [EVALUATION.md](EVALUATION.md)). The paragraphs after the table describe the state on 2026-10-01; the current policies are the geographic two-aircraft PPO runs from D-61 onwards, not `runs/ppo-tactical-v2.pt`.
+
 **Status:** not ready for physical, geographic-performance, or operational claims. Byte/hash and alignment checks passed, but a 2026-10-01 audit corrected three catalog incident identities/times and the Massarosa projection. The derived environment family now connects heights and Artesa weather; this is not evidence of physical validity or suppression effectiveness. The existing FM1 integrated episode may be used for explicitly exploratory controller experiments.
 
 The following gate applies to a **result-bearing geographic or physical comparison**, not to a labeled synthetic decision-interface experiment. Exploratory results may compare controllers and baselines within the frozen simulator, but must report its scenario, seed, water-effect assumption, code version, and limitations, and must not be mixed with validated-incident results.
