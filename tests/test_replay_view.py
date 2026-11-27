@@ -78,6 +78,25 @@ class ReplayViewTests(unittest.TestCase):
         self.assertEqual(replay["elevation_m"][0], [350, 350, 350])
         self.assertTrue(out["metadata"]["terrain"]["display_only"])
 
+    def test_normalize_replay_is_idempotent(self):
+        replay = copy.deepcopy(self.replay)
+        replay["decisions"] = [
+            {"time_s": 60.0, "decision_time_s": 0.0, "completed_at_s": 60.0,
+             "order": {"type": "DROP", "target_m": [200, 0]},
+             "observation": {"fire": {"cells": [[{"fire_detected": True}, None, None]]},
+                             "aircraft": {"position_m": [100, 0]}}},
+            {"time_s": 120.0, "decision_time_s": 60.0,
+             "order": {"type": "RETURN_TO_REFILL"},
+             "observation": {"fire_reports": [[0, 0]], "aircraft": {"position_m": [200, 0]}}},
+        ]
+        once = normalize_replay(replay)
+        twice = normalize_replay(once)
+        self.assertEqual(twice, once)
+        self.assertEqual(twice["decisions"][0]["completed_at_s"], 60.0)
+        self.assertEqual(twice["decisions"][0]["time_s"], 0.0)
+        self.assertEqual(twice["decisions"][1]["completed_at_s"], 120.0)
+        self.assertEqual(twice["decisions"][1]["time_s"], 60.0)
+
 
 class WorkspaceTests(unittest.TestCase):
     def setUp(self):

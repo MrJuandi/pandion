@@ -74,7 +74,7 @@ PY
 
 ## Interpretation and limits
 
-`--seed` seeds Python scenario selection and PyTorch initialization/action sampling, and is stored separately from scenario seeds in smoke/train/selection reports. Default candidate seeds remain 42, 43, and so on. Exact repeatability was checked within the same CPU runtime; it is not promised across devices, architectures, or dependency versions. The dependency range `torch>=2.0.0` is not a claim that every allowed version was tested.
+`--seed` seeds Python scenario selection and PyTorch initialization/action sampling, and is stored separately from scenario seeds in smoke/train/selection reports. Default candidate seeds remain 42, 43, and so on. Exact repeatability was checked within the same CPU runtime; it is not promised across devices, architectures, or dependency versions. The dependency range `torch>=2.6` (the first release where `torch.load` defaults to `weights_only=True`; every loader in the package also passes it explicitly) is not a claim that every allowed version was tested.
 
 Checkpoints retain the existing raw `state_dict` format. `--resume` restores model weights into a fresh optimizer; optimizer state, random-generator state, model configuration, and dataset identity are not restored from that file. Preserve the matching report and input manifest. It is a restart from weights, not exact continuation of an interrupted optimizer trajectory.
 

@@ -163,8 +163,14 @@ class ImageryAcquireTests(unittest.TestCase):
             self._write_imagery(src, image)
             manifest = json.loads((src / "sources.json").read_text())
             manifest["activations"]["EMSR578"]["pixel_size_m"] = 50.0
+            manifest["activations"]["EMSR578"]["transform"] = [50.0, 0.0, 1000.0, 0.0, -50.0, 2200.0]
             (src / "sources.json").write_text(json.dumps(manifest))
             downsample_imagery(src, dst, 2)
+            out = json.loads((dst / "sources.json").read_text())["activations"]["EMSR578"]
+            # Same extent: the affine scale follows the new pixel size, the corner stays.
+            self.assertEqual(out["pixel_size_m"], 100.0)
+            self.assertEqual(out["transform"], [100.0, 0.0, 1000.0, 0.0, -100.0, 2200.0])
+            self.assertEqual(out["derived_from"]["source_sha256"], manifest["activations"]["EMSR578"]["array_sha256"])
             small = load_activation_image(dst, scenario())
             self.assertEqual(small.shape, (2, 3, 3))
             self.assertEqual(small[0, 0, 0], round(image[:2, :2, 0].mean()))

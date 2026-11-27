@@ -1046,3 +1046,14 @@ Any-cell frontier actions (D-104, `runs/geographic-frontier-20261126`, criterion
 | B (four cells per front, seed 42) | 79.47 | 47.74 |
 
 Policy minus fair rule: selection −2.06 [−3.93, −0.70] (better/equal/worse 75/38/15), training scenarios −1.98 [−2.81, −1.16] (454/402/72); minus the learned-water rule −2.00 [−4.61, −0.61] and −1.24 [−2.59, −0.24]. Fast, steep group against the fair rule: training +1.64 ha (14 losses, 20 wins over 5 ha; B +5.96, 24 and 8), selection −4.32 (B −3.05); the other fires −2.30 on training (B −1.91) and −1.59 on selection (B +0.58). Reading: the first policy without the formula that beats the fair rule on both sets with intervals that exclude zero, and it also has lower means than the rule that knows the limits and than D-85 with the formula. Caveats: one seed; the selection incidents (four) also chose the weights, although the kept weights are the last ones; nothing here is unseen (the holdout report is off in this run's code copy and EMSR837/EMSR590 were not flown).
+
+
+Water on burning cells (D-105, O-20; `runs/water-on-burning-20261126`, rules only, no network trained). The 1,056 development scenarios (928 training, 128 selection) with two aircraft; flag off reproduces all 3,168 stored rule results exactly. Paired difference, flag on minus off, with 95 % bootstrap intervals over incident groups:
+
+| Rule | Off (1,056) | Mixed targets | Burning targets only | Burning only, selection (128) |
+|---|---|---|---|---|
+| `heuristic` | 56.02 | −1.99 [−3.58, −0.65] | −5.66 [−7.57, −3.92] | −8.54 [−11.36, −5.72] |
+| `hold_aware_heuristic` | 51.95 | −0.91 [−1.73, −0.18] | −4.04 [−5.17, −2.92] | −7.11 [−9.23, −4.98] |
+| `blind_hold_aware_heuristic` (fair rule) | 52.70 | −0.10 [−0.50, +0.25] | −3.84 [−4.80, −2.90] | −5.62 [−8.91, −3.03] |
+
+No intervention is 63.97 ha in every configuration. With burning targets only about 99 % of drops hit burning cells and the rules drop about 45 % less water (10,300 against 18,500 drops for the fair rule), because knocked-down fronts leave fewer targets. The gain is an upper bound of this prototype: a drop closes every outgoing edge of its 100 m cell and a knocked-down cell never rekindles. Mixing both kinds of target in the existing rank orders gains little, so the rules' ordering, not the physics, limits the mixed case.

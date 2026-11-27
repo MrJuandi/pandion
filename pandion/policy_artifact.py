@@ -56,10 +56,9 @@ def inference_config(report: dict) -> dict:
                  "include_thermal": report.get("include_thermal", False),
                  "slot_features": report.get("slot_features"),
                  "skip_forced": report.get("skip_forced", report.get("ppo", {}).get("skip_forced")),
-                 "imagery_dir": report.get("imagery_dir")}
-    # Keys appear only for reports that use them, so older reports keep their exact binding.
-    if report.get("drop_distances") and list(report["drop_distances"]) != [0]:
-        inference["drop_distances"] = list(report["drop_distances"])
+                 "imagery_dir": report.get("imagery_dir"),
+                 "drop_distances": list(report.get("drop_distances") or [0])}
+    # Other optional keys appear only when enabled, preserving older bindings.
     if report.get("action_features"):
         inference["action_features"] = True
     if report.get("action_skip"):
@@ -84,6 +83,9 @@ def write_report(report: dict, report_path: Path, checkpoint: Path | None = None
         report["artifact"] = {"schema_version": SCHEMA_VERSION,
                               "checkpoint_sha256": file_hash(checkpoint),
                               "inference": inference_config(report)}
+        best_checkpoint = Path(f"{checkpoint}.best")
+        if best_checkpoint.is_file():
+            report["artifact"]["best_checkpoint_sha256"] = file_hash(best_checkpoint)
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(json.dumps(report, indent=2, allow_nan=False) + "\n")
     if "artifact" in report and attach_sidecar:
@@ -96,10 +98,14 @@ def verify_binding(checkpoint: Path, report_path: Path, report: dict) -> bool:
     """Validate weights and any exact-report sidecar without importing torch."""
     artifact = report.get("artifact")
     digest = file_hash(checkpoint)
-    if artifact and (artifact.get("schema_version") != SCHEMA_VERSION
-                     or artifact.get("checkpoint_sha256") != digest
-                     or artifact.get("inference") != inference_config(report)):
-        raise ValueError("checkpoint/report binding mismatch")
+    if artifact:
+        bound = artifact.get("inference")
+        # Older bindings implied a zero-cell distance when the field was absent.
+        if (artifact.get("schema_version") != SCHEMA_VERSION
+                or artifact.get("checkpoint_sha256") != digest
+                or not isinstance(bound, dict)
+                or {"drop_distances": [0], **bound} != inference_config(report)):
+            raise ValueError("checkpoint/report binding mismatch")
     sidecar_path = Path(str(checkpoint) + ".artifact.json")
     if sidecar_path.exists():
         sidecar = json.loads(sidecar_path.read_text())
@@ -119,7 +125,10 @@ def load_policy_artifact(checkpoint: Path, report_path: Path, scenarios: list[di
     report = json.loads(report_path.read_text())
     if report.get("schema_version") not in REPORT_SCHEMAS:
         raise ValueError("workspace requires a geographic report with dataset provenance")
-    entries = report.get("dataset", {}).get("splits", {}).get("development", [])
+    training_dataset = report.get("dataset", {})
+    if report["schema_version"] == "nightjar-geographic-ppo-eval-0.1":
+        training_dataset = report.get("training_artifact", {}).get("dataset", training_dataset)
+    entries = training_dataset.get("splits", {}).get("development", [])
     config = inference_config(report)
     from .geographic_ppo import with_fleet, build_policy_model
     available = {s["scenario_id"]: s["scenario_hash"] for s in with_fleet(scenarios, config["fleet_size"])}
@@ -162,7 +171,7 @@ def load_policy_artifact(checkpoint: Path, report_path: Path, scenarios: list[di
     model = build_policy_model(scenario, **{k: config[k] for k in
                                ("input_mode", "action_mode", "recurrent", "include_ros", "include_thermal", "slot_features")},
                                imagery_dir=image_path,
-                               drop_distances=tuple(config.get("drop_distances", (0,))),
+                               drop_distances=tuple(config["drop_distances"]),
                                action_features=bool(config.get("action_features", False)),
                                **({"action_skip": True} if config.get("action_skip") else {}),
                                measured_intensity=bool(config.get("measured_intensity", False)),
@@ -181,5 +190,5 @@ def load_policy_artifact(checkpoint: Path, report_path: Path, scenarios: list[di
             "checkpoint_sha256": digest, "report_sha256": file_hash(report_path),
             "checkpoint_report_binding": "verified" if artifact else "caller_supplied_legacy",
             "inference": {**config, "imagery_dir": str(image_path) if image_path else None},
-            "dataset": report["dataset"], "execution": report.get("execution"), "warnings": warnings}
+            "dataset": training_dataset, "execution": report.get("execution"), "warnings": warnings}
     return model, info

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import random
+from collections import Counter
 from math import hypot
 from typing import Any
 
@@ -13,9 +14,8 @@ def _is_burnable_fuel(val: Any) -> bool:
     return str(val).upper() not in ("NONE", "0", "")
 
 
-# Cells wetted by one drop: the target and its 4-neighbours (same footprint as the
-# geographic executor). Two such footprints overlap iff their targets are within
-# Manhattan distance 2.
+# The fleet claim footprint is the target and its four neighbours. Two such
+# footprints overlap when their targets are within Manhattan distance 2.
 _DROP_FOOTPRINT = ((0, 0), (-1, 0), (1, 0), (0, -1), (0, 1))
 _OVERLAP_RADIUS = 2
 # A geographic cell may receive up to this many stacked drops (D-76; McFayden et al.
@@ -69,16 +69,34 @@ def claimed_cells(observation: dict) -> set[tuple[int, int]]:
     return claimed
 
 
-def candidate_cells(observation: dict) -> list[list[int]]:
-    """Return observed unburned burnable cells adjacent to an observed active fire.
+def _observed_burning(record: dict | None) -> bool:
+    return isinstance(record, dict) and record.get("visible_state", record.get("fire_state")) == "burning"
 
-    Cells holding the observation's ``max_stacked_drops`` are excluded (one drop
-    when absent); a cell with fewer can be targeted again to stack water (D-76).
+
+def _geographic_burnable(fuel: Any) -> bool:
+    # Scott & Burgan include five positive codes for nonburnable land cover.
+    return _is_burnable_fuel(fuel) and str(fuel) not in {"91", "92", "93", "98", "99"}
+
+
+def _observed_unburned_fuel(cells: list, fuel: list, r: int, c: int) -> bool:
+    return (0 <= r < len(cells) and 0 <= c < len(cells[0])
+            and isinstance(cells[r][c], dict) and cells[r][c].get("fire_detected") is False
+            and _geographic_burnable(fuel[r][c]))
+
+
+def candidate_cells(observation: dict) -> list[list[int]]:
+    """Return admissible drop targets from the current fire observation.
+
+    Pre-wetting targets are observed unburned burnable cells adjacent to an
+    observed reached cell. They can be targeted up to ``max_stacked_drops``
+    times (one drop when absent, D-76).
 
     Only delivered cell records in ``observation['fire']['cells']`` are read;
     unknown cells never count as either burning or unburned. With several
     aircraft, targets whose drop footprint would overlap another aircraft's
     pending drop are excluded (D-63), for every policy and action mapper.
+    The geographic direct-attack prototype also admits observed burning front
+    cells below their own drop cap, with a burning-only mode for measurement.
     """
     fire = observation["fire"]
     cells = fire["cells"]
@@ -89,7 +107,7 @@ def candidate_cells(observation: dict) -> list[list[int]]:
     cols = len(cells[0]) if rows else 0
     if len(fuel) != rows or any(len(row) != cols for row in cells) or any(len(row) != cols for row in fuel):
         raise ValueError("fire.cells and fuel_model must have matching rectangular shapes")
-    burning = {
+    reached = {
         (r, c)
         for r in range(rows)
         for c in range(cols)
@@ -98,14 +116,23 @@ def candidate_cells(observation: dict) -> list[list[int]]:
     full = full_cells(observation)
     forbidden = claimed_cells(observation)
     candidates = set()
-    for r, c in burning:
-        for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1)):
-            nr, nc = r + dr, c + dc
-            if not (0 <= nr < rows and 0 <= nc < cols):
-                continue
-            record = cells[nr][nc]
-            if (nr, nc) not in full and (nr, nc) not in forbidden and _is_burnable_fuel(fuel[nr][nc]) and isinstance(record, dict) and record.get("fire_detected") is False:
-                candidates.add((nr, nc))
+    direct_attack = observation.get("water_on_burning", False)
+    if not direct_attack or observation.get("water_on_burning_candidates") != "burning_only":
+        for r, c in reached:
+            for dr, dc in _DROP_FOOTPRINT[1:]:
+                nr, nc = r + dr, c + dc
+                if not (0 <= nr < rows and 0 <= nc < cols):
+                    continue
+                record = cells[nr][nc]
+                if (nr, nc) not in full and (nr, nc) not in forbidden and _is_burnable_fuel(fuel[nr][nc]) and isinstance(record, dict) and record.get("fire_detected") is False:
+                    candidates.add((nr, nc))
+    if direct_attack:
+        counts = Counter(map(tuple, observation.get("known_burning_drops", [])))
+        limit = stack_limit(observation)
+        candidates.update((r, c) for r, c in reached
+                          if (r, c) not in forbidden and counts[r, c] < limit and _observed_burning(cells[r][c])
+                          and any(_observed_unburned_fuel(cells, fuel, r + dr, c + dc)
+                                  for dr, dc in _DROP_FOOTPRINT[1:]))
     return [[r, c] for r, c in sorted(candidates)]
 
 
@@ -174,10 +201,14 @@ def _downwind_rank(observation: dict, candidate: list[int]) -> tuple[float, floa
     position_x, position_y = observation["aircraft"]["position_m"]
     cell_size = float(observation["cell_size_m"])
     r, c = candidate
+    direct_attack = observation.get("water_on_burning") and _observed_burning(cells[r][c])
     sources = []
-    for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+    for dr, dc in _DROP_FOOTPRINT[1:]:
         nr, nc = r + dr, c + dc
-        if 0 <= nr < len(cells) and 0 <= nc < len(cells[0]):
+        if direct_attack:
+            if _observed_unburned_fuel(cells, observation["fuel_model"], nr, nc):
+                sources.append((dc * cell_size * east + dr * cell_size * north) / cell_size)
+        elif 0 <= nr < len(cells) and 0 <= nc < len(cells[0]):
             record = cells[nr][nc]
             if isinstance(record, dict) and record.get("fire_detected") is True:
                 # Geographic displacement from burning source to target.
@@ -195,6 +226,19 @@ def _heuristic_target(observation: dict, candidates: list[list[int]]) -> list[in
     return min(candidates, key=lambda candidate: _downwind_rank(observation, candidate))
 
 
+def _direct_attack_need(observation: dict, behavior: Any, r: int, c: int) -> float:
+    """Estimate the largest drop need across observed, linked outgoing edges."""
+    from .geographic_integrated import NEIGHBORS
+
+    cells = observation["fire"]["cells"]
+    fuel = observation["fuel_model"]
+    return max((behavior.needed_from(observation, r, c, dr, dc) for dr, dc in NEIGHBORS
+                if _observed_unburned_fuel(cells, fuel, r + dr, c + dc)
+                and (not (dr and dc)
+                     or (_geographic_burnable(fuel[r + dr][c]) and _geographic_burnable(fuel[r][c + dc])))),
+               default=0.0)
+
+
 def _hold_aware_target(observation: dict, candidates: list[list[int]], behavior: Any) -> list[int] | None:
     """Downwind target with two corrections from the stacked drops a front needs.
 
@@ -205,10 +249,16 @@ def _hold_aware_target(observation: dict, candidates: list[list[int]], behavior:
     Rothermel fireline intensity from observed fuel, terrain, wind and moisture.
     """
     counts = treated_counts(observation)
+    direct_attack = observation.get("water_on_burning")
+    burning_counts = Counter(map(tuple, observation.get("known_burning_drops", []))) if direct_attack else None
     ranked = []
     for r, c in candidates:
-        need = behavior.needed_at(observation, r, c)
-        have = counts.get((r, c), 0)
+        if direct_attack and _observed_burning(observation["fire"]["cells"][r][c]):
+            need = _direct_attack_need(observation, behavior, r, c)
+            have = burning_counts[r, c]
+        else:
+            need = behavior.needed_at(observation, r, c)
+            have = counts.get((r, c), 0)
         holdable = need != float("inf")
         if holdable and have >= need:
             continue  # the water already there holds this front
@@ -229,9 +279,14 @@ def _blind_hold_aware_target(observation: dict, candidates: list[list[int]]) -> 
     """
     cells = observation["fire"]["cells"]
     counts = treated_counts(observation)
+    direct_attack = observation.get("water_on_burning")
+    burning_counts = Counter(map(tuple, observation.get("known_burning_drops", []))) if direct_attack else None
 
     def key(candidate: list[int]) -> tuple:
         r, c = candidate
+        if direct_attack and _observed_burning(cells[r][c]):
+            return (1 if burning_counts[r, c] else 0, cells[r][c].get("thermal_byte") or 0) + _downwind_rank(
+                observation, candidate)
         heat = 0
         for dr in (-1, 0, 1):
             for dc in (-1, 0, 1):

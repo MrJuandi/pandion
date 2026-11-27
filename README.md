@@ -4,7 +4,7 @@
 ![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)
 ![PyTorch](https://img.shields.io/badge/PyTorch-RL-EE4C2C?logo=pytorch&logoColor=white)
 
-**Where should the next drop go?** Pandion is a research simulator for wildfire response. A reinforcement-learning policy decides where and when water-dropping aircraft act, and is evaluated against transparent rules that receive the same delayed information.
+**Where should the next drop go?** Pandion is a research simulator for wildfire response. A reinforcement-learning policy decides where and when water-dropping aircraft act, and is evaluated against transparent rules that receive the same observation. In the reported experiments that observation is an idealised real-time sensor: the whole grid's current fire state and the current weather interval, with no delay or noise (D-49, D-85).
 
 ![The same fire under the learned policy, a downwind rule and no aircraft](docs/assets/three-controllers.gif)
 
@@ -14,11 +14,11 @@
 
 ## Research question
 
-Can a learned policy choose where and when to deploy firefighting resources more effectively than transparent baselines when all controllers receive the same delayed and uncertain information?
+Can a learned policy choose where and when to deploy firefighting resources more effectively than transparent baselines when all controllers receive the same information? The results below use perfect, instantaneous observation; delayed and partial observation exist in the code (`observation_mode="scheduled"`) but are not part of the reported results.
 
 ## Results
 
-Final burned area on 288 scenarios from one held-out activation (EMSR837), two aircraft, three training seeds. Paired difference, policy − reference, in hectares with 95 % bootstrap intervals; lower is better.
+Final burned area on 288 scenarios (nine mapped areas) from one held-out CEMS activation (EMSR837), two aircraft, three training seeds. The policies trained on 928 scenarios from 24 other Spanish fires and chose their weights on 128 scenarios from 4 more. Paired difference, policy − reference, in hectares with 95 % bootstrap intervals over those 288 scenarios (they all come from one activation, so the intervals do not cover variation between fires); lower is better.
 
 | Policy | − downwind heuristic | − hold-aware rule |
 |---|---|---|
@@ -52,7 +52,7 @@ python3 -m pandion.viewer runs/integrated-heuristic.json --output runs/heuristic
 
 Open `runs/heuristic-viewer.html` in a browser. Run the tests with `python3 -m unittest discover -s tests -v`.
 
-To see the project page and the bundled 3D replay, run `python3 -m http.server` from the repository root and open `http://localhost:8000/site/`. Real-terrain scenarios, training and evaluation are covered in [USAGE.md](docs/USAGE.md).
+To see the project page and the bundled 3D replay, run `python3 -m http.server 8000 --bind 127.0.0.1 --directory site` and open `http://127.0.0.1:8000/`. Real-terrain scenarios, training and evaluation are covered in [USAGE.md](docs/USAGE.md).
 
 ## How it works
 
@@ -102,7 +102,7 @@ The project moves from one aircraft to two, and then to heterogeneous resources.
 - [REFERENCES.md](docs/REFERENCES.md) — related research and official data sources.
 - [PUBLICATION_CHECKLIST.md](docs/PUBLICATION_CHECKLIST.md) — checks before creating and publishing the GitHub repository.
 - [MAINTENANCE.md](docs/MAINTENANCE.md) — documentation ownership and change review rules.
-- [site/](site/index.html) — static project page. Serve the repository root with `python3 -m http.server` and open `/site/`. Its replay is copied, not recomputed, from a built workspace by `python3 site/extract_episode.py <workspace>/index.html`, which writes `site/data/` and `site/viewer.html`, the offline 3D viewer for the same scenario that the page links to.
+- [site/](site/index.html) — static project page. Serve `site/` locally with `python3 -m http.server 8000 --bind 127.0.0.1 --directory site` and open `http://127.0.0.1:8000/`. Its replay is copied, not recomputed, from a built workspace by `python3 site/extract_episode.py <workspace>/index.html`, which writes `site/data/` and `site/viewer.html`, the offline 3D viewer for the same scenario that the page links to.
 
 ## Scope and limitations
 

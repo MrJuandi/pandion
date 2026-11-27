@@ -322,8 +322,13 @@ def downsample_imagery(source_dir: Path | str, output_dir: Path | str, factor: i
         h, w, _ = image.shape
         small = np.rint(image.reshape(h // factor, factor, w // factor, factor, 3).mean(axis=(1, 3))).astype(np.uint8)
         np.save(output_dir / source["array"], small)
+        transform = source.get("transform")
+        if transform is not None:
+            # Same top-left corner, coarser pixels: the affine scale must follow pixel_size_m.
+            transform = [transform[0] * factor, transform[1] * factor, transform[2],
+                         transform[3] * factor, transform[4] * factor, transform[5]]
         source.update(px_per_cell=source["px_per_cell"] // factor, pixel_size_m=source["pixel_size_m"] * factor,
-                      array_shape=list(small.shape),
+                      array_shape=list(small.shape), **({"transform": transform} if transform is not None else {}),
                       array_sha256=sha256((output_dir / source["array"]).read_bytes()).hexdigest(),
                       derived_from={"imagery_dir": str(source_dir), "pooling": f"{factor}x{factor} mean",
                                     "source_sha256": source["array_sha256"]})
