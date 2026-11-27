@@ -25,11 +25,10 @@ from zipfile import ZipFile
 
 import numpy as np
 
-from .geodesy import epsg_for_utm_zone, utm_to_wgs84, wgs84_to_utm
+from .geodesy import utm_to_wgs84, wgs84_to_utm
 from .pilot_emsr578 import (
     CORINE_TO_SCOTT_BURGAN as EMSR578_CORINE_CROSSWALK,
     _points_in_polygon,
-    _rasterize_polygons,
 )
 
 SCHEMA_VERSION = "nightjar-cems-scenario-0.1"

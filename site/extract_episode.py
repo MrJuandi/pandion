@@ -18,7 +18,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from pandion.viewer import build_viewer_html  # noqa: E402
+from pandion.viewer import build_viewer_html, strip_local_paths  # noqa: E402
 
 SCENARIO = "geographic-dev-emsr837_aoi07-06-mf00"
 POLICIES = {"PPO geográfico": "learned", "Geographic PPO": "learned", "heuristic": "heuristic", "no_intervention": "none"}
@@ -61,11 +61,12 @@ def main(viewer: Path) -> None:
             "drops": [[d["aircraft_index"], d["time_s"], d["water_l"], d["newly_blocked_cells"]] for d in r["drops"]],
         }
     OUT.mkdir(exist_ok=True)
+    episode = strip_local_paths(episode)
     payload = json.dumps(episode, ensure_ascii=False, separators=(",", ":"))
     (OUT / "episode.js").write_text(f"window.PANDION_EPISODE={payload};\n", encoding="utf-8")
     png = image["png_data_uri"].split(",", 1)[1]
     (OUT / "basemap.png").write_bytes(base64.b64decode(png))
-    scenario_runs = [r for r in replays if r["scenario_id"] == SCENARIO]
+    scenario_runs = strip_local_paths([r for r in replays if r["scenario_id"] == SCENARIO])
     page = build_viewer_html(scenario_runs, title=f"{base['metadata']['name']} · Pandion viewer",
                              imagery={base["display_imagery_id"]: image})
     OUT.parent.joinpath("viewer.html").write_text(page, encoding="utf-8")

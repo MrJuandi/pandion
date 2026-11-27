@@ -5,10 +5,6 @@ import tempfile
 import unittest
 
 from pandion.discrimination_family import (
-    DEVELOPMENT_INDICES,
-    VALIDATION_INDICES,
-    RESERVED_INDICES,
-    RESERVED_V2_INDICES,
     build_reserved_v2_scenarios,
     build_scenarios,
     canonical_hash,

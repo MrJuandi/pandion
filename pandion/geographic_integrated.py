@@ -9,16 +9,13 @@ from __future__ import annotations
 
 import argparse
 from copy import deepcopy
-from hashlib import sha256
 from heapq import heappop, heappush
 import json
 from math import atan2, degrees, hypot, isfinite, log1p
 from pathlib import Path
 from random import Random
-import time
-from typing import Any, Sequence
+from typing import Any
 
-import numpy as np
 from pyretechnics import fuel_models, surface_fire
 
 from .environment import MOISTURE_KEYS, delivered_weather, edge_arrival, validate_forcing

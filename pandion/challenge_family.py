@@ -7,7 +7,6 @@ from hashlib import sha256
 import json
 from pathlib import Path
 import random
-from statistics import mean
 
 from .aircraft import validate_scenario as validate_aircraft
 from .fire_rothermel import validate_scenario as validate_fire

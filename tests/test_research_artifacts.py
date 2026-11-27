@@ -13,7 +13,7 @@ from pandion.experiment_catalog import scan_catalog, write_catalog
 from pandion.geographic_family import build_synthetic_cems_fixture, generate_geographic_scenario, canonical_hash
 from pandion.geographic_ppo import HAS_TORCH, _dataset_report, build_policy_model, main, rollout_geographic, with_fleet
 from pandion.geographic_training_env import GeographicTrainingEnv
-from pandion.identity import audit_independence, content_hash, partition_holdout, scenario_entry
+from pandion.identity import audit_independence, content_hash, partition_holdout
 from pandion.multi_ignition_family import derive_scenario
 from pandion.parametric_actions import num_actions
 from pandion.policy_artifact import file_hash, load_policy_artifact, write_report

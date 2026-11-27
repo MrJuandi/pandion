@@ -8,7 +8,7 @@ from __future__ import annotations
 from copy import deepcopy
 from datetime import datetime, timezone
 from math import exp, isfinite, radians, sin, cos, inf
-from typing import Any, Callable
+from typing import Callable
 
 SCHEMA_VERSION = 'nightjar-environment-0.1'
 MOISTURE_KEYS = ('dead_1h', 'dead_10h', 'dead_100h', 'dead_herbaceous', 'live_herbaceous', 'live_woody')

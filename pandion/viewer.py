@@ -8,7 +8,7 @@ import html
 import json
 import re
 import struct
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Sequence
 import zlib
 
@@ -16,6 +16,21 @@ from .replay_view import normalize_replay
 
 VIEWER_VERSION = "pandion-viewer-0.8"
 _ASSETS = Path(__file__).with_name("viewer_assets")
+
+
+def strip_local_paths(value):
+    """Return a deep copy with absolute filesystem paths reduced to their names."""
+    if isinstance(value, dict):
+        return {key: strip_local_paths(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [strip_local_paths(item) for item in value]
+    if isinstance(value, str):
+        windows_path = PureWindowsPath(value)
+        if windows_path.drive and windows_path.is_absolute():
+            return windows_path.name
+        if value.startswith("/") and "/" in value[1:]:
+            return PurePosixPath(value).name
+    return value
 
 
 def _safe_json(value: object) -> str:
