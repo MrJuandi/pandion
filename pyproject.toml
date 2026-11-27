@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pandion"
+version = "0.9.0"
+description = "Research simulator for wildfire aerial response with reinforcement-learning and transparent baseline controllers."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = []
+
+[project.optional-dependencies]
+standard = ["numpy==1.26.4", "pyretechnics==2026.8.10"]
+rl = ["torch==2.14.0"]
+terrain = ["rasterio==1.4.4"]
+all = ["pandion[standard,rl,terrain]"]
+
+[tool.setuptools.packages.find]
+include = ["pandion*"]
+
+[tool.setuptools.package-data]
+pandion = ["viewer_assets/**/*"]

@@ -1,0 +1,164 @@
+{
+ "holdout": {
+  "n": 288,
+  "branched": {
+   "policy": 38.67,
+   "minus_heuristic": -3.09,
+   "ci95_heuristic": [
+    -4.52,
+    -1.88
+   ],
+   "per_seed_minus_heuristic": {
+    "d85-seed42": -3.21,
+    "d85-seed43": -3.27,
+    "d85-seed44": -2.78
+   },
+   "bew_heuristic": [
+    127,
+    122,
+    39
+   ],
+   "minus_hold_aware_heuristic": -0.03,
+   "ci95_hold_aware_heuristic": [
+    -0.44,
+    0.35
+   ],
+   "per_seed_minus_hold_aware_heuristic": {
+    "d85-seed42": -0.16,
+    "d85-seed43": -0.21,
+    "d85-seed44": 0.27
+   },
+   "bew_hold_aware_heuristic": [
+    63,
+    140,
+    85
+   ]
+  },
+  "monte_carlo": {
+   "policy": 40.72,
+   "minus_heuristic": -1.03,
+   "ci95_heuristic": [
+    -1.62,
+    -0.53
+   ],
+   "per_seed_minus_heuristic": {
+    "d84-seed42": -1.05,
+    "d84-seed43": -0.85,
+    "d84-seed44": -1.2
+   },
+   "bew_heuristic": [
+    105,
+    115,
+    68
+   ],
+   "minus_hold_aware_heuristic": 2.02,
+   "ci95_hold_aware_heuristic": [
+    1.04,
+    3.28
+   ],
+   "per_seed_minus_hold_aware_heuristic": {
+    "d84-seed42": 2.01,
+    "d84-seed43": 2.2,
+    "d84-seed44": 1.85
+   },
+   "bew_hold_aware_heuristic": [
+    36,
+    123,
+    129
+   ]
+  },
+  "branched_minus_monte_carlo": {
+   "mean": -2.05,
+   "ci95": [
+    -3.39,
+    -1.06
+   ],
+   "per_seed": {
+    "d85-seed42": -2.16,
+    "d85-seed43": -2.41,
+    "d85-seed44": -1.58
+   }
+  }
+ },
+ "development_sample": {
+  "n": 120,
+  "branched": {
+   "policy": 43.37,
+   "minus_heuristic": -2.96,
+   "ci95_heuristic": [
+    -4.75,
+    -1.49
+   ],
+   "per_seed_minus_heuristic": {
+    "d85-seed42": -2.95,
+    "d85-seed43": -3.31,
+    "d85-seed44": -2.62
+   },
+   "bew_heuristic": [
+    55,
+    52,
+    13
+   ],
+   "minus_hold_aware_heuristic": 0.16,
+   "ci95_hold_aware_heuristic": [
+    -0.78,
+    1.14
+   ],
+   "per_seed_minus_hold_aware_heuristic": {
+    "d85-seed42": 0.17,
+    "d85-seed43": -0.19,
+    "d85-seed44": 0.49
+   },
+   "bew_hold_aware_heuristic": [
+    35,
+    58,
+    27
+   ]
+  },
+  "monte_carlo": {
+   "policy": 45.64,
+   "minus_heuristic": -0.69,
+   "ci95_heuristic": [
+    -1.4,
+    -0.06
+   ],
+   "per_seed_minus_heuristic": {
+    "d84-seed42": -1.12,
+    "d84-seed43": -0.1,
+    "d84-seed44": -0.87
+   },
+   "bew_heuristic": [
+    41,
+    50,
+    29
+   ],
+   "minus_hold_aware_heuristic": 2.42,
+   "ci95_hold_aware_heuristic": [
+    1.06,
+    4.21
+   ],
+   "per_seed_minus_hold_aware_heuristic": {
+    "d84-seed42": 2.0,
+    "d84-seed43": 3.02,
+    "d84-seed44": 2.25
+   },
+   "bew_hold_aware_heuristic": [
+    19,
+    50,
+    51
+   ]
+  },
+  "branched_minus_monte_carlo": {
+   "mean": -2.27,
+   "ci95": [
+    -3.76,
+    -1.09
+   ],
+   "per_seed": {
+    "d85-seed42": -1.83,
+    "d85-seed43": -3.21,
+    "d85-seed44": -1.76
+   }
+  }
+ }
+}
